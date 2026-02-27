@@ -55,7 +55,6 @@ org.openphc.cce.compliance
 │   │   ├── IntelligenceTriggerEvent.java      # Outbound deviation event
 │   │   └── SchedulerTriggerMessage.java       # Inbound scheduler trigger
 │   └── producer/
-│       ├── DeadLetterProducer.java             # cce.deadletter publisher
 │       └── IntelligenceTriggerProducer.java    # cce.intelligence.triggers publisher
 │
 ├── service/                                   # Business logic (8 classes)
@@ -424,30 +423,7 @@ stateDiagram-v2
     EXPIRED --> [*]
 ```
 
-## 7. Dead Letter Retry Strategy
-
-```mermaid
-flowchart LR
-    E["Event fails"] --> DL["Dead Letter Record<br/>retryCount=0"]
-    DL --> R1["Retry 1<br/>+5 min"]
-    R1 --> R2["Retry 2<br/>+10 min"]
-    R2 --> R3["Retry 3<br/>+20 min"]
-    R3 --> R4["Retry 4<br/>+40 min"]
-    R4 --> R5["Retry 5<br/>+80 min"]
-    R5 --> PERM["Permanent Failure<br/>Manual Resolution"]
-```
-
-**Formula:** `nextRetryAt = now + RETRY_DELAY_MINUTES × 2^retryCount`
-
-| Retry | Delay | Cumulative |
-|---|---|---|
-| 1 | 5 min | 5 min |
-| 2 | 10 min | 15 min |
-| 3 | 20 min | 35 min |
-| 4 | 40 min | 75 min |
-| 5 | 80 min | 155 min (~2.6 hours) |
-
-## 8. FHIR PlanDefinition Parser
+## 7. FHIR PlanDefinition Parser
 
 The `PlanDefinitionParser` (459 lines) extracts structured data from FHIR R4 PlanDefinition resources:
 

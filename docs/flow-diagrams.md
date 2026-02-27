@@ -297,26 +297,6 @@ flowchart TD
     E4 --> KAFKA["Kafka: cce.intelligence.triggers<br/>key = protocolInstanceId"]
 ```
 
-## 6. Dead Letter Processing Flow
-
-```mermaid
-flowchart TD
-    A["Event Processing Error"] --> B["Catch Exception in ComplianceEngine"]
-    B --> C["DeadLetterProducer.publishDeadLetter()"]
-
-    C --> D["Build dead-letter envelope"]
-    D --> E["Set failureReason = exception message"]
-    E --> F["Set failureStage = PROCESSING"]
-    F --> G["Set correlationId"]
-    G --> H["Kafka: cce.deadletter<br/>key = correlationId"]
-
-    subgraph "Downstream (Collector Service)"
-        H --> I["Collector consumes dead-letter event"]
-        I --> J["Persist to dead_letter_event table"]
-        J --> K["Retry / Manual Resolution"]
-    end
-```
-
 ## 7. REST API Request Flow
 
 ```mermaid

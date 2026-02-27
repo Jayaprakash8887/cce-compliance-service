@@ -37,7 +37,6 @@ graph TB
     ENGINE --> DB
     ENGINE --> KAFKA_P
     KAFKA_P -->|"cce.intelligence.triggers"| KAFKA
-    KAFKA_P -->|"cce.deadletter"| KAFKA
     KAFKA --> INTEL
     API --> ENGINE
     API --> DB
@@ -75,7 +74,6 @@ graph TB
         DVS["DeviationService"]
         ELS["EventLogService"]
         AUS["AuditService"]
-        DLS["DeadLetterService"]
     end
 
     subgraph "FHIR & Expression Layer"
@@ -112,7 +110,6 @@ graph TB
     KCC --> CE
     KCC --> SIS
     DVS --> KCP
-    DLS --> KCP
     PDS --> REP
     PIS --> REP
     SIS --> REP
@@ -120,7 +117,6 @@ graph TB
     DVS --> REP
     ELS --> REP
     AUS --> REP
-    DLS --> REP
     REP --> ENT
     ENT --> ENM
 
@@ -131,7 +127,7 @@ graph TB
     classDef domain fill:#1ABC9C,stroke:#16A085,color:white
 
     class CTRL,DTO,EXC web
-    class CE,PDS,PIS,SIS,TMS,DVS,ELS,AUS,DLS svc
+    class CE,PDS,PIS,SIS,TMS,DVS,ELS,AUS svc
     class PDP,FRV,EES fhir
     class KCC,KCP,REP infra
     class ENT,ENM domain
@@ -188,10 +184,6 @@ All inbound clinical events are persisted in a **monthly-partitioned** `event_lo
 
 All Kafka messages follow the **CloudEvents v1.0 specification** with CCE-specific extension attributes, ensuring consistent event metadata across the platform.
 
-### 4.5 Dead Letter Queue Pattern
-
-Failed events are captured in a persistent dead-letter store with **exponential backoff retry** (5, 10, 20, 40, 80 minutes), ensuring no data loss and enabling operational recovery.
-
 ## 5. Cross-Cutting Concerns
 
 | Concern | Implementation |
@@ -202,4 +194,4 @@ Failed events are captured in a persistent dead-letter store with **exponential 
 | **Audit** | Async, separate-transaction audit logging for all state changes |
 | **Error Handling** | Global exception handler with structured error responses |
 | **Idempotency** | CloudEvents ID + source deduplication |
-| **Resilience** | Dead letter queue, exponential backoff, circuit breakers |
+| **Resilience** | Circuit breakers, retry patterns |

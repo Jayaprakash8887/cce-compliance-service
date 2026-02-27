@@ -15,18 +15,15 @@ graph LR
         C1["InboundEventConsumer"]
         C2["SchedulerTriggerConsumer"]
         P1["IntelligenceTriggerProducer"]
-        P2["DeadLetterProducer"]
     end
 
     subgraph Outbound Topics
         T3["cce.intelligence.triggers"]
-        T4["cce.deadletter"]
     end
 
     T1 --> C1
     T2 --> C2
     P1 --> T3
-    P2 --> T4
 
     classDef inbound fill:#3498DB,stroke:#2980B9,color:white
     classDef outbound fill:#E67E22,stroke:#D35400,color:white
@@ -34,9 +31,9 @@ graph LR
     classDef producer fill:#9B59B6,stroke:#8E44AD,color:white
 
     class T1,T2 inbound
-    class T3,T4 outbound
+    class T3 outbound
     class C1,C2 consumer
-    class P1,P2 producer
+    class P1 producer
 ```
 
 ## 2. Topic Reference
@@ -47,7 +44,6 @@ graph LR
 | `cce.scheduler.triggers` | Inbound | `cce-compliance-service` | Timer-based state transitions |
 | `cce.intelligence.triggers` | Outbound | — | Deviation alerts for analytics |
 | `cce.protocol.control` | Reserved | — | Protocol lifecycle commands (future) |
-| `cce.deadletter` | Outbound | — | Failed event notifications |
 
 ## 3. Consumer Configuration
 
@@ -294,29 +290,6 @@ Published when a compliance deviation is detected.
 
 ---
 
-### 5.4 Dead Letter Message (Outbound — `cce.deadletter`)
-
-Published when event processing fails.
-
-```json
-{
-  "originalEvent": {
-    "id": "evt-eb010001-0002-4000-8000-000000000002",
-    "source": "rhie-mediator",
-    "type": "org.openphc.cce.observation",
-    "data": { ... }
-  },
-  "failureReason": "org.hibernate.exception.ConstraintViolationException: could not execute statement",
-  "failureStage": "processing",
-  "correlationId": "corr-abc-123",
-  "timestamp": "2026-03-15T10:30:05Z"
-}
-```
-
-**Kafka Key:** `correlationId`
-
----
-
 ## 6. Consumer Implementations
 
 ### 6.1 InboundEventConsumer
@@ -385,21 +358,6 @@ public void publishTrigger(IntelligenceTriggerEvent event) {
 
 **Key strategy:** `protocolInstanceId` ensures partition locality for all events related to a protocol.
 
-### 7.2 DeadLetterProducer
-
-```java
-public void publishDeadLetter(Object originalPayload, String failureReason,
-                              FailureStage failureStage, String correlationId) {
-    Map<String, Object> envelope = new LinkedHashMap<>();
-    envelope.put("payload", originalPayload);
-    envelope.put("failureReason", failureReason);
-    envelope.put("failureStage", failureStage.getValue());
-    envelope.put("correlationId", correlationId);
-    envelope.put("timestamp", OffsetDateTime.now().toString());
-    kafkaTemplate.send(topics.getDeadLetter(), correlationId, envelope);
-}
-```
-
 ## 8. Ordering & Delivery Guarantees
 
 | Guarantee | Mechanism |
@@ -421,10 +379,9 @@ flowchart TD
     D -->|"Yes"| E["Acknowledge"]
     D -->|"No"| F["Log error"]
     F --> G["Increment error metric"]
-    G --> H["Publish to cce.deadletter"]
-    H --> I["Don't acknowledge"]
-    I --> J["Kafka redelivers"]
-    J --> K{"Idempotency check"}
-    K -->|"Duplicate"| L["Skip"]
-    K -->|"Not duplicate<br/>(prev attempt failed before event_log)"| D
+    G --> H["Don't acknowledge"]
+    H --> I["Kafka redelivers"]
+    I --> J{"Idempotency check"}
+    J -->|"Duplicate"| K["Skip"]
+    J -->|"Not duplicate<br/>(prev attempt failed before event_log)"| D
 ```

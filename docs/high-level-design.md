@@ -60,14 +60,12 @@ graph LR
     end
 
     CS -->|"cce.intelligence.triggers<br/>(Kafka)"| INTEL
-    CS -->|"cce.deadletter<br/>(Kafka)"| OPS
     CS -->|"REST API<br/>(HTTPS)"| OPS
 ```
 
 | Dependency | Protocol | Topic/Endpoint | Purpose |
 |---|---|---|---|
 | CCE Intelligence Service | Kafka | `cce.intelligence.triggers` | Deviation alerts and compliance events |
-| Dead Letter consumers | Kafka | `cce.deadletter` | Failed event notifications for operational recovery |
 | API consumers | HTTPS | `/v1/*` endpoints | Protocol management and patient tracking queries |
 
 ### 2.3 Infrastructure Dependencies
@@ -166,16 +164,6 @@ Publishes compliance events to the Intelligence Service.
 - Publish to `cce.intelligence.triggers` topic
 - Include context: protocol, step, patient, facility, deviation type
 
-### 3.5 Dead Letter Subsystem
-
-Handles failed event processing with retry logic.
-
-**Responsibilities:**
-- Capture failed events with failure reason and stage
-- Implement exponential backoff retry (5 min base, max 5 retries)
-- Publish to `cce.deadletter` topic for operational visibility
-- Support manual resolution via service methods
-
 ## 4. Security Model
 
 ### 4.1 Authentication
@@ -258,7 +246,6 @@ HikariCP with:
 | `cce.events.duplicate` | Counter | Duplicate events detected |
 | `cce.step.matching.duration` | Timer | Time spent in trigger matching pipeline |
 | `cce.protocol.instances.active` | Gauge | Count of active protocol instances |
-| `cce.dead_letter.unresolved` | Gauge | Count of unresolved dead letter events |
 | `http.server.requests` | Histogram | HTTP request latency with percentiles |
 
 ### 6.2 Distributed Tracing
@@ -323,11 +310,11 @@ Runs as non-root user 'cce' (UID 1001)
 | State conflict | 409 | Client resolves conflict |
 | FHIR validation failure | 422 | Client fixes FHIR resource |
 | Expression evaluation error | 422 | Admin fixes expression |
-| Internal error | 500 | Dead-lettered for retry |
+| Internal error | 500 | Logged and event not acknowledged for Kafka redelivery |
 
 ### 8.2 Kafka Error Handling
 
 - **Consumer errors:** Event is NOT acknowledged → Kafka redelivers
-- **Processing errors:** Event is dead-lettered (DB + Kafka topic)
-- **Producer errors:** Idempotent producer with `acks=all` and 3 retries
+- **Processing errors:** Event is NOT acknowledged → Kafka redelivers
+- **Producer errors:** Idempotent producer with `acks=all`
 - **Deserialization errors:** `ErrorHandlingDeserializer` wraps errors gracefully

@@ -155,7 +155,6 @@ Configured via `cce.kafka.topics.*` in `application.yml`:
 | `cce.kafka.topics.scheduler-triggers` | `cce.scheduler.triggers` | Scheduler timer triggers |
 | `cce.kafka.topics.intelligence-triggers` | `cce.intelligence.triggers` | Outbound deviation events |
 | `cce.kafka.topics.protocol-control` | `cce.protocol.control` | Protocol lifecycle (reserved) |
-| `cce.kafka.topics.dead-letter` | `cce.deadletter` | Failed event notifications |
 
 ### 3.3 JPA & Hibernate
 

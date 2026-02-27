@@ -435,7 +435,7 @@ This returns all trigger index entries matching the resource type whose code fil
 
 | Value | Description |
 |-------|-------------|
-| `KAFKA_PUBLISH` | Failure occurred while publishing a message to a Kafka topic (e.g., dead letter, intelligence trigger). |
+| `KAFKA_PUBLISH` | Failure occurred while publishing a message to a Kafka topic (e.g., intelligence trigger). |
 | `PROCESSING` | Failure occurred during the Compliance Engine's matching pipeline (e.g., condition evaluation error, database error). |
 | `VALIDATION` | Failure occurred during input validation (e.g., malformed CloudEvent, invalid FHIR resource, missing required fields). |
 
