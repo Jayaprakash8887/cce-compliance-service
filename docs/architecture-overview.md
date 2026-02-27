@@ -19,7 +19,7 @@ graph TB
         KAFKA_C["Kafka Consumers"]
         KAFKA_P["Kafka Producers"]
         FHIR["FHIR Parser<br/>(HAPI FHIR R4)"]
-        EXPR["Expression Evaluator<br/>(JSONLogic + CQL + FHIRPath)"]
+        EXPR["Expression Evaluator<br/>(JSONLogic + FHIRPath)"]
         DB[("PostgreSQL 16<br/>+ JSONB")]
     end
 
@@ -151,7 +151,6 @@ graph TB
 | **Messaging** | Spring Kafka | 3.x | Event-driven messaging |
 | **FHIR** | HAPI FHIR | 7.4.0 | HL7 FHIR R4 PlanDefinition parsing & validation |
 | **Expression Engine** | json-logic-java | 1.0.7 | Tier 2 conditional evaluation (JSONLogic) |
-| **CQL Engine** | CQF CQL Engine | 3.26.0 | Tier 2 Clinical Quality Language evaluation |
 | **FHIRPath Cache** | HAPI FHIR Caching (Caffeine) | 7.4.0 | Cache service provider for FHIRPath engine |
 | **Security** | Spring Security OAuth2 | 6.x | JWT-based authentication (Keycloak) |
 | **Resilience** | Resilience4j | 2.2.0 | Circuit breakers, retry patterns |
@@ -176,7 +175,7 @@ The service uses a **two-tier matching algorithm** for matching inbound events t
 | Tier | Name | Mechanism | Purpose |
 |---|---|---|---|
 | **Tier 1** | Structural Match | Inverted index lookup (trigger_index table) | Fast O(1) filtering by resource type + code |
-| **Tier 2** | Condition Evaluation | JSONLogic, CQL, or FHIRPath expression evaluation | Rich conditional logic on event/patient/step context |
+| **Tier 2** | Condition Evaluation | JSONLogic or FHIRPath expression evaluation | Rich conditional logic on event/patient/step context |
 
 ### 4.3 Event Sourcing via Event Log
 

@@ -38,7 +38,6 @@ org.openphc.cce.compliance
 │       └── TriggerIndexRepository.java
 │
 ├── fhir/
-│   ├── CqlEvaluationEngine.java                # CQL condition evaluator (CQF Engine)
 │   ├── ExpressionEvaluationService.java       # Multi-language condition evaluator
 │   ├── FhirResourceValidator.java             # HAPI FHIR validation
 │   ├── HapiFhirConfig.java                    # FhirContext, IParser & IFhirPath beans
@@ -238,7 +237,6 @@ classDiagram
     ComplianceEngine --> AuditService
     ComplianceEngine --> PlanDefinitionParser
     ComplianceEngine --> ExpressionEvaluationService
-    ExpressionEvaluationService --> CqlEvaluationEngine
     DeviationService --> IntelligenceTriggerProducer
 ```
 
@@ -271,7 +269,7 @@ flowchart TD
     S4 --> S5
 
     S5["Step 5: Tier 2 Condition Evaluation<br/>(for each structural match)"]
-    S5 -->|"Parse PlanDefinition<br/>Evaluate JSONLogic / CQL / FHIRPath"| S6
+    S5 -->|"Parse PlanDefinition<br/>Evaluate JSONLogic / FHIRPath"| S6
 
     S6{"Step 6: Result Classification"}
     S6 -->|"Exactly 1 match"| MATCH["processMatch()"]
@@ -368,7 +366,6 @@ WHERE resource_type = :resourceType
 
 **Supported Languages:**
 - `text/jsonlogic` — evaluated via `io.github.jamsesso.jsonlogic.JsonLogic`
-- `text/cql` — evaluated via CQF CQL Engine (`info.cqframework:engine:3.26.0`)
 - `text/fhirpath` — evaluated via HAPI FHIR `IFhirPath` engine (R4)
 - Any other language — treated as **unconditionally true** (pass-through)
 
@@ -453,24 +450,6 @@ flowchart LR
 ## 8. FHIR PlanDefinition Parser
 
 The `PlanDefinitionParser` (459 lines) extracts structured data from FHIR R4 PlanDefinition resources:
-
-### 8.0 CQL Evaluation Engine
-
-The `CqlEvaluationEngine` (Component, ~140 lines) evaluates CQL expressions:
-
-| Aspect | Detail |
-|---|---|
-| **FHIR Version** | R4 (4.0.1) |
-| **Translation** | CQL → ELM via `CqlTranslator` |
-| **Caching** | `ConcurrentHashMap` caches translated ELM libraries by expression key |
-| **Library Wrapping** | Inline expressions are auto-wrapped in a minimal CQL library |
-| **Context** | `Unfiltered` (no patient-specific data provider required) |
-| **Result Expression** | Defines `"Result"` as the evaluated expression |
-
-**Example CQL expression in a PlanDefinition condition:**
-```cql
-Observation.value >= 1000
-```
 
 ### 8.1 Extraction Methods
 

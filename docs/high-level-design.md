@@ -115,7 +115,7 @@ graph TB
     C -->|New| E["2. Record Event Log"]
     E --> F["3. Extract Resource Info"]
     F --> G["4. Tier 1: Structural Match"]
-    G --> H["5. Tier 2: Condition Eval<br/>(JSONLogic + CQL)"]
+    G --> H["5. Tier 2: Condition Eval<br/>(JSONLogic + FHIRPath)"]
     H --> I{"Match Count?"}
     I -->|"1"| J["Process Single Match"]
     I -->|">1"| K["Record AMBIGUOUS<br/>Deviations"]
@@ -132,7 +132,7 @@ graph TB
 - Consume CloudEvents from `cce.events.inbound`
 - Perform idempotency check via `(cloudeventsId, source)`
 - Support **explicit matching** (bypass structural match when CloudEvent carries `actionId`)
-- Execute two-tier trigger matching (Tier 1 structural + Tier 2 expression evaluation via JSONLogic, CQL, or FHIRPath)
+- Execute two-tier trigger matching (Tier 1 structural + Tier 2 expression evaluation via JSONLogic or FHIRPath)
 - Enroll patients in protocols automatically on first match
 - Create and complete step instances with **due-date calculation** from timing/relatedAction offsets and tolerance-days
 - **Progressive step instantiation** — create downstream PENDING steps when a step is completed

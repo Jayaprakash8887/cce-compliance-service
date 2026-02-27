@@ -204,7 +204,7 @@ cce-compliance-service/
 │       │   ├── ComplianceServiceApplication.java
 │       │   ├── config/          # Spring configuration
 │       │   ├── domain/          # Entities, enums, repositories
-│       │   ├── fhir/            # FHIR parsing, JSONLogic, CQL & FHIRPath expression evaluation
+│       │   ├── fhir/            # FHIR parsing, JSONLogic & FHIRPath expression evaluation
 │       │   ├── kafka/           # Kafka consumers, producers, models
 │       │   ├── service/         # Business logic
 │       │   └── web/             # REST controllers, DTOs, exception handler

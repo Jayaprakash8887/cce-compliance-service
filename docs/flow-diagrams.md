@@ -18,7 +18,7 @@ sequenceDiagram
     participant EventLog as EventLogService
     participant TriggerMatch as TriggerMatchingService
     participant Parser as PlanDefinitionParser
-    participant ExprEval as ExpressionEvaluationService<br/>(JSONLogic + CQL + FHIRPath)
+    participant ExprEval as ExpressionEvaluationService<br/>(JSONLogic + FHIRPath)
     participant ProtoInst as ProtocolInstanceService
     participant StepInst as StepInstanceService
     participant Audit as AuditService
