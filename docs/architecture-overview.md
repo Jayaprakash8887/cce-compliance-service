@@ -75,6 +75,7 @@ graph TB
         DVS["DeviationService"]
         ELS["EventLogService"]
         AUS["AuditService"]
+        DLS["DeadLetterService"]
     end
 
     subgraph "FHIR & Expression Layer"
@@ -87,7 +88,6 @@ graph TB
         KCC["Kafka Consumers"]
         KCP["Kafka Producers"]
         REP["JPA Repositories"]
-        CFG["Config & Security"]
     end
 
     subgraph "Domain Layer"
@@ -133,7 +133,7 @@ graph TB
     class CTRL,DTO,EXC web
     class CE,PDS,PIS,SIS,TMS,DVS,ELS,AUS,DLS svc
     class PDP,FRV,EES fhir
-    class KCC,KCP,REP,CFG infra
+    class KCC,KCP,REP infra
     class ENT,ENM domain
 ```
 
