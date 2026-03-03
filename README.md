@@ -8,9 +8,7 @@ A core microservice within the Clinical Compliance Engine (CCE) platform. It tra
 
 | Document | Description |
 |---|---|
-| [Architecture Overview](docs/architecture-overview.md) | System context, component interactions, and infrastructure layout |
-| [High-Level Design](docs/high-level-design.md) | Service responsibilities, system interactions, and design decisions |
-| [Low-Level Design](docs/low-level-design.md) | Package structure, class-level design, and implementation details |
+| [Architecture & Design](docs/architecture-overview.md) | System context, core pipeline, matching algorithm, state machines, and design decisions |
 | [API Reference](docs/api-reference.md) | RESTful API endpoints, request/response schemas, and authentication |
 | [Data Model](docs/data-model.md) | Entity relationships, JPA entities, and database schema diagrams |
 | [Data Dictionary](docs/data-dictionary.md) | Complete database schema reference — tables, columns, indexes, and JSONB schemas |

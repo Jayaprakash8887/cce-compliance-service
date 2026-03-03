@@ -188,10 +188,7 @@ cce-compliance-service/
 ├── artifacts/                          # Design documents
 │   └── CCE Solution Design v0.3 Draft.pdf
 ├── docs/                               # Documentation (this folder)
-│   ├── README.md
 │   ├── architecture-overview.md
-│   ├── high-level-design.md
-│   ├── low-level-design.md
 │   ├── flow-diagrams.md
 │   ├── api-reference.md
 │   ├── data-model.md

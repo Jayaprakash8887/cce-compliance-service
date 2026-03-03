@@ -1,8 +1,8 @@
-# Architecture Overview
+# Architecture & Design
 
 ## 1. System Context
 
-The **CCE Compliance Service** is a core microservice within the **Clinical Compliance Engine (CCE)** platform. It is responsible for tracking patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources. The service consumes clinical events, matches them against protocol steps, detects deviations, and publishes intelligence triggers for downstream analytics.
+The **CCE Compliance Service** is a core microservice within the **Clinical Compliance Engine (CCE)** platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps, detecting deviations, and publishing intelligence triggers for downstream analytics.
 
 ```mermaid
 graph TB
@@ -53,145 +53,196 @@ graph TB
     class KAFKA broker
 ```
 
-## 2. Component Architecture
+**This service does NOT handle:** event generation (EHR systems), scheduling (CCE Scheduler Service), analytics/alerting (CCE Intelligence Service), or user authentication (Keycloak).
 
-The service follows a **layered architecture** with clear separation of concerns:
-
-```mermaid
-graph TB
-    subgraph "Web Layer"
-        CTRL["REST Controllers"]
-        DTO["DTOs & Mapper"]
-        EXC["Exception Handler"]
-    end
-
-    subgraph "Service Layer"
-        CE["ComplianceEngine"]
-        PDS["ProtocolDefinitionService"]
-        PIS["ProtocolInstanceService"]
-        SIS["StepInstanceService"]
-        TMS["TriggerMatchingService"]
-        DVS["DeviationService"]
-        ELS["EventLogService"]
-        AUS["AuditService"]
-    end
-
-    subgraph "FHIR & Expression Layer"
-        PDP["PlanDefinitionParser"]
-        FRV["FhirResourceValidator"]
-        EES["ExpressionEvaluationService"]
-    end
-
-    subgraph "Infrastructure Layer"
-        KCC["Kafka Consumers"]
-        KCP["Kafka Producers"]
-        REP["JPA Repositories"]
-    end
-
-    subgraph "Domain Layer"
-        ENT["Entities"]
-        ENM["Enums"]
-    end
-
-    CTRL --> CE
-    CTRL --> PDS
-    CTRL --> PIS
-    CTRL --> DTO
-    CE --> PDS
-    CE --> PIS
-    CE --> SIS
-    CE --> TMS
-    CE --> DVS
-    CE --> ELS
-    CE --> AUS
-    CE --> PDP
-    CE --> PDP
-    CE --> EES
-    KCC --> CE
-    KCC --> SIS
-    DVS --> KCP
-    PDS --> REP
-    PIS --> REP
-    SIS --> REP
-    TMS --> REP
-    DVS --> REP
-    ELS --> REP
-    AUS --> REP
-    REP --> ENT
-    ENT --> ENM
-
-    classDef web fill:#3498DB,stroke:#2980B9,color:white
-    classDef svc fill:#2ECC71,stroke:#27AE60,color:white
-    classDef fhir fill:#9B59B6,stroke:#8E44AD,color:white
-    classDef infra fill:#E67E22,stroke:#D35400,color:white
-    classDef domain fill:#1ABC9C,stroke:#16A085,color:white
-
-    class CTRL,DTO,EXC web
-    class CE,PDS,PIS,SIS,TMS,DVS,ELS,AUS svc
-    class PDP,FRV,EES fhir
-    class KCC,KCP,REP infra
-    class ENT,ENM domain
-```
-
-## 3. Technology Stack
+## 2. Technology Stack
 
 | Category | Technology | Version | Purpose |
 |---|---|---|---|
-| **Runtime** | Java | 21 LTS | Language runtime with virtual threads support |
+| **Runtime** | Java | 21 LTS | Language runtime |
 | **Framework** | Spring Boot | 3.4.2 | Application framework |
-| **Web** | Spring MVC | 6.x | REST API layer |
 | **Persistence** | Spring Data JPA / Hibernate | 6.x | ORM and data access |
-| **Database** | PostgreSQL | 16 | Primary data store with JSONB, GIN indexes, table partitioning |
+| **Database** | PostgreSQL | 16 | JSONB, GIN indexes, table partitioning |
 | **Migration** | Flyway | 10.x | Schema version management |
-| **JSONB Mapping** | Hypersistence Utils | 3.7.3 | JPA ↔ PostgreSQL JSONB mapping |
+| **JSONB Mapping** | Hypersistence Utils | 3.7.3 | JPA ↔ PostgreSQL JSONB |
 | **Messaging** | Spring Kafka | 3.x | Event-driven messaging |
-| **FHIR** | HAPI FHIR | 7.4.0 | HL7 FHIR R4 PlanDefinition parsing & validation |
-| **Expression Engine** | json-logic-java | 1.0.7 | Tier 2 conditional evaluation (JSONLogic) |
-| **FHIRPath Cache** | HAPI FHIR Caching (Caffeine) | 7.4.0 | Cache service provider for FHIRPath engine |
-| **Security** | Spring Security OAuth2 | 6.x | JWT-based authentication (Keycloak) |
-| **Resilience** | Resilience4j | 2.2.0 | Circuit breakers, retry patterns |
-| **Metrics** | Micrometer + Prometheus | 1.x | Application metrics and monitoring |
+| **FHIR** | HAPI FHIR | 7.4.0 | FHIR R4 PlanDefinition parsing & validation |
+| **Expression** | json-logic-java | 1.0.7 | Tier 2 conditional evaluation (JSONLogic) |
+| **Security** | Spring Security OAuth2 | 6.x | JWT authentication (Keycloak) |
+| **Metrics** | Micrometer + Prometheus | 1.x | Application metrics |
 | **Tracing** | OpenTelemetry | 1.x | Distributed tracing |
-| **Containerization** | Docker | — | Multi-stage build, Alpine-based runtime |
 | **Testing** | Testcontainers | 1.x | Integration testing with real PostgreSQL & Kafka |
 
-## 4. Key Design Decisions
+## 3. Package Structure
 
-### 4.1 FHIR R4 PlanDefinition as Protocol Schema
+```
+org.openphc.cce.compliance
+├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
+├── config/                                    # AppConfig, ObservabilityConfig
+├── domain/
+│   ├── entity/                                # 7 JPA entities
+│   ├── enums/                                 # 8 value-based enums
+│   └── repository/                            # 7 Spring Data JPA repositories
+├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
+├── kafka/
+│   ├── config/                                # Consumer/Producer factories, topic bindings
+│   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
+│   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
+│   └── producer/                              # IntelligenceTriggerProducer
+├── service/                                   # 8 business logic classes
+└── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
+```
 
-Clinical protocols are defined using the HL7 FHIR R4 `PlanDefinition` resource. This provides:
-- **Standardized structure** for actions, triggers, conditions, and timing
-- **Interoperability** with external clinical systems
-- **Rich metadata** including code filters, data requirements, and related actions
+**63 source files** across 15 packages. Layered architecture: `web/` → `service/` → `domain/` + `fhir/` + `kafka/`.
 
-### 4.2 Two-Tier Trigger Matching
+## 4. Core Pipeline — ComplianceEngine
 
-The service uses a **two-tier matching algorithm** for matching inbound events to protocol steps:
+The `ComplianceEngine` is the central orchestrator. All inbound event processing flows through it:
 
-| Tier | Name | Mechanism | Purpose |
-|---|---|---|---|
-| **Tier 1** | Structural Match | Inverted index lookup (trigger_index table) | Fast O(1) filtering by resource type + code |
-| **Tier 2** | Condition Evaluation | JSONLogic or FHIRPath expression evaluation | Rich conditional logic on event/patient/step context |
+```mermaid
+flowchart TD
+    START["CloudEventMessage received"] --> EXPL
 
-### 4.3 Event Sourcing via Event Log
+    EXPL{"Explicit Match?<br/>(actionId on CloudEvent)"}
+    EXPL -->|"Yes"| EXPLM["processExplicitMatch()<br/>Bypass structural match"]
+    EXPL -->|"No"| S1
+    EXPLM --> DONE["Return"]
 
-All inbound clinical events are persisted in a **monthly-partitioned** `event_log` table before processing. This provides:
-- **Idempotency** via `(cloudeventsId, source)` uniqueness
-- **Audit trail** for compliance verification
-- **Replayability** for debugging and reprocessing
+    S1["Step 1: Idempotency Check<br/>(cloudeventsId, source)"]
+    S1 -->|"Duplicate"| DUP["Return early"]
+    S1 -->|"New"| S2
 
-### 4.4 CloudEvents Envelope
+    S2["Step 2: Record Event Log"] --> S3
+    S3["Step 3: Extract Resource Info<br/>from payload (data)"] --> S4
+    S4["Step 4: Tier 1 Structural Match<br/>(trigger_index lookup)"] --> S5
+    S5["Step 5: Tier 2 Condition Eval<br/>(JSONLogic / FHIRPath)"] --> S6
 
-All Kafka messages follow the **CloudEvents v1.0 specification** with CCE-specific extension attributes, ensuring consistent event metadata across the platform.
+    S6{"Result Classification"}
+    S6 -->|"1 match"| MATCH["Enroll patient → Create/Complete step<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
+    S6 -->|">1 matches"| AMBIG["Record AMBIGUOUS deviations"]
+    S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
+```
 
-## 5. Cross-Cutting Concerns
+### 4.1 Resource Extraction
 
-| Concern | Implementation |
+Resource metadata is extracted from the CloudEvent **payload** (`data`), never from the envelope:
+
+| Field | Extraction Paths |
 |---|---|
-| **Authentication** | OAuth2 JWT validation via Keycloak |
-| **Authorization** | Scope-based: `compliance:read`, `compliance:write` |
-| **Observability** | Micrometer metrics, OpenTelemetry tracing, structured logging with correlationId |
-| **Audit** | Async, separate-transaction audit logging for all state changes |
-| **Error Handling** | Global exception handler with structured error responses |
-| **Idempotency** | CloudEvents ID + source deduplication |
-| **Resilience** | Circuit breakers, retry patterns |
+| `resourceType` | `data.resourceType` (e.g., `"Observation"`, `"Encounter"`) |
+| `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.status` |
+
+> The envelope `type` (e.g., `org.openphc.cce.observation`) is used for routing at the Collector level, not for Tier 1 matching.
+
+## 5. Two-Tier Matching Algorithm
+
+### 5.1 Tier 1 — Structural Match
+
+Fast O(1) inverted index lookup on the `trigger_index` table:
+
+```sql
+SELECT * FROM trigger_index
+WHERE resource_type = :resourceType
+  AND (
+    (code_system = :codeSystem AND code_value = :codeValue)
+    OR code_system IS NULL  -- wildcard triggers
+  )
+```
+
+The index is built at protocol load time by decomposing each action's `TriggerDefinition` into `(resourceType, codeSystem, codeValue, planDefinitionId, actionId)` rows.
+
+### 5.2 Tier 2 — Condition Evaluation
+
+For each Tier 1 candidate, evaluates expressions against a variable context:
+
+| Variable | Source |
+|---|---|
+| `event` | CloudEvent data payload |
+| `patient` | Patient context (`patientId`, demographics) |
+| `step` | Current step context (`actionId`, `repeatIndex`, `state`) |
+| `protocol` | Protocol context (`protocolCanonical`, `status`) |
+
+**Supported languages:**
+- `text/jsonlogic` — via `io.github.jamsesso.jsonlogic.JsonLogic`
+- `text/fhirpath` — via HAPI FHIR `IFhirPath` engine (R4)
+- Any other — treated as unconditionally true (pass-through)
+
+## 6. State Machines
+
+### 6.1 Step Instance
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING : createStep()
+    PENDING --> DUE : scheduler(PENDING_TO_DUE)
+    DUE --> OVERDUE : scheduler(DUE_TO_OVERDUE)
+    OVERDUE --> MISSED : scheduler(OVERDUE_TO_MISSED)
+    PENDING --> COMPLETED : completeStep()
+    DUE --> COMPLETED : completeStep()
+    OVERDUE --> COMPLETED : completeStep()
+    PENDING --> SKIPPED : skipStep()
+    DUE --> SKIPPED : skipStep()
+    COMPLETED --> [*]
+    MISSED --> [*]
+    SKIPPED --> [*]
+```
+
+**Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE).
+
+### 6.2 Protocol Instance
+
+`ACTIVE → COMPLETED | WITHDRAWN | EXPIRED`. Terminal states: `COMPLETED`, `WITHDRAWN`, `EXPIRED`.
+
+## 7. Security
+
+- **Authentication:** OAuth 2.0 JWT Bearer tokens via Keycloak (`cce-production` realm)
+- **Authorization:** `compliance:read` (GET), `compliance:write` (POST/DELETE protocol-definitions), actuator endpoints are public
+- **Stateless** — no server-side sessions, CSRF disabled
+
+See [API Reference](api-reference.md) for endpoint-level details.
+
+## 8. Observability
+
+### 8.1 Metrics
+
+| Metric | Type | Description |
+|---|---|---|
+| `cce.events.processed` | Counter | Total inbound events processed |
+| `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match`, `ambiguous` |
+| `cce.events.duplicate` | Counter | Duplicate events detected |
+| `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
+| `cce.protocol.instances.active` | Gauge | Active protocol instances |
+
+### 8.2 Logging & Tracing
+
+- **Format:** `timestamp [thread] [correlationId] level logger - message`
+- **Tracing:** OpenTelemetry (OTLP), `correlationId` propagated via MDC and CloudEvents extensions
+- **Health:** `/actuator/health` (liveness + readiness), `/actuator/prometheus`
+
+## 9. Error Handling
+
+### 9.1 REST API
+
+| Error Type | HTTP Status |
+|---|---|
+| Resource not found | 404 |
+| Invalid input | 400 |
+| State conflict | 409 |
+| FHIR validation failure | 422 |
+| Internal error | 500 |
+
+### 9.2 Kafka
+
+- **Consumer errors:** Message NOT acknowledged → Kafka redelivers
+- **Processing errors:** Message NOT acknowledged → Kafka redelivers
+- **Producer:** Idempotent with `acks=all`
+- **Deserialization:** `ErrorHandlingDeserializer` wraps errors gracefully
+
+## 10. Scaling
+
+| Dimension | Strategy |
+|---|---|
+| **Horizontal** | Kafka consumer group enables multi-instance; partition assignment is automatic |
+| **Database** | Connection pool per instance (20 max); `event_log` monthly-partitioned |
+| **Kafka** | 3 concurrent listener threads per instance |
+| **API** | Stateless — any instance serves any request |
