@@ -36,8 +36,7 @@ graph TB
     ENGINE --> EXPR
     ENGINE --> DB
     ENGINE --> KAFKA_P
-    KAFKA_P -->|"cce.intelligence.triggers"| KAFKA
-    KAFKA --> INTEL
+    KAFKA_P -->|"cce.intelligence.triggers"| INTEL
     API --> ENGINE
     API --> DB
     KEYCLOAK -->|"JWT Validation"| API
