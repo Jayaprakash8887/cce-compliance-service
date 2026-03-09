@@ -11,7 +11,7 @@ This is the primary workflow — processing a clinical event from Kafka through 
 ```mermaid
 sequenceDiagram
     autonumber
-    participant EHR as EHR System
+    participant EHR as CCE Collector Service
     participant Kafka as Apache Kafka
     participant Consumer as InboundEventConsumer
     participant Engine as ComplianceEngine

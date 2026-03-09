@@ -252,7 +252,7 @@ Manage patient protocol enrollment lifecycle.
       "overdueDate": "2026-03-25T00:00:00Z",
       "missedDate": "2026-04-01T00:00:00Z",
       "completedAt": "2026-03-18T14:30:00Z",
-      "completedBySource": "ehr-lab-system",
+      "completedBySource": "ebuzima",
       "completionStatus": "early",
       "matchedEventId": "880e8400-e29b-41d4-a716-446655440003",
       "createdAt": "2026-03-15T10:30:00Z",
