@@ -7,9 +7,9 @@ The **CCE Compliance Service** is a core microservice within the **Clinical Comp
 ```mermaid
 graph TB
     subgraph External Systems
+        INTEL["CCE Intelligence Service"]
         EHR["EHR / Clinical Systems"]
         SCHEDULER["CCE Scheduler Service"]
-        INTEL["CCE Intelligence Service"]
         KEYCLOAK["Keycloak IAM"]
     end
 
