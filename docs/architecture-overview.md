@@ -70,7 +70,7 @@ graph TB
 | **Security** | Spring Security OAuth2 | 6.x | JWT authentication (Keycloak) |
 | **Metrics** | Micrometer + Prometheus | 1.x | Application metrics |
 | **Tracing** | OpenTelemetry | 1.x | Distributed tracing |
-| **Testing** | Testcontainers | 1.x | Integration testing with real PostgreSQL & Kafka |
+| **Testing** | JUnit 5 + Mockito | 5.x / 5.x | Unit testing with mocked dependencies |
 
 ## 3. Package Structure
 
@@ -91,8 +91,6 @@ org.openphc.cce.compliance
 ├── service/                                   # 8 business logic classes
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
-
-**63 source files** across 15 packages. Layered architecture: `web/` → `service/` → `domain/` + `fhir/` + `kafka/`.
 
 ## 4. Core Pipeline — ComplianceEngine
 
@@ -164,7 +162,7 @@ For each Tier 1 candidate, evaluates expressions against a variable context:
 **Supported languages:**
 - `text/jsonlogic` — via `io.github.jamsesso.jsonlogic.JsonLogic`
 - `text/fhirpath` — via HAPI FHIR `IFhirPath` engine (R4)
-- Any other — treated as unconditionally true (pass-through)
+- Any other — rejected with `UnsupportedExpressionLanguageException`
 
 ## 6. State Machines
 
