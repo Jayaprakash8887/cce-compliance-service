@@ -346,7 +346,7 @@ WHERE ti.resourceType = :resourceType
 | `source` | `VARCHAR` | **NOT NULL** | — | CloudEvents `source` (e.g., `rhie-mediator`, `smartcare-emr`). |
 | `source_event_id` | `VARCHAR` | Yes | — | Optional external identifier from the originating system. |
 | `subject` | `VARCHAR` | **NOT NULL** | — | Patient UPID from CloudEvent `subject`. |
-| `type` | `VARCHAR` | **NOT NULL** | — | CloudEvents `type` (e.g., `org.openphc.cce.encounter`). |
+| `type` | `VARCHAR` | **NOT NULL** | — | CloudEvents `type`. |
 | `event_time` | `TIMESTAMPTZ` | **NOT NULL** | — | Clinical event time from CloudEvent `time`. |
 | `received_at` | `TIMESTAMPTZ` | **NOT NULL** | — | Ingestion timestamp. **Partition key**. |
 | `correlation_id` | `VARCHAR` | **NOT NULL** | — | Distributed tracing ID from CloudEvent `correlationid` extension. |
