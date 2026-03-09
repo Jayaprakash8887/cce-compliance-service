@@ -191,7 +191,7 @@ cce-compliance-service/
 │   ├── architecture-overview.md
 │   ├── flow-diagrams.md
 │   ├── api-reference.md
-│   ├── data-model.md
+│   ├── data-dictionary.md
 │   ├── kafka-events.md
 │   └── developer-setup.md
 ├── src/
