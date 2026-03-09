@@ -236,7 +236,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 ### State Machine
 
 ```
-                    ┌──────────┐
+                   ┌──────────┐
          ┌─────────│ PENDING  │─────────┐
          │         └────┬─────┘         │
          │   scheduler  │               │ event match
