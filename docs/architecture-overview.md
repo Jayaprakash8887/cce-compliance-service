@@ -129,8 +129,6 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 | `resourceType` | `data.resourceType` (e.g., `"Observation"`, `"Encounter"`) |
 | `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.status` |
 
-> The envelope `type` (e.g., `org.openphc.cce.observation`) is used for routing at the Collector level, not for Tier 1 matching.
-
 ## 5. Two-Tier Matching Algorithm
 
 ### 5.1 Tier 1 — Structural Match
