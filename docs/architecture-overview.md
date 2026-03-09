@@ -8,7 +8,7 @@ The **CCE Compliance Service** is a core microservice within the **Clinical Comp
 graph TB
     subgraph External Systems
         INTEL["CCE Intelligence Service"]
-        EHR["EHR / Clinical Systems"]
+        EHR["CCE Collector Service"]
         SCHEDULER["CCE Scheduler Service"]
         KEYCLOAK["Keycloak IAM"]
     end
@@ -52,7 +52,7 @@ graph TB
     class KAFKA broker
 ```
 
-**This service does NOT handle:** event generation (EHR systems), scheduling (CCE Scheduler Service), analytics/alerting (CCE Intelligence Service), or user authentication (Keycloak).
+**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics/alerting (CCE Intelligence Service), or user authentication (Keycloak).
 
 ## 2. Technology Stack
 
