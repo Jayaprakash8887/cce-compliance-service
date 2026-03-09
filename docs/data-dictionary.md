@@ -20,8 +20,7 @@
 10. [Enumerated Value Reference](#10-enumerated-value-reference)
 11. [Relationships & Foreign Keys](#11-relationships--foreign-keys)
 12. [JSONB Column Schemas](#12-jsonb-column-schemas)
-13. [JPA ↔ PostgreSQL Mapping](#13-jpa--postgresql-mapping)
-14. [Partitioning Management](#14-partitioning-management)
+13. [Partitioning Management](#13-partitioning-management)
 
 ---
 
@@ -583,53 +582,7 @@ Content varies by audit event type:
 
 ---
 
-## 13. JPA ↔ PostgreSQL Mapping
-
-### JSONB Mapping
-
-All JSONB columns use **Hypersistence Utils** for transparent JPA mapping:
-
-```java
-@Type(JsonType.class)
-@Column(name = "definition", columnDefinition = "jsonb")
-private Map<String, Object> definition;
-```
-
-Maps Java `Map<String, Object>` ↔ PostgreSQL `JSONB` with automatic serialization/deserialization.
-
-### Enum Mapping
-
-All enums use `@Enumerated(EnumType.STRING)`:
-
-```java
-@Enumerated(EnumType.STRING)
-@Column(name = "status")
-private PlanDefinitionStatus status;  // stores "active" or "retired"
-```
-
-### Composite Primary Key
-
-`TriggerIndex` uses `@IdClass(TriggerIndexId.class)`:
-
-```java
-@IdClass(TriggerIndex.TriggerIndexId.class)
-@Entity
-public class TriggerIndex {
-    @Id private String resourceType;
-    @Id private String codeSystem;
-    @Id private String codeValue;
-    @Id private UUID planDefinitionId;
-    @Id private String actionId;
-
-    public static class TriggerIndexId implements Serializable {
-        // All @Id fields + equals() + hashCode()
-    }
-}
-```
-
----
-
-## 14. Partitioning Management
+## 13. Partitioning Management
 
 The `event_log` table uses **monthly range partitioning** on `received_at`.
 
