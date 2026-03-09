@@ -351,73 +351,7 @@ sequenceDiagram
     end
 ```
 
-## 8. PlanDefinition Retirement Flow
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Client
-    participant Controller as ProtocolDefinitionController
-    participant Service as ProtocolDefinitionService
-    participant DB as PostgreSQL
-    participant Audit as AuditService
-
-    Client->>Controller: POST /v1/protocol-definitions/{id}/retire
-    Controller->>Service: retirePlanDefinition(url, version)
-    Service->>DB: findByUrlAndVersion(url, version)
-
-    alt Not Found
-        DB-->>Service: empty
-        Service-->>Controller: throw NoSuchElementException
-        Controller-->>Client: 404 Not Found
-    end
-
-    DB-->>Service: PlanDefinitionEntity
-    Service->>Service: Set status = RETIRED
-    Service->>DB: Save entity
-    Service->>DB: DELETE FROM trigger_index WHERE plan_definition_id = :id
-    Service->>Audit: auditSystem("protocol.definition", "retired", ...)
-    Service-->>Controller: updated entity
-    Controller-->>Client: 200 OK + PlanDefinitionDto
-```
-
-## 9. Patient Protocol Tracking Query
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant Client
-    participant Controller as ProtocolTrackingController
-    participant ProtoSvc as ProtocolInstanceService
-    participant StepRepo as StepInstanceRepository
-    participant DevRepo as DeviationRepository
-    participant Mapper as DtoMapper
-    participant DB as PostgreSQL
-
-    Client->>Controller: GET /v1/patients/{patientId}/protocol-tracking/active
-    Controller->>ProtoSvc: findActiveByPatientId(patientId)
-    ProtoSvc->>DB: JPQL: WHERE patientId AND status=ACTIVE
-    DB-->>ProtoSvc: List<ProtocolInstance>
-    ProtoSvc-->>Controller: protocols
-
-    Controller->>Mapper: toProtocolInstanceDtoList(protocols)
-    Note over Mapper: Children (steps, deviations) excluded in list view
-    Mapper-->>Controller: List<ProtocolInstanceDto>
-    Controller-->>Client: 200 OK
-
-    Note over Client: Client drills into specific protocol
-
-    Client->>Controller: GET /v1/patients/{patientId}/protocol-tracking/{protocolId}
-    Controller->>ProtoSvc: findById(protocolId)
-    ProtoSvc->>DB: SELECT by ID
-    DB-->>ProtoSvc: ProtocolInstance
-    Controller->>Mapper: toProtocolInstanceDto(protocol, includeChildren=true)
-    Note over Mapper: Includes steps + deviations
-    Mapper-->>Controller: ProtocolInstanceDto
-    Controller-->>Client: 200 OK
-```
-
-## 10. Kafka Consumer Error Handling
+## 8. Kafka Consumer Error Handling
 
 ```mermaid
 flowchart TD
