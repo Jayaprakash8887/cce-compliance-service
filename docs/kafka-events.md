@@ -186,7 +186,7 @@ All Kafka messages use **CloudEvents spec field names (lowercase)** — no camel
 
 | Pattern | Example | Description |
 |---|---|---|
-| `org.openphc.cce.compliance.deviation.*` | `org.openphc.cce.compliance.deviation.overdue` | Compliance-generated deviation events |
+| `cce.compliance.deviation.*` | `cce.compliance.deviation.overdue` | Compliance-generated deviation events |
 
 #### Payload Content Types
 
