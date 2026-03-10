@@ -280,9 +280,9 @@ Published when a compliance deviation is detected.
 
 | Type | Trigger | Severity |
 |---|---|---|
-| `org.openphc.cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE | Warning |
-| `org.openphc.cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED | Critical |
-| `org.openphc.cce.compliance.deviation.ambiguous` | Multiple protocol matches for an event | Info |
+| `cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE | Warning |
+| `cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED | Critical |
+| `cce.compliance.deviation.ambiguous` | Multiple protocol matches for an event | Info |
 
 ---
 
