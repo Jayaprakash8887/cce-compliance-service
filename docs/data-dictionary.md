@@ -596,20 +596,62 @@ The `event_log` table uses **monthly range partitioning** on `received_at`.
 | `event_log_2026_05` | 2026-05-01 to 2026-06-01 |
 | `event_log_2026_06` | 2026-06-01 to 2026-07-01 |
 
-### Creating New Partitions
+### Automated Partition Management (pg_cron)
 
-New partitions must be created **before** the start of each month:
+Partition lifecycle is managed by **pg_cron**, a PostgreSQL extension that runs scheduled SQL inside the database.
 
-```sql
-CREATE TABLE event_log_2026_07 PARTITION OF event_log
-    FOR VALUES FROM ('2026-07-01') TO ('2026-08-01');
-```
-
-### Archiving Old Partitions
+#### Prerequisites
 
 ```sql
-ALTER TABLE event_log DETACH PARTITION event_log_2026_02;
-ALTER TABLE event_log_2026_02 SET SCHEMA archive;  -- optional
+-- pg_cron must be in shared_preload_libraries (requires PostgreSQL restart once)
+-- Then enable the extension:
+CREATE EXTENSION IF NOT EXISTS pg_cron;
 ```
 
-> The unique constraint `(cloudevents_id, source, received_at)` includes `received_at` because PostgreSQL requires the partition key in unique constraints. Partition creation should be automated via a scheduled job or operational runbook.
+#### Creating New Partitions
+
+A scheduled job creates next month's partition on the 1st of each month:
+
+```sql
+SELECT cron.schedule(
+    'create-event-log-partition',
+    '0 0 1 * *',   -- midnight on the 1st of every month
+    $$
+    DO $$
+    DECLARE
+        next_month DATE := date_trunc('month', now()) + interval '1 month';
+        partition_name TEXT := 'event_log_' || to_char(next_month, 'YYYY_MM');
+        start_bound TEXT := to_char(next_month, 'YYYY-MM-DD');
+        end_bound TEXT := to_char(next_month + interval '1 month', 'YYYY-MM-DD');
+    BEGIN
+        EXECUTE format(
+            'CREATE TABLE IF NOT EXISTS %I PARTITION OF event_log FOR VALUES FROM (%L) TO (%L)',
+            partition_name, start_bound, end_bound
+        );
+    END $$;
+    $$
+);
+```
+
+#### Archiving Old Partitions
+
+A scheduled job detaches partitions older than 6 months on the 2nd of each month:
+
+```sql
+SELECT cron.schedule(
+    'archive-event-log-partition',
+    '0 1 2 * *',   -- 01:00 on the 2nd of every month
+    $$
+    DO $$
+    DECLARE
+        cutoff DATE := date_trunc('month', now()) - interval '6 months';
+        partition_name TEXT := 'event_log_' || to_char(cutoff, 'YYYY_MM');
+    BEGIN
+        EXECUTE format('ALTER TABLE event_log DETACH PARTITION %I', partition_name);
+        EXECUTE format('ALTER TABLE %I SET SCHEMA archive', partition_name);
+    END $$;
+    $$
+);
+```
+
+> The unique constraint `(cloudevents_id, source, received_at)` includes `received_at` because PostgreSQL requires the partition key in unique constraints.
