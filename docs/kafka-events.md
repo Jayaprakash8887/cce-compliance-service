@@ -43,7 +43,6 @@ graph LR
 | `cce.events.inbound` | Inbound | `cce-compliance-service` | Clinical events from CCE Collector Service |
 | `cce.scheduler.triggers` | Inbound | `cce-compliance-service` | Timer-based state transitions |
 | `cce.intelligence.triggers` | Outbound | — | Deviation alerts for analytics |
-| `cce.protocol.control` | Reserved | — | Protocol lifecycle commands (future) |
 
 ## 3. Consumer Configuration
 
