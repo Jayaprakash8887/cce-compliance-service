@@ -240,7 +240,7 @@ Published when a compliance deviation is detected.
 ```json
 {
   "id": "itrig-550e8400-e29b-41d4-a716-446655440099",
-  "type": "org.openphc.cce.compliance.deviation.overdue",
+  "type": "cce.compliance.deviation.overdue",
   "subject": "260225-0002-5501",
   "protocolInstanceId": "660e8400-e29b-41d4-a716-446655440001",
   "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
@@ -261,7 +261,7 @@ Published when a compliance deviation is detected.
 | Field | Type | Description |
 |---|---|---|
 | `id` | UUID | Unique event identifier |
-| `type` | String | `org.openphc.cce.compliance.deviation.<deviationType>` |
+| `type` | String | `cce.compliance.deviation.<deviationType>` |
 | `subject` | String | Patient identifier |
 | `protocolInstanceId` | UUID | Protocol instance |
 | `stepInstanceId` | UUID | Step that deviated |
