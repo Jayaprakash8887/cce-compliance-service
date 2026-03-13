@@ -155,7 +155,7 @@ Triggers that have no `data[]` section (only a `condition`) are **not indexed** 
 
 ### 5.3 Tier 2 — Condition Evaluation
 
-For each Tier 1 candidate, evaluates expressions against a variable context:
+For each Tier 1 candidate, evaluates the trigger's `condition` expression.  **Triggers with no `condition` pass automatically**.
 
 | Variable | Source |
 |---|---|
