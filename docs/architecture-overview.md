@@ -98,27 +98,28 @@ The `ComplianceEngine` is the central orchestrator. All inbound event processing
 
 ```mermaid
 flowchart TD
-    START["CloudEventMessage received"] --> EXPL
-
-    EXPL{"Explicit Match?<br/>(actionId on CloudEvent)"}
-    EXPL -->|"Yes"| EXPLM["processExplicitMatch()<br/>Bypass structural match"]
-    EXPL -->|"No"| S1
-    EXPLM --> DONE["Return"]
+    START["CloudEventMessage received"] --> S1
 
     S1["Step 1: Idempotency Check<br/>(cloudeventsId, source)"]
     S1 -->|"Duplicate"| DUP["Return early"]
     S1 -->|"New"| S2
 
     S2["Step 2: Record Event Log"] --> S3
-    S3["Step 3: Extract Resource Info<br/>from payload (data)"] --> S4
-    S4["Step 4: Tier 1 Structural Match<br/>(trigger_index GROUP BY + HAVING)"]
-    S4 --> S4b
-    S4b["Step 4b: Condition-Only Triggers<br/>(in-memory, Tier 2 only)"] --> S5
-    S5["Step 5: Tier 2 Condition Eval<br/>(JSONLogic / FHIRPath)"] --> S6
+    S3["Step 3: Extract Resource Info<br/>from payload (data)"] --> EXPL
 
-    S6{"Result Classification"}
-    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
-    S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
+    EXPL{"Step 4: Explicit Match?<br/>(actionId on CloudEvent)"}
+    EXPL -->|"Yes"| EXPLM["processExplicitMatch()<br/>Bypass Tier 1/2"]
+    EXPL -->|"No"| S5
+    EXPLM --> DONE["Return"]
+
+    S5["Step 5: Tier 1 Structural Match<br/>(trigger_index GROUP BY + HAVING)"]
+    S5 --> S5b
+    S5b["Step 5b: Condition-Only Triggers<br/>(in-memory, Tier 2 only)"] --> S6
+    S6["Step 6: Tier 2 Condition Eval<br/>(JSONLogic / FHIRPath)"] --> S7
+
+    S7{"Result Classification"}
+    S7 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
+    S7 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
 ```
 
 ### 4.1 Resource Extraction
