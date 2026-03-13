@@ -80,7 +80,7 @@ org.openphc.cce.compliance
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
 │   ├── entity/                                # 7 JPA entities
-│   ├── enums/                                 # 8 value-based enums
+│   ├── enums/                                 # 6 value-based enums
 │   └── repository/                            # 7 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
@@ -111,12 +111,13 @@ flowchart TD
 
     S2["Step 2: Record Event Log"] --> S3
     S3["Step 3: Extract Resource Info<br/>from payload (data)"] --> S4
-    S4["Step 4: Tier 1 Structural Match<br/>(trigger_index lookup)"] --> S5
+    S4["Step 4: Tier 1 Structural Match<br/>(trigger_index GROUP BY + HAVING)"]
+    S4 --> S4b
+    S4b["Step 4b: Condition-Only Triggers<br/>(in-memory, Tier 2 only)"] --> S5
     S5["Step 5: Tier 2 Condition Eval<br/>(JSONLogic / FHIRPath)"] --> S6
 
     S6{"Result Classification"}
-    S6 -->|"1 match"| MATCH["Enroll patient → Create/Complete step<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
-    S6 -->|">1 matches"| AMBIG["Record AMBIGUOUS deviations"]
+    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
     S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
 ```
 
@@ -133,20 +134,25 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 
 ### 5.1 Tier 1 — Structural Match
 
-Fast O(1) inverted index lookup on the `trigger_index` table:
+Inverted index lookup on the `trigger_index` table using `GROUP BY` + `HAVING` to enforce **AND semantics** across all `codeFilter` entries:
 
 ```sql
-SELECT * FROM trigger_index
+SELECT plan_definition_id, action_id
+FROM trigger_index
 WHERE resource_type = :resourceType
-  AND (
-    (code_system = :codeSystem AND code_value = :codeValue)
-    OR code_system IS NULL  -- wildcard triggers
-  )
+  AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
+    OR (path = :path2 AND code_system = :sys2 AND code_value = :code2))
+GROUP BY plan_definition_id, action_id
+HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 ```
 
-The index is built at protocol load time by decomposing each action's `TriggerDefinition` into `(resourceType, codeSystem, codeValue, planDefinitionId, actionId)` rows.
+The index is built at protocol load time by decomposing each action's `TriggerDefinition.data[].codeFilter[]` into `(resourceType, path, codeSystem, codeValue, planDefinitionId, actionId)` rows.
 
-### 5.2 Tier 2 — Condition Evaluation
+### 5.2 Condition-Only Triggers
+
+Triggers that have no `data[]` section (only a `condition`) are **not indexed** in `trigger_index`. They are held in-memory and evaluated via Tier 2 for every inbound event. These are validated at protocol load time — a trigger with no `data[]` and no `condition` is rejected.
+
+### 5.3 Tier 2 — Condition Evaluation
 
 For each Tier 1 candidate, evaluates expressions against a variable context:
 
@@ -203,7 +209,7 @@ See [API Reference](api-reference.md) for endpoint-level details.
 | Metric | Type | Description |
 |---|---|---|
 | `cce.events.processed` | Counter | Total inbound events processed |
-| `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match`, `ambiguous` |
+| `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |

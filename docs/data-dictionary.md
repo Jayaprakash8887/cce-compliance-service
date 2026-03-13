@@ -83,11 +83,11 @@ erDiagram
 
     TRIGGER_INDEX {
         varchar resource_type PK
+        varchar path PK
         varchar code_system PK
         varchar code_value PK
         uuid plan_definition_id PK
         varchar action_id PK
-        varchar trigger_mode
     }
 
     EVENT_LOG {
@@ -131,7 +131,7 @@ erDiagram
 | 1 | `plan_definition` | Stores FHIR R4 PlanDefinition resources (protocol templates) | Low (tens) | No |
 | 2 | `protocol_instance` | Patient enrollments in specific protocols | Medium (per-patient) | No |
 | 3 | `step_instance` | Individual action steps within a patient's protocol journey | Medium–High | No |
-| 4 | `deviation` | Compliance deviations (overdue, missed, ambiguous) | Medium | No |
+| 4 | `deviation` | Compliance deviations (overdue, missed) | Medium | No |
 | 5 | `trigger_index` | Inverted index for fast Tier 1 structural event matching | Low (rebuilt on protocol load) | No |
 | 6 | `event_log` | Immutable log of all inbound CloudEvents and their processing outcomes | High (every event) | **Yes** (monthly by `received_at`) |
 | 7 | `audit_log` | System and user audit trail | Medium–High | No |
@@ -267,7 +267,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 
 ## 6. deviation
 
-Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`, or when an inbound event matches multiple protocol actions ambiguously. Each deviation triggers an intelligence event published to `cce.intelligence.triggers`.
+Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. Each deviation triggers an intelligence event published to `cce.intelligence.triggers`.
 
 ### Columns
 
@@ -288,7 +288,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | Primary Key | `deviation_pkey` | `id` |
 | Foreign Key | `deviation_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Foreign Key | `deviation_step_instance_id_fkey` | `step_instance_id` → `step_instance(id)` |
-| Check | — | `deviation_type IN ('OVERDUE', 'MISSED', 'AMBIGUOUS')` |
+| Check | — | `deviation_type IN ('OVERDUE', 'MISSED')` |
 | B-tree Index | `idx_deviation_protocol` | `protocol_instance_id` |
 | B-tree Index | `idx_deviation_type` | `deviation_type` |
 
@@ -296,37 +296,53 @@ Records **compliance deviations** detected during protocol execution. Created wh
 
 ## 7. trigger_index
 
-An **inverted index** for fast **Tier 1 structural matching** of inbound CloudEvents to PlanDefinition actions. Built at protocol load time by decomposing each action's trigger definitions into (`resourceType`, `codeSystem`, `codeValue`) rows. Rebuilt whenever a protocol is reloaded.
+An **inverted index** for fast **Tier 1 structural matching** of inbound CloudEvents to PlanDefinition actions. Built at protocol load time by decomposing each action's trigger `data[].codeFilter[]` entries into `(resourceType, path, codeSystem, codeValue)` rows. Rebuilt whenever a protocol is reloaded.
+
+Only triggers that contain a `data[]` section produce `trigger_index` entries. **Condition-only triggers** (no `data[]`, only `condition`) are held in-memory and evaluated via Tier 2 for every inbound event.
 
 ### Columns
 
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
 | `resource_type` | `VARCHAR` | **NOT NULL** | — | FHIR resource type from the trigger's `DataRequirement.type` (e.g., `Encounter`, `Observation`). |
-| `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = resource-type-only match. |
-| `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match. |
+| `path` | `VARCHAR` | **NOT NULL** | — | The `codeFilter.path` this row was decomposed from (e.g., `type`, `status`, `class`, `serviceType`). |
+| `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
+| `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `plan_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `plan_definition.id`. |
 | `action_id` | `VARCHAR` | **NOT NULL** | — | PlanDefinition `action.id` this trigger belongs to. |
-| `trigger_mode` | `VARCHAR` | **NOT NULL** | — | Trigger activation type. See [TriggerMode](#triggermode). |
 
 ### Constraints & Indexes
 
 | Type | Name | Details |
 |------|------|---------|
-| Composite PK | `trigger_index_pkey` | `(resource_type, code_system, code_value, plan_definition_id, action_id)` |
+| Composite PK | `trigger_index_pkey` | `(resource_type, path, code_system, code_value, plan_definition_id, action_id)` |
 | Foreign Key | `trigger_index_plan_definition_id_fkey` | `plan_definition_id` → `plan_definition(id)` |
-| Check | — | `trigger_mode IN ('DATA_ADDED', 'NAMED_EVENT')` |
 | B-tree Index | `idx_trigger_index_resource` | `resource_type` — Resource-type-only matching. |
-| B-tree Index | `idx_trigger_index_code` | `(resource_type, code_system, code_value)` — Full structural matching (primary query path). |
+| B-tree Index | `idx_trigger_index_code` | `(resource_type, path, code_system, code_value)` — Full structural matching (primary query path). |
 
 ### Matching Query
 
+Uses `GROUP BY` + `HAVING` to enforce **AND semantics** — all codeFilter paths for an action must match:
+
 ```sql
-SELECT ti FROM TriggerIndex ti
-WHERE ti.resourceType = :resourceType
-  AND (ti.codeSystem IS NULL
-       OR (ti.codeSystem = :codeSystem AND ti.codeValue = :codeValue))
+SELECT plan_definition_id, action_id
+FROM trigger_index
+WHERE resource_type = :resourceType
+  AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
+    OR (path = :path2 AND code_system = :sys2 AND code_value = :code2)
+    OR (path = :path3 AND code_system = :sys3 AND code_value = :code3))
+GROUP BY plan_definition_id, action_id
+HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 ```
+
+### Load-Time Validation
+
+| Trigger Shape | Index Entries | Matching Path |
+|---|---|---|
+| `data[]` only (no condition) | Decomposed `(path, system, code)` rows | Tier 1 only |
+| `data[]` + `condition` | Decomposed `(path, system, code)` rows | Tier 1 → Tier 2 |
+| `condition` only (no `data[]`) | **None** — held in-memory | Tier 2 only |
+| No `data[]` and no `condition` | **Rejected at load time** | N/A |
 
 ---
 
@@ -443,23 +459,15 @@ WHERE ti.resourceType = :resourceType
 |-------|---------|
 | `OVERDUE` | Scheduler transitions step `DUE` → `OVERDUE`. |
 | `MISSED` | Scheduler transitions step `OVERDUE` → `MISSED`. |
-| `AMBIGUOUS` | Compliance Engine detects >1 confirmed match after Tier 2 evaluation. |
+
 
 ### ProcessingStatus
 
 | Value | Description |
 |-------|-------------|
-| `MATCHED` | Matched to exactly one action. Step completed. |
+| `MATCHED` | Matched one or more triggers. Step instances created for all matches. |
 | `ZERO_MATCH` | No trigger match or all Tier 2 conditions failed. Logged only. |
-| `AMBIGUOUS` | Matched multiple actions. Deviations recorded, no step completed. |
 | `DUPLICATE` | Already processed (idempotency check). No processing occurs. |
-
-### TriggerMode
-
-| Value | Description |
-|-------|-------------|
-| `DATA_ADDED` | Fires when a FHIR resource matching the type and code filters is received. |
-| `NAMED_EVENT` | Fires on a named event type (e.g., `home-visit-completed`). For non-FHIR payloads. |
 
 ### FailureStage
 
@@ -503,11 +511,11 @@ The `definition` column stores the complete FHIR R4 PlanDefinition resource. Key
       "id": "anc-visit-1",                    // → trigger_index.action_id
       "title": "ANC Visit 1",
       "trigger": [{
-        "type": "data-added",                  // trigger mode
+        "type": "data-added",
         "data": [{
           "type": "Encounter",                 // → trigger_index.resource_type
           "codeFilter": [{
-            "path": "type",
+            "path": "type",                    // → trigger_index.path
             "code": [{
               "system": "http://openphc.org/encounter-types",  // → trigger_index.code_system
               "code": "anc-visit"                              // → trigger_index.code_value
@@ -544,7 +552,7 @@ Content varies by deviation type:
 |------|---------|
 | OVERDUE | `{"due_date": "2026-03-12T00:00:00Z", "tolerance_days": 3}` |
 | MISSED | `{"due_date": "2026-03-12T00:00:00Z", "overdue_date": "2026-03-15T00:00:00Z", "days_overdue": 14}` |
-| AMBIGUOUS | `{"matchCount": 2, "eventId": "evt-a1b2c3d4-2222-4000-8000-000000000002"}` |
+
 
 ### event_log — `data`
 
