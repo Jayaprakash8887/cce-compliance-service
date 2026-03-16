@@ -10,7 +10,7 @@
 
 1. [Entity Relationship Diagram](#1-entity-relationship-diagram)
 2. [Table Summary](#2-table-summary)
-3. [plan_definition](#3-plan_definition)
+3. [protocol_definition](#3-protocol_definition)
 4. [protocol_instance](#4-protocol_instance)
 5. [step_instance](#5-step_instance)
 6. [deviation](#6-deviation)
@@ -28,13 +28,13 @@
 
 ```mermaid
 erDiagram
-    PLAN_DEFINITION ||--o{ PROTOCOL_INSTANCE : "defines"
-    PLAN_DEFINITION ||--o{ TRIGGER_INDEX : "indexed by"
+    PROTOCOL_DEFINITION ||--o{ PROTOCOL_INSTANCE : "defines"
+    PROTOCOL_DEFINITION ||--o{ TRIGGER_INDEX : "indexed by"
     PROTOCOL_INSTANCE ||--o{ STEP_INSTANCE : "contains"
     PROTOCOL_INSTANCE ||--o{ DEVIATION : "has"
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
 
-    PLAN_DEFINITION {
+    PROTOCOL_DEFINITION {
         uuid id PK
         varchar url
         varchar version
@@ -47,7 +47,7 @@ erDiagram
         uuid id PK
         varchar patient_id
         varchar protocol_canonical
-        uuid plan_definition_id FK
+        uuid protocol_definition_id FK
         timestamptz enrolled_at
         varchar status
         timestamptz created_at
@@ -86,7 +86,7 @@ erDiagram
         varchar path PK
         varchar code_system PK
         varchar code_value PK
-        uuid plan_definition_id PK
+        uuid protocol_definition_id PK
         varchar action_id PK
     }
 
@@ -128,7 +128,7 @@ erDiagram
 
 | # | Table | Purpose | Row Growth | Partitioned |
 |---|-------|---------|-----------|-------------|
-| 1 | `plan_definition` | Stores FHIR R4 PlanDefinition resources (protocol templates) | Low (tens) | No |
+| 1 | `protocol_definition` | Stores FHIR R4 PlanDefinition resources (protocol templates) | Low (tens) | No |
 | 2 | `protocol_instance` | Patient enrollments in specific protocols | Medium (per-patient) | No |
 | 3 | `step_instance` | Individual action steps within a patient's protocol journey | Medium–High | No |
 | 4 | `deviation` | Compliance deviations (overdue, missed) | Medium | No |
@@ -138,7 +138,7 @@ erDiagram
 
 ---
 
-## 3. plan_definition
+## 3. protocol_definition
 
 Stores FHIR R4 **PlanDefinition** resources that define compliance protocols. Each row represents a versioned protocol template containing actions, triggers, conditions, timing constraints, and related action dependencies. The full PlanDefinition JSON is stored in a JSONB column to preserve the complete FHIR resource while allowing PostgreSQL JSON queries.
 
@@ -149,18 +149,18 @@ Stores FHIR R4 **PlanDefinition** resources that define compliance protocols. Ea
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. Auto-generated unique identifier. |
 | `url` | `VARCHAR` | **NOT NULL** | — | FHIR canonical URL (e.g., `http://openphc.org/fhir/PlanDefinition/anc-high-risk`). Combined with `version` forms the canonical reference. |
 | `version` | `VARCHAR` | **NOT NULL** | — | Semantic version (e.g., `2.1`). Allows multiple versions of the same protocol URL to coexist. |
-| `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. Only `ACTIVE` definitions participate in trigger matching. See [PlanDefinitionStatus](#plandefinitionstatus). |
-| `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 PlanDefinition resource. Contains `action[]` with triggers, conditions, timing, and related actions. See [JSONB: definition](#plan_definition--definition). |
+| `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. Only `ACTIVE` definitions participate in trigger matching. See [ProtocolDefinitionStatus](#protocoldefinitionstatus). |
+| `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 PlanDefinition resource. Contains `action[]` with triggers, conditions, timing, and related actions. See [JSONB: definition](#protocol_definition--definition). |
 | `loaded_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | When this protocol definition was loaded into the system. |
 
 ### Constraints & Indexes
 
 | Type | Name | Details |
 |------|------|---------|
-| Primary Key | `plan_definition_pkey` | `id` |
-| Unique | `plan_definition_url_version_key` | `(url, version)` — Prevents duplicate protocol versions. |
+| Primary Key | `protocol_definition_pkey` | `id` |
+| Unique | `protocol_definition_url_version_key` | `(url, version)` — Prevents duplicate protocol versions. |
 | Check | — | `status IN ('ACTIVE', 'RETIRED')` |
-| GIN Index | `idx_plan_definition_triggers` | `definition` (`jsonb_path_ops`) — Fast JSON path queries. |
+| GIN Index | `idx_protocol_definition_triggers` | `definition` (`jsonb_path_ops`) — Fast JSON path queries. |
 
 ### Canonical Reference
 
@@ -178,8 +178,8 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 |--------|-----------|----------|---------|-------------|
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
 | `patient_id` | `VARCHAR` | **NOT NULL** | — | UPID of the enrolled patient (e.g., `260115-0001-7823`). Derived from the CloudEvent `subject` field. |
-| `protocol_canonical` | `VARCHAR` | **NOT NULL** | — | Denormalized `url|version` reference. Stored for fast display without joining `plan_definition`. |
-| `plan_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `plan_definition.id`. |
+| `protocol_canonical` | `VARCHAR` | **NOT NULL** | — | Denormalized `url|version` reference. Stored for fast display without joining `protocol_definition`. |
+| `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
 | `enrolled_at` | `TIMESTAMPTZ` | **NOT NULL** | — | Enrollment timestamp. Used as the anchor for timing calculations. |
 | `status` | `VARCHAR` | **NOT NULL** | — | Instance lifecycle status. See [ProtocolInstanceStatus](#protocolinstancestatus). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
@@ -190,7 +190,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 | Type | Name | Details |
 |------|------|---------|
 | Primary Key | `protocol_instance_pkey` | `id` |
-| Foreign Key | `protocol_instance_plan_definition_id_fkey` | `plan_definition_id` → `plan_definition(id)` |
+| Foreign Key | `protocol_instance_protocol_definition_id_fkey` | `protocol_definition_id` → `protocol_definition(id)` |
 | Check | — | `status IN ('ACTIVE', 'COMPLETED', 'WITHDRAWN', 'EXPIRED')` |
 | B-tree Index | `idx_protocol_instance_patient` | `patient_id` — Fast lookup of all protocol enrollments for a patient. |
 | Partial B-tree | `idx_protocol_instance_status` | `status WHERE status = 'ACTIVE'` — Optimizes active enrollment queries. |
@@ -199,7 +199,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the PlanDefinition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven) or `→ COMPLETED` (event-driven) or `→ SKIPPED` (manual). Repeating steps are differentiated by `repeat_index`.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven) or `→ COMPLETED` (event-driven) or `→ SKIPPED` (manual). Repeating steps are differentiated by `repeat_index`.
 
 ### Columns
 
@@ -207,7 +207,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 |--------|-----------|----------|---------|-------------|
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | PlanDefinition `action.id` this step instantiates (e.g., `anc-visit-1`). |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). |
 | `repeat_index` | `INTEGER` | **NOT NULL** | `0` | Zero-based occurrence counter for repeating actions. Non-repeating actions always have index 0. |
 | `state` | `VARCHAR` | **NOT NULL** | — | Current step state. See [StepState](#stepstate). |
 | `due_date` | `TIMESTAMPTZ` | Yes | — | Scheduled due date. Calculated from `relatedAction.offsetDuration`. `NULL` for event-triggered steps. |
@@ -296,7 +296,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 
 ## 7. trigger_index
 
-An **inverted index** for fast **Tier 1 structural matching** of inbound CloudEvents to PlanDefinition actions. Built at protocol load time by decomposing each action's trigger `data[].codeFilter[]` entries into `(resourceType, path, codeSystem, codeValue)` rows. Rebuilt whenever a protocol is reloaded.
+An **inverted index** for fast **Tier 1 structural matching** of inbound CloudEvents to protocol definition actions. Built at protocol load time by decomposing each action's trigger `data[].codeFilter[]` entries into `(resourceType, path, codeSystem, codeValue)` rows. Rebuilt whenever a protocol is reloaded.
 
 Only triggers that contain a `data[]` section produce `trigger_index` entries. **Condition-only triggers** (no `data[]`, only `condition`) are held in-memory and evaluated via Tier 2 for every inbound event.
 
@@ -308,15 +308,15 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | `path` | `VARCHAR` | **NOT NULL** | — | The `codeFilter.path` this row was decomposed from (e.g., `type`, `status`, `class`, `serviceType`). |
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
-| `plan_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `plan_definition.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | PlanDefinition `action.id` this trigger belongs to. |
+| `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. |
 
 ### Constraints & Indexes
 
 | Type | Name | Details |
 |------|------|---------|
-| Composite PK | `trigger_index_pkey` | `(resource_type, path, code_system, code_value, plan_definition_id, action_id)` |
-| Foreign Key | `trigger_index_plan_definition_id_fkey` | `plan_definition_id` → `plan_definition(id)` |
+| Composite PK | `trigger_index_pkey` | `(resource_type, path, code_system, code_value, protocol_definition_id, action_id)` |
+| Foreign Key | `trigger_index_protocol_definition_id_fkey` | `protocol_definition_id` → `protocol_definition(id)` |
 | B-tree Index | `idx_trigger_index_resource` | `resource_type` — Resource-type-only matching. |
 | B-tree Index | `idx_trigger_index_code` | `(resource_type, path, code_system, code_value)` — Full structural matching (primary query path). |
 
@@ -325,13 +325,13 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 Uses `GROUP BY` + `HAVING` to enforce **AND semantics** — all codeFilter paths for an action must match:
 
 ```sql
-SELECT plan_definition_id, action_id
+SELECT protocol_definition_id, action_id
 FROM trigger_index
 WHERE resource_type = :resourceType
   AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
     OR (path = :path2 AND code_system = :sys2 AND code_value = :code2)
     OR (path = :path3 AND code_system = :sys3 AND code_value = :code3))
-GROUP BY plan_definition_id, action_id
+GROUP BY protocol_definition_id, action_id
 HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 ```
 
@@ -369,7 +369,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 | `data` | `JSONB` | **NOT NULL** | — | Full CloudEvent `data` body. See [JSONB: event data](#event_log--data). |
 | `protocol_instance_id` | `UUID` | Yes | — | Matched protocol instance. `NULL` for zero-match or duplicate events. |
 | `protocol_definition_id` | `UUID` | Yes | — | Matched protocol definition. `NULL` for zero-match or duplicate events. |
-| `action_id` | `VARCHAR` | Yes | — | Matched PlanDefinition action. `NULL` for zero-match or duplicate events. |
+| `action_id` | `VARCHAR` | Yes | — | Matched protocol definition action. `NULL` for zero-match or duplicate events. |
 | `facility_id` | `VARCHAR` | Yes | — | FOSA ID from CloudEvent `facilityid` extension. |
 | `processing_status` | `VARCHAR` | **NOT NULL** | — | Processing outcome. See [ProcessingStatus](#processingstatus). |
 | `matched_step_instance_id` | `UUID` | Yes | — | Step completed as a result of this event. |
@@ -399,7 +399,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 | `event_category` | `VARCHAR` | **NOT NULL** | — | High-level category (e.g., `COMPLIANCE`, `PROTOCOL_MANAGEMENT`, `SECURITY`). |
 | `event_type` | `VARCHAR` | **NOT NULL** | — | Specific action (e.g., `STEP_COMPLETED`, `PROTOCOL_LOADED`, `DEVIATION_DETECTED`). |
 | `actor` | `VARCHAR` | Yes | — | `SYSTEM` for automated events, authenticated user identity for API calls. |
-| `resource_type` | `VARCHAR` | Yes | — | Affected entity type (e.g., `StepInstance`, `PlanDefinition`). |
+| `resource_type` | `VARCHAR` | Yes | — | Affected entity type (e.g., `StepInstance`, `ProtocolDefinition`). |
 | `resource_id` | `VARCHAR` | Yes | — | Affected entity UUID (stored as VARCHAR). |
 | `details` | `JSONB` | Yes | — | Event-specific context. See [JSONB: audit details](#audit_log--details). |
 | `ip_address` | `VARCHAR` | Yes | — | Client IP. `NULL` for system-generated events. |
@@ -418,7 +418,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 
 ## 10. Enumerated Value Reference
 
-### PlanDefinitionStatus
+### ProtocolDefinitionStatus
 
 | Value | Description |
 |-------|-------------|
@@ -483,8 +483,8 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 
 | Parent Table | Child Table | FK Column | Cascade | Description |
 |-------------|-------------|-----------|---------|-------------|
-| `plan_definition` | `protocol_instance` | `plan_definition_id` | No cascade | Deletion prevented if instances exist. |
-| `plan_definition` | `trigger_index` | `plan_definition_id` | Application-managed | Entries deleted when protocol retired or rebuilt. |
+| `protocol_definition` | `protocol_instance` | `protocol_definition_id` | No cascade | Deletion prevented if instances exist. |
+| `protocol_definition` | `trigger_index` | `protocol_definition_id` | Application-managed | Entries deleted when protocol retired or rebuilt. |
 | `protocol_instance` | `step_instance` | `protocol_instance_id` | JPA `CascadeType.ALL` | Steps fully managed by parent. |
 | `protocol_instance` | `deviation` | `protocol_instance_id` | JPA `CascadeType.ALL` | Deviations fully managed by parent. |
 | `step_instance` | `deviation` | `step_instance_id` | No cascade (DB level) | Reference only; not cascade-deleted. |
@@ -495,7 +495,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 
 ## 12. JSONB Column Schemas
 
-### plan_definition — `definition`
+### protocol_definition — `definition`
 
 The `definition` column stores the complete FHIR R4 PlanDefinition resource. Key paths used by the application:
 

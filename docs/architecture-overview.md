@@ -138,16 +138,16 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 Inverted index lookup on the `trigger_index` table using `GROUP BY` + `HAVING` to enforce **AND semantics** across all `codeFilter` entries:
 
 ```sql
-SELECT plan_definition_id, action_id
+SELECT protocol_definition_id, action_id
 FROM trigger_index
 WHERE resource_type = :resourceType
   AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
     OR (path = :path2 AND code_system = :sys2 AND code_value = :code2))
-GROUP BY plan_definition_id, action_id
+GROUP BY protocol_definition_id, action_id
 HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 ```
 
-The index is built at protocol load time by decomposing each action's `TriggerDefinition.data[].codeFilter[]` into `(resourceType, path, codeSystem, codeValue, planDefinitionId, actionId)` rows.
+The index is built at protocol load time by decomposing each action's `TriggerDefinition.data[].codeFilter[]` into `(resourceType, path, codeSystem, codeValue, protocolDefinitionId, actionId)` rows.
 
 ### 5.2 Condition-Only Triggers
 

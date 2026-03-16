@@ -27,9 +27,9 @@ Tokens are obtained from Keycloak (`cce-production` realm).
 
 ## 1. Protocol Definitions
 
-Manage FHIR R4 PlanDefinition resources.
+Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
-### 1.1 Load PlanDefinition
+### 1.1 Load Protocol Definition
 
 **`POST /v1/protocol-definitions`** — Load a new clinical protocol definition.
 
@@ -66,7 +66,7 @@ Manage FHIR R4 PlanDefinition resources.
 
 ---
 
-### 1.2 List Active PlanDefinitions
+### 1.2 List Active Protocol Definitions
 
 **`GET /v1/protocol-definitions`** — List all active protocol definitions.
 
@@ -90,7 +90,7 @@ Manage FHIR R4 PlanDefinition resources.
 
 ---
 
-### 1.3 Get PlanDefinition by ID
+### 1.3 Get Protocol Definition by ID
 
 **`GET /v1/protocol-definitions/{id}`**
 
@@ -100,9 +100,9 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `id` | UUID | PlanDefinition ID |
+| `id` | UUID | Protocol definition ID |
 
-**Response:** `200 OK` — `PlanDefinitionDto`
+**Response:** `200 OK` — `ProtocolDefinitionDto`
 
 **Error Responses:**
 
@@ -112,7 +112,7 @@ Manage FHIR R4 PlanDefinition resources.
 
 ---
 
-### 1.4 Get PlanDefinitions by URL
+### 1.4 Get Protocol Definitions by URL
 
 **`GET /v1/protocol-definitions/by-url?url={url}`**
 
@@ -122,13 +122,13 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `url` | String | Yes | PlanDefinition canonical URL |
+| `url` | String | Yes | Protocol definition canonical URL |
 
-**Response:** `200 OK` — `List<PlanDefinitionDto>` (all versions)
+**Response:** `200 OK` — `List<ProtocolDefinitionDto>` (all versions)
 
 ---
 
-### 1.5 Get PlanDefinition by URL and Version
+### 1.5 Get Protocol Definition by URL and Version
 
 **`GET /v1/protocol-definitions/by-url-version?url={url}&version={version}`**
 
@@ -138,10 +138,10 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `url` | String | Yes | PlanDefinition canonical URL |
+| `url` | String | Yes | Protocol definition canonical URL |
 | `version` | String | Yes | Semantic version |
 
-**Response:** `200 OK` — `PlanDefinitionDto`
+**Response:** `200 OK` — `ProtocolDefinitionDto`
 
 **Error Responses:**
 
@@ -151,7 +151,7 @@ Manage FHIR R4 PlanDefinition resources.
 
 ---
 
-### 1.6 Retire PlanDefinition
+### 1.6 Retire Protocol Definition
 
 **`POST /v1/protocol-definitions/{id}/retire`** — Retire a protocol definition and remove its trigger index.
 
@@ -161,13 +161,13 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `id` | UUID | PlanDefinition ID |
+| `id` | UUID | Protocol definition ID |
 
-**Response:** `200 OK` — Updated `PlanDefinitionDto` with `status: "retired"`
+**Response:** `200 OK` — Updated `ProtocolDefinitionDto` with `status: "retired"`
 
 **Side Effects:**
-- Sets PlanDefinition status to `RETIRED`
-- Deletes all `trigger_index` entries for this PlanDefinition
+- Sets protocol definition status to `RETIRED`
+- Deletes all `trigger_index` entries for this protocol definition
 - Writes an audit log entry
 
 ---
@@ -182,11 +182,11 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `id` | UUID | PlanDefinition ID |
+| `id` | UUID | Protocol definition ID |
 
 **Response:** `200 OK`
 
-**Use Case:** When the index parsing logic is updated, this endpoint allows re-indexing without reloading the PlanDefinition.
+**Use Case:** When the index parsing logic is updated, this endpoint allows re-indexing without reloading the protocol definition.
 
 ---
 
@@ -200,7 +200,7 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `id` | UUID | PlanDefinition ID |
+| `id` | UUID | Protocol definition ID |
 
 **Response:** `204 No Content`
 
@@ -208,14 +208,14 @@ Manage FHIR R4 PlanDefinition resources.
 
 | Status | Condition |
 |---|---|
-| `404 Not Found` | PlanDefinition with the given ID does not exist |
-| `409 Conflict` | Protocol instances still reference this PlanDefinition |
+| `404 Not Found` | Protocol definition with the given ID does not exist |
+| `409 Conflict` | Protocol instances still reference this protocol definition |
 
 **Side Effects:**
-- Deletes all `trigger_index` entries for this PlanDefinition
-- Removes the `plan_definition` row permanently
+- Deletes all `trigger_index` entries for this protocol definition
+- Removes the `protocol_definition` row permanently
 
-**Note:** A PlanDefinition cannot be deleted while protocol instances reference it. Retire the definition first and ensure all protocol instances are completed or cancelled before deleting.
+**Note:** A protocol definition cannot be deleted while protocol instances reference it. Retire the definition first and ensure all protocol instances are completed or cancelled before deleting.
 
 ---
 
@@ -236,7 +236,7 @@ Manage patient protocol enrollment lifecycle.
   "id": "660e8400-e29b-41d4-a716-446655440001",
   "patientId": "260225-0002-5501",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-  "planDefinitionId": "550e8400-e29b-41d4-a716-446655440000",
+  "protocolDefinitionId": "550e8400-e29b-41d4-a716-446655440000",
   "status": "active",
   "enrolledAt": "2026-03-15T10:30:00Z",
   "createdAt": "2026-03-15T10:30:00Z",
@@ -374,7 +374,7 @@ All errors follow a consistent structure:
 {
   "status": 400,
   "error": "Bad Request",
-  "message": "PlanDefinition with this url and version already exists",
+  "message": "Protocol definition with this url and version already exists",
   "path": "/v1/protocol-definitions",
   "timestamp": "2026-03-15T10:30:00Z",
   "fieldErrors": null
@@ -415,7 +415,7 @@ All errors follow a consistent structure:
 
 ## 6. DTO Schemas
 
-### PlanDefinitionDto
+### ProtocolDefinitionDto
 
 | Field | Type | Nullable | Description |
 |---|---|---|---|
@@ -433,8 +433,8 @@ All errors follow a consistent structure:
 |---|---|---|---|
 | `id` | UUID | No | Unique identifier |
 | `patientId` | String | No | Patient identifier |
-| `protocolCanonical` | String | No | `url\|version` of the PlanDefinition |
-| `planDefinitionId` | UUID | No | FK to PlanDefinition |
+| `protocolCanonical` | String | No | `url\|version` of the protocol definition |
+| `protocolDefinitionId` | UUID | No | FK to ProtocolDefinition |
 | `status` | String | No | `active`, `completed`, `withdrawn`, `expired` |
 | `enrolledAt` | OffsetDateTime | No | Enrollment timestamp |
 | `createdAt` | OffsetDateTime | No | Record creation |
@@ -448,7 +448,7 @@ All errors follow a consistent structure:
 |---|---|---|---|
 | `id` | UUID | No | Unique identifier |
 | `protocolInstanceId` | UUID | No | FK to ProtocolInstance |
-| `actionId` | String | No | PlanDefinition action ID |
+| `actionId` | String | No | Protocol definition action ID |
 | `repeatIndex` | int | No | 0-based repeat counter |
 | `state` | String | No | `pending`, `due`, `overdue`, `missed`, `completed`, `skipped` |
 | `dueDate` | OffsetDateTime | Yes | When step becomes due |

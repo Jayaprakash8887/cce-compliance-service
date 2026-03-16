@@ -268,7 +268,7 @@ Published when a compliance deviation is detected.
 | `deviationId` | UUID | Deviation record ID |
 | `deviationType` | String | `overdue`, `missed`, or `ambiguous` |
 | `stepState` | String | Current step state |
-| `actionId` | String | PlanDefinition action ID |
+| `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |
 | `facilityId` | String | Healthcare facility FOSA ID |
 | `detectedAt` | OffsetDateTime | Detection timestamp |

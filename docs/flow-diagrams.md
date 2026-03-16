@@ -122,7 +122,7 @@ sequenceDiagram
     Consumer->>Kafka: Acknowledge offset
 ```
 
-## 2. PlanDefinition Loading Flow
+## 2. Protocol Definition Loading Flow
 
 ```mermaid
 sequenceDiagram
@@ -136,7 +136,7 @@ sequenceDiagram
     participant Audit as AuditService
 
     Client->>Controller: POST /v1/protocol-definitions<br/>{ planDefinitionJson: "..." }
-    Controller->>Service: loadPlanDefinition(json)
+    Controller->>Service: loadProtocolDefinition(json)
 
     Service->>Parser: parse(json)
     Parser->>Parser: FhirContext.parseResource()
@@ -157,7 +157,7 @@ sequenceDiagram
         Controller-->>Client: 400 Bad Request
     end
 
-    Service->>DB: Save PlanDefinitionEntity<br/>(status=ACTIVE, definition=JSONB)
+    Service->>DB: Save ProtocolDefinitionEntity<br/>(status=ACTIVE, definition=JSONB)
     DB-->>Service: saved entity
 
     rect rgb(245, 255, 245)
@@ -171,15 +171,15 @@ sequenceDiagram
                 Service->>Parser: extractResourceType(trigger)
                 Service->>Parser: extractCodeFilters(trigger)
                 loop For each CodeFilter
-                    Service->>DB: Save TriggerIndex entry<br/>(resourceType, system, code, planDefId, actionId)
+                    Service->>DB: Save TriggerIndex entry<br/>(resourceType, system, code, protocolDefId, actionId)
                 end
             end
         end
     end
 
     Service->>Audit: auditSystem("protocol.definition", "loaded", ...)
-    Service-->>Controller: PlanDefinitionEntity
-    Controller-->>Client: 201 Created + PlanDefinitionDto
+    Service-->>Controller: ProtocolDefinitionEntity
+    Controller-->>Client: 201 Created + ProtocolDefinitionDto
 ```
 
 ## 3. Scheduler-Driven State Transitions
@@ -228,14 +228,14 @@ sequenceDiagram
 
 ```mermaid
 flowchart TD
-    A["Inbound Event<br/>Matched to PlanDefinition Action"] --> B{"Patient has<br/>active protocol?"}
+    A["Inbound Event<br/>Matched to Protocol Definition Action"] --> B{"Patient has<br/>active protocol?"}
 
     B -->|"Yes"| C["Return existing<br/>ProtocolInstance"]
     B -->|"No"| D["Create new<br/>ProtocolInstance"]
 
     D --> E["Set status = ACTIVE"]
     E --> F["Set enrolledAt = now()"]
-    F --> G["Link to PlanDefinitionEntity"]
+    F --> G["Link to ProtocolDefinitionEntity"]
     G --> H["Set protocolCanonical = url|version"]
 
     C --> I["Check for existing<br/>active step"]
