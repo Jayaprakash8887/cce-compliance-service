@@ -192,7 +192,7 @@ All Kafka messages use **CloudEvents spec field names (lowercase)** — no camel
 
 | `datacontenttype` | Validation by Collector | Compliance Service Handling |
 |---|---|---|
-| `application/fhir+json` (default) | FHIR R4 structural validation via HAPI FHIR | Parse via `FhirContext.forR4()`, extract resource type + codes for trigger matching |
+| `application/fhir+json` (default) | FHIR R4 structural validation via FHIR Libraries | Parse via `FhirContext.forR4()`, extract resource type + codes for trigger matching |
 | `application/json` | Valid JSON object check (no FHIR validation) | Extract fields directly from JSON map; used for non-FHIR payloads (e.g., CHW apps, named events) |
 
 ---

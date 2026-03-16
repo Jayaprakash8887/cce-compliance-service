@@ -18,7 +18,7 @@ graph TB
         ENGINE["Compliance Engine<br/>(Core Orchestrator)"]
         KAFKA_C["Kafka Consumers"]
         KAFKA_P["Kafka Producers"]
-        FHIR["FHIR Parser<br/>(HAPI FHIR R4)"]
+        FHIR["FHIR Parser<br/>(FHIR R4 Libraries)"]
         EXPR["Expression Evaluator<br/>(JSONLogic + FHIRPath)"]
         DB[("PostgreSQL 16<br/>+ JSONB")]
     end
@@ -65,7 +65,7 @@ graph TB
 | **Migration** | Flyway | 10.x | Schema version management |
 | **JSONB Mapping** | Hypersistence Utils | 3.7.3 | JPA ↔ PostgreSQL JSONB |
 | **Messaging** | Spring Kafka | 3.x | Event-driven messaging |
-| **FHIR** | HAPI FHIR | 7.4.0 | FHIR R4 PlanDefinition parsing & validation |
+| **FHIR** | FHIR Libraries | 4.0.1 | FHIR R4 PlanDefinition parsing & validation |
 | **Expression** | json-logic-java | 1.0.7 | Tier 2 conditional evaluation (JSONLogic) |
 | **Security** | Spring Security OAuth2 | 6.x | JWT authentication (Keycloak) |
 | **Metrics** | Micrometer + Prometheus | 1.x | Application metrics |
@@ -166,7 +166,7 @@ For each Tier 1 candidate, evaluates the trigger's `condition` expression.  **Tr
 
 **Supported languages:**
 - `text/jsonlogic` — via `io.github.jamsesso.jsonlogic.JsonLogic`
-- `text/fhirpath` — via HAPI FHIR `IFhirPath` engine (R4)
+- `text/fhirpath` — via FHIR `IFhirPath` engine (R4)
 - Any other — rejected with `UnsupportedExpressionLanguageException`
 
 ## 6. State Machines
