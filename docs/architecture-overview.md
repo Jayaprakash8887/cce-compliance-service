@@ -169,6 +169,139 @@ For each Tier 1 candidate, evaluates the trigger's `condition` expression.  **Tr
 - `text/fhirpath` — via FHIR `IFhirPath` engine (R4)
 - Any other — rejected with `UnsupportedExpressionLanguageException`
 
+### 5.4 How Matching Works — Step by Step
+
+A trigger definition has three filter components. Each component is **independent** — a trigger may use any combination:
+
+| Component | FHIR Path | What it checks |
+|---|---|---|
+| **F1** — Resource type | `trigger.data[].type` | Does the payload's `resourceType` match? (e.g., `Encounter`) |
+| **F2** — Code filters | `trigger.data[].codeFilter[]` | Do the payload's coded fields match the required `(path, system, code)` tuples? |
+| **F3** — Condition | `trigger.condition` | Does the payload satisfy a JSONLogic/FHIRPath expression? |
+
+> **F1 is implicit:** Every trigger that has a `data[]` section always has `data[].type` (the FHIR resource type). So F1 is present whenever F2 is present. A trigger with no `data[]` at all is a **condition-only trigger** (F3 only).
+
+#### Four Exclusive Matching Scenarios
+
+Every trigger in the system falls into **exactly one** of these four scenarios:
+
+```mermaid
+flowchart TD
+    EVENT["Inbound CloudEvent"] --> F1_CHECK{"F1: resource_type\nmatch in trigger_index?"}
+
+    F1_CHECK -->|"Yes"| HAS_F2{"Has F2?\n(codeFilter entries)"}
+    F1_CHECK -->|"No"| F3_ONLY{"F3-only triggers\n(condition-only,\nheld in-memory)"}
+
+    HAS_F2 -->|"Yes"| TIER1["Tier 1 Query:\nGROUP BY + HAVING\nenforces ALL codeFilters match"]
+    HAS_F2 -->|"No (F1 only)"| S1["Scenario 1\n(F1)\nMatch on resource type alone"]
+
+    TIER1 --> TIER1_RESULT["Tier 1 Result Set\n(actions matching F1+F2)"]
+
+    TIER1_RESULT --> HAS_F3{"Has F3?\n(condition)"}
+    HAS_F3 -->|"No"| S2["Scenario 2\n(F1,F2)\nStep created"]
+    HAS_F3 -->|"Yes"| TIER2["Tier 2: Evaluate condition\nagainst payload"]
+
+    TIER2 -->|"true"| S3["Scenario 3\n(F1,F2,F3)\nStep created"]
+    TIER2 -->|"false"| REJECT["No match — eliminated"]
+
+    F3_ONLY --> EVAL_F3["Tier 2: Evaluate condition\nagainst payload"]
+    EVAL_F3 -->|"true"| S4["Scenario 4\n(F3 only)\nStep created"]
+    EVAL_F3 -->|"false"| REJECT2["No match — eliminated"]
+
+    style S1 fill:#27AE60,stroke:#1E8449,color:white
+    style S2 fill:#27AE60,stroke:#1E8449,color:white
+    style S3 fill:#27AE60,stroke:#1E8449,color:white
+    style S4 fill:#27AE60,stroke:#1E8449,color:white
+    style REJECT fill:#E74C3C,stroke:#C0392B,color:white
+    style REJECT2 fill:#E74C3C,stroke:#C0392B,color:white
+```
+
+| Scenario | Components | Trigger Shape | Matching Path | Step Created When |
+|---|---|---|---|---|
+| **1** | **(F1)** | `data[].type` only, no `codeFilter[]`, no `condition` | Tier 1 (resource type match only) | Payload `resourceType` matches trigger `data[].type` |
+| **2** | **(F1,F2)** | `data[].type` + `codeFilter[]`, no `condition` | Tier 1 (GROUP BY + HAVING) | All code filters match — **no further evaluation needed** |
+| **3** | **(F1,F2,F3)** | `data[].type` + `codeFilter[]` + `condition` | Tier 1 → **reuses Tier 1 result** → Tier 2 | All code filters match AND condition evaluates to `true` |
+| **4** | **(F3)** | `condition` only, no `data[]` | Tier 2 only (in-memory) | Condition evaluates to `true` (checked for **every** inbound event) |
+
+#### Exclusivity
+
+Each scenario is **mutually exclusive** — a trigger belongs to exactly one scenario based on which components it defines:
+
+- Has `data[]` with `codeFilter[]` and `condition`? → **Scenario 3 (F1,F2,F3)**
+- Has `data[]` with `codeFilter[]` but no `condition`? → **Scenario 2 (F1,F2)**
+- Has `data[]` with only `type` (no `codeFilter[]`) and no `condition`? → **Scenario 1 (F1)**
+- Has only `condition` (no `data[]`)? → **Scenario 4 (F3)**
+- Has neither `data[]` nor `condition`? → **Rejected at protocol load time**
+
+#### Tier 1 Result Reuse
+
+Scenarios 2 and 3 both require Tier 1 matching (F1+F2). The Tier 1 query is executed **once**, and its result set is **reused**:
+
+1. The `trigger_index` query runs once, returning all `(protocolDefinitionId, actionId)` pairs where all code filters match.
+2. For **Scenario 2** actions (no condition): the Tier 1 result is final — step instances are created immediately.
+3. For **Scenario 3** actions (has condition): the same Tier 1 result is filtered through Tier 2 condition evaluation. There is **no re-query** of `trigger_index`.
+
+```
+Tier 1 Result Set ──┬── actions without condition ──► Scenario 2 → create steps
+                    │
+                    └── actions with condition ──► Tier 2 eval ──► Scenario 3 → create steps (if true)
+```
+
+#### Example Trigger (Scenario 3: F1,F2,F3)
+
+Consider an action with a trigger that requires an `Encounter` (F1) with **four** code filters (F2) and a condition (F3):
+
+```json
+"trigger": [
+  {
+    "type": "data-added",
+    "data": [
+      {
+        "type": "Encounter",
+        "codeFilter": [
+          {
+            "path": "type",
+            "code": [{ "system": "http://openphc.org/encounter-types", "code": "anc-visit" }]
+          },
+          {
+            "path": "status",
+            "code": [{ "code": "finished" }]
+          },
+          {
+            "path": "class",
+            "code": [{ "system": "http://terminology.hl7.org/CodeSystem/v3-ActCode", "code": "AMB" }]
+          },
+          {
+            "path": "serviceType",
+            "code": [{ "system": "http://openphc.org/service-types", "code": "high-risk-anc" }]
+          }
+        ]
+      }
+    ],
+    "condition": {
+      "language": "text/jsonlogic",
+      "expression": "{\"==\": [{\"var\": \"class.code\"}, \"AMB\"]}"
+    }
+  }
+]
+```
+
+At **protocol load time**, this trigger is decomposed into 4 `trigger_index` rows (one per `codeFilter`):
+
+| `resource_type` | `path` | `code_system` | `code_value` |
+|---|---|---|---|
+| `Encounter` | `type` | `http://openphc.org/encounter-types` | `anc-visit` |
+| `Encounter` | `status` | *(empty)* | `finished` |
+| `Encounter` | `class` | `http://terminology.hl7.org/CodeSystem/v3-ActCode` | `AMB` |
+| `Encounter` | `serviceType` | `http://openphc.org/service-types` | `high-risk-anc` |
+
+When an inbound `Encounter` event arrives:
+
+1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks all 4 `(path, system, code)` tuples. `HAVING COUNT(DISTINCT path) = 4` ensures **all four** code filters match. If the payload is missing any one (e.g., no `serviceType` code), this action is eliminated.
+2. **Tier 2 (F3)** — Since this action has a condition, the Tier 1 result is passed to Tier 2. The JSONLogic expression `{"==": [{"var": "class.code"}, "AMB"]}` is evaluated against the payload. Only if it returns `true` does this action produce a step instance.
+
+> **Key point:** A step instance is created for **every** action that survives its matching scenario. If 3 different actions match a single inbound event (e.g., one via Scenario 2, one via Scenario 3, one via Scenario 4), 3 separate step instances are created.
+
 ## 6. State Machines
 
 ### 6.1 Step Instance
