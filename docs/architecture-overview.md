@@ -52,7 +52,7 @@ graph TB
     class KAFKA broker
 ```
 
-**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics/alerting (CCE Intelligence Service), or user authentication (Keycloak).
+**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics, alerting (CCE Intelligence Service), or user authentication (Keycloak).
 
 ## 2. Technology Stack
 
