@@ -336,11 +336,13 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 
 ### Load-Time Validation
 
-| Trigger Shape | Index Entries | Matching Path |
+| Trigger Shape | Index Entries | Matching Scenario |
 |---|---|---|
-| `data[]` only (no condition) | Decomposed `(path, system, code)` rows | Tier 1 only |
-| `data[]` + `condition` | Decomposed `(path, system, code)` rows | Tier 1 → Tier 2 |
-| `condition` only (no `data[]`) | **None** — held in-memory | Tier 2 only |
+| `data[].type` only (no `codeFilter[]`, no `condition`) | Resource-type-only row | Scenario 1 (F1) — matches every event of that type |
+| `data[].type` + `codeFilter[]` (no `condition`) | Decomposed `(path, system, code)` rows | Scenario 2 (F1,F2) — Tier 1 only |
+| `data[].type` + `condition` (no `codeFilter[]`) | Resource-type-only row | Scenario 3 (F1,F3) — type match → Tier 2 |
+| `data[].type` + `codeFilter[]` + `condition` | Decomposed `(path, system, code)` rows | Scenario 4 (F1,F2,F3) — Tier 1 → Tier 2 |
+| `condition` only (no `data[]`) | **None** — held in-memory | Scenario 5 (F3) — Tier 2 only |
 | No `data[]` and no `condition` | **Rejected at load time** | N/A |
 
 ---

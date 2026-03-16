@@ -180,73 +180,85 @@ A trigger definition has three filter components. Each component is **independen
 
 > **F1 is implicit:** Every trigger that has a `data[]` section always has `data[].type` (the FHIR resource type). So F1 is present whenever F2 is present. A trigger with no `data[]` at all is a **condition-only trigger** (F3 only).
 
-#### Four Exclusive Matching Scenarios
+#### Five Exclusive Matching Scenarios
 
-Every trigger in the system falls into **exactly one** of these four scenarios:
+Every trigger in the system falls into **exactly one** of these five scenarios:
 
 ```mermaid
 flowchart TD
-    EVENT["Inbound CloudEvent"] --> F1_CHECK{"F1: resource_type - match in trigger_index?"}
+    EVENT["Inbound CloudEvent"] --> F1_CHECK{"F1: Does payload resourceType match any trigger data[].type?"}
 
     F1_CHECK -->|"Yes"| HAS_F2{"Has F2? (codeFilter entries)"}
     F1_CHECK -->|"No"| F3_ONLY{"F3-only triggers (condition-only, held in-memory)"}
 
     HAS_F2 -->|"Yes"| TIER1["Tier 1 Query: GROUP BY + HAVING enforces ALL codeFilters match"]
-    HAS_F2 -->|"No (F1 only)"| S1["Scenario 1: (F1) Match on resource type alone"]
+    HAS_F2 -->|"No"| HAS_F3_NOFILT{"Has F3? (condition)"}
 
-    TIER1 --> TIER1_RESULT["Tier 1 Result Set\n(step definitions matching F1+F2)"]
+    HAS_F3_NOFILT -->|"No"| S1["Scenario 1 (F1) Match on resource type alone ⚠ Broadest match"]
+    HAS_F3_NOFILT -->|"Yes"| TIER2_F1F3["Tier 2: Evaluate condition against payload"]
+
+    TIER2_F1F3 -->|"true"| S3_ALT["Scenario 3 (F1,F3) Step created"]
+    TIER2_F1F3 -->|"false"| REJECT3["No match — eliminated"]
+
+    TIER1 --> TIER1_RESULT["Tier 1 Result Set (step definitions matching F1+F2)"]
 
     TIER1_RESULT --> HAS_F3{"Has F3? (condition)"}
-    HAS_F3 -->|"No"| S2["Scenario 2 (F1,F2) - Step created"]
-    HAS_F3 -->|"Yes"| TIER2["Tier 2: Evaluate condition\nagainst payload"]
+    HAS_F3 -->|"No"| S2["Scenario 2 (F1,F2) Step created"]
+    HAS_F3 -->|"Yes"| TIER2["Tier 2: Evaluate condition against payload"]
 
-    TIER2 -->|"true"| S3["Scenario 3 (F1,F2,F3) - Step created"]
+    TIER2 -->|"true"| S4["Scenario 4 (F1,F2,F3) Step created"]
     TIER2 -->|"false"| REJECT["No match — eliminated"]
 
     F3_ONLY --> EVAL_F3["Tier 2: Evaluate condition against payload"]
-    EVAL_F3 -->|"true"| S4["Scenario 4 (F3 only) - Step created"]
+    EVAL_F3 -->|"true"| S5["Scenario 5 (F3 only) Step created"]
     EVAL_F3 -->|"false"| REJECT2["No match — eliminated"]
 
-    style S1 fill:#27AE60,stroke:#1E8449,color:white
+    style S1 fill:#E67E22,stroke:#D35400,color:white
     style S2 fill:#27AE60,stroke:#1E8449,color:white
-    style S3 fill:#27AE60,stroke:#1E8449,color:white
+    style S3_ALT fill:#27AE60,stroke:#1E8449,color:white
     style S4 fill:#27AE60,stroke:#1E8449,color:white
+    style S5 fill:#27AE60,stroke:#1E8449,color:white
     style REJECT fill:#E74C3C,stroke:#C0392B,color:white
     style REJECT2 fill:#E74C3C,stroke:#C0392B,color:white
+    style REJECT3 fill:#E74C3C,stroke:#C0392B,color:white
 ```
 
 | Scenario | Components | Trigger Shape | Matching Path | Step Created When |
 |---|---|---|---|---|
-| **1** | **(F1)** | `data[].type` only, no `codeFilter[]`, no `condition` | Tier 1 (resource type match only) | Payload `resourceType` matches trigger `data[].type` |
+| **1** | **(F1)** | `data[].type` only — no `codeFilter[]`, no `condition` | Resource type match only | Payload `resourceType` matches trigger `data[].type`. **Broadest match** — every event of that type triggers a step. |
 | **2** | **(F1,F2)** | `data[].type` + `codeFilter[]`, no `condition` | Tier 1 (GROUP BY + HAVING) | All code filters match — **no further evaluation needed** |
-| **3** | **(F1,F2,F3)** | `data[].type` + `codeFilter[]` + `condition` | Tier 1 → **reuses Tier 1 result** → Tier 2 | All code filters match AND condition evaluates to `true` |
-| **4** | **(F3)** | `condition` only, no `data[]` | Tier 2 only (in-memory) | Condition evaluates to `true` (checked for **every** inbound event) |
+| **3** | **(F1,F3)** | `data[].type` + `condition`, no `codeFilter[]` | Resource type match → Tier 2 | `resourceType` matches AND condition evaluates to `true` |
+| **4** | **(F1,F2,F3)** | `data[].type` + `codeFilter[]` + `condition` | Tier 1 → **reuses Tier 1 result** → Tier 2 | All code filters match AND condition evaluates to `true` |
+| **5** | **(F3)** | `condition` only, no `data[]` | Tier 2 only (in-memory) | Condition evaluates to `true` (checked for **every** inbound event) |
+
+> **Scenario 1 (F1) — caution:** A trigger with only `data[].type` and no `codeFilter[]` or `condition` will match **every** inbound event of that resource type (e.g., every `Encounter`). This is intentionally supported for use cases like "enroll patient on any encounter of this type," but protocol authors should be aware of the broad match scope.
 
 #### Exclusivity
 
 Each scenario is **mutually exclusive** — a trigger belongs to exactly one scenario based on which components it defines:
 
-- Has `data[]` with `codeFilter[]` and `condition`? → **Scenario 3 (F1,F2,F3)**
+- Has `data[]` with `codeFilter[]` and `condition`? → **Scenario 4 (F1,F2,F3)**
 - Has `data[]` with `codeFilter[]` but no `condition`? → **Scenario 2 (F1,F2)**
+- Has `data[]` with only `type` (no `codeFilter[]`) and `condition`? → **Scenario 3 (F1,F3)**
 - Has `data[]` with only `type` (no `codeFilter[]`) and no `condition`? → **Scenario 1 (F1)**
-- Has only `condition` (no `data[]`)? → **Scenario 4 (F3)**
+- Has only `condition` (no `data[]`)? → **Scenario 5 (F3)**
 - Has neither `data[]` nor `condition`? → **Rejected at protocol load time**
 
 #### Tier 1 Result Reuse
 
-Scenarios 2 and 3 both require Tier 1 matching (F1+F2). The Tier 1 query is executed **once**, and its result set is **reused**:
+Scenarios 2 and 4 both require Tier 1 matching (F1+F2). The Tier 1 query is executed **once**, and its result set is **reused**:
 
 1. The `trigger_index` query runs once, returning all `(protocolDefinitionId, actionId)` pairs where all code filters match.
 2. For **Scenario 2** step definitions (no condition): the Tier 1 result is final — step instances are created immediately.
-3. For **Scenario 3** step definitions (has condition): the same Tier 1 result is filtered through Tier 2 condition evaluation. There is **no re-query** of `trigger_index`.
+3. For **Scenario 4** step definitions (has condition): the same Tier 1 result is filtered through Tier 2 condition evaluation. There is **no re-query** of `trigger_index`.
 
 ```
 Tier 1 Result Set ──┬── step definitions without condition ──► Scenario 2 → create step instances
                     │
-                    └── step definitions with condition ──► Tier 2 eval ──► Scenario 3 → create step instances (if true)
+                    └── step definitions with condition ──► Tier 2 eval ──► Scenario 4 → create step instances (if true)
 ```
 
-#### Example Trigger (Scenario 3: F1,F2,F3)
+#### Example Trigger (Scenario 4: F1,F2,F3)
 
 Consider a step definition (`action`) with a trigger that requires an `Encounter` (F1) with **four** code filters (F2) and a condition (F3):
 
@@ -299,7 +311,7 @@ When an inbound `Encounter` event arrives:
 1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks all 4 `(path, system, code)` tuples. `HAVING COUNT(DISTINCT path) = 4` ensures **all four** code filters match. If the payload is missing any one (e.g., no `serviceType` code), this step definition is eliminated.
 2. **Tier 2 (F3)** — Since this step definition has a condition, the Tier 1 result is passed to Tier 2. The JSONLogic expression `{"==": [{"var": "class.code"}, "AMB"]}` is evaluated against the payload. Only if it returns `true` does this step definition produce a step instance.
 
-> **Key point:** A step instance is created for **every** step definition that survives its matching scenario. If 3 different step definitions match a single inbound event (e.g., one via Scenario 2, one via Scenario 3, one via Scenario 4), 3 separate step instances are created.
+> **Key point:** A step instance is created for **every** step definition that survives its matching scenario. If 3 different step definitions match a single inbound event (e.g., one via Scenario 1, one via Scenario 2, one via Scenario 4), 3 separate step instances are created.
 
 ## 6. State Machines
 
