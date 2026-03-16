@@ -327,6 +327,10 @@ Query patient compliance data.
 
 **Response:** `200 OK` — `List<DeviationDto>`
 
+Returns compliance deviations detected by the scheduler for this protocol instance:
+- **`OVERDUE`** — step was not completed by its `overdueDate` (scheduler transition `DUE → OVERDUE`)
+- **`MISSED`** — step was not completed by its `missedDate` (scheduler transition `OVERDUE → MISSED`)
+
 ---
 
 ### 3.6 List Patient Events
