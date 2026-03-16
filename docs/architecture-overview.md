@@ -61,7 +61,7 @@ graph TB
 | **Runtime** | Java | 21 LTS | Language runtime |
 | **Framework** | Spring Boot | 3.4.2 | Application framework |
 | **Persistence** | Spring Data JPA / Hibernate | 6.x | ORM and data access |
-| **Database** | PostgreSQL | 16 | JSONB, GIN indexes, table partitioning |
+| **Database** | PostgreSQL | 16 | JSONB, GIN indexes |
 | **Migration** | Flyway | 10.x | Schema version management |
 | **JSONB Mapping** | Hypersistence Utils | 3.7.3 | JPA ↔ PostgreSQL JSONB |
 | **Messaging** | Spring Kafka | 3.x | Event-driven messaging |
@@ -247,6 +247,6 @@ See [API Reference](api-reference.md) for endpoint-level details.
 | Dimension | Strategy |
 |---|---|
 | **Horizontal** | Kafka consumer group enables multi-instance; partition assignment is automatic |
-| **Database** | Connection pool per instance (20 max); `event_log` monthly-partitioned |
+| **Database** | Connection pool per instance (20 max) |
 | **Kafka** | 3 concurrent listener threads per instance |
 | **API** | Stateless — any instance serves any request |

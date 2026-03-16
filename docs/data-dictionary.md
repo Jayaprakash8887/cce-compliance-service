@@ -20,7 +20,6 @@
 10. [Enumerated Value Reference](#10-enumerated-value-reference)
 11. [Relationships & Foreign Keys](#11-relationships--foreign-keys)
 12. [JSONB Column Schemas](#12-jsonb-column-schemas)
-13. [Partitioning Management](#13-partitioning-management)
 
 ---
 
@@ -126,15 +125,15 @@ erDiagram
 
 ## 2. Table Summary
 
-| # | Table | Purpose | Row Growth | Partitioned |
-|---|-------|---------|-----------|-------------|
-| 1 | `protocol_definition` | Stores FHIR R4 PlanDefinition resources (protocol templates) | Low (tens) | No |
-| 2 | `protocol_instance` | Patient enrollments in specific protocols | Medium (per-patient) | No |
-| 3 | `step_instance` | Individual action steps within a patient's protocol journey | Medium–High | No |
-| 4 | `deviation` | Compliance deviations (overdue, missed) | Medium | No |
-| 5 | `trigger_index` | Inverted index for fast Tier 1 structural event matching | Low (rebuilt on protocol load) | No |
-| 6 | `event_log` | Immutable log of all inbound CloudEvents and their processing outcomes | High (every event) | **Yes** (monthly by `received_at`) |
-| 7 | `audit_log` | System and user audit trail | Medium–High | No |
+| # | Table | Purpose | Row Growth |
+|---|-------|---------|-----------|
+| 1 | `protocol_definition` | Stores FHIR R4 PlanDefinition resources (protocol templates) | Low (tens) |
+| 2 | `protocol_instance` | Patient enrollments in specific protocols | Medium (per-patient) |
+| 3 | `step_instance` | Individual action steps within a patient's protocol journey | Medium–High |
+| 4 | `deviation` | Compliance deviations (overdue, missed) | Medium |
+| 5 | `trigger_index` | Inverted index for fast Tier 1 structural event matching | Low (rebuilt on protocol load) |
+| 6 | `event_log` | Immutable log of all inbound CloudEvents and their processing outcomes | High (every event) |
+| 7 | `audit_log` | System and user audit trail | Medium–High |
 
 ---
 
@@ -216,7 +215,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completed_at` | `TIMESTAMPTZ` | Yes | — | Completion timestamp. `NULL` for non-completed steps. |
 | `completed_by_source` | `VARCHAR` | Yes | — | CloudEvent `source` that completed this step. |
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
-| `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id`. No FK constraint (event_log is partitioned). |
+| `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 
@@ -348,7 +347,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 
 ## 8. event_log
 
-**Immutable append-only log** of every inbound CloudEvent. Records the full event payload and processing outcome. Monthly-partitioned by `received_at`. Used for:
+**Immutable append-only log** of every inbound CloudEvent. Records the full event payload and processing outcome. Used for:
 - **Idempotency**: `(cloudevents_id, source)` uniqueness prevents duplicate processing.
 - **Auditability**: Complete provenance trail of every clinical event.
 - **Troubleshooting**: Full payload preservation enables replay and debugging.
@@ -364,7 +363,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 | `subject` | `VARCHAR` | **NOT NULL** | — | Patient UPID from CloudEvent `subject`. |
 | `type` | `VARCHAR` | **NOT NULL** | — | CloudEvents `type`. |
 | `event_time` | `TIMESTAMPTZ` | **NOT NULL** | — | Clinical event time from CloudEvent `time`. |
-| `received_at` | `TIMESTAMPTZ` | **NOT NULL** | — | Ingestion timestamp. **Partition key**. |
+| `received_at` | `TIMESTAMPTZ` | **NOT NULL** | — | Ingestion timestamp. |
 | `correlation_id` | `VARCHAR` | **NOT NULL** | — | Distributed tracing ID from CloudEvent `correlationid` extension. |
 | `data` | `JSONB` | **NOT NULL** | — | Full CloudEvent `data` body. See [JSONB: event data](#event_log--data). |
 | `protocol_instance_id` | `UUID` | Yes | — | Matched protocol instance. `NULL` for zero-match or duplicate events. |
@@ -378,12 +377,12 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 
 | Type | Name | Details |
 |------|------|---------|
-| Unique | `event_log_cloudevents_id_source_received_at_key` | `(cloudevents_id, source, received_at)` — Idempotency guard. Includes `received_at` because the table is partitioned by it. |
-| Unique (partial) | `idx_event_log_source_sourceeventid` | `(source, source_event_id, received_at) WHERE source_event_id IS NOT NULL` |
+| Unique | `event_log_cloudevents_id_source_key` | `(cloudevents_id, source)` — Idempotency guard. |
+| Unique (partial) | `idx_event_log_source_sourceeventid` | `(source, source_event_id) WHERE source_event_id IS NOT NULL` |
 | B-tree Index | `idx_event_log_subject` | `subject` — Patient-centric event queries. |
 | Partial B-tree | `idx_event_log_facility` | `facility_id WHERE facility_id IS NOT NULL` — Facility-level queries. |
 
-> **Note**: No foreign key constraints exist from `event_log` to other tables because PostgreSQL partitioned tables have restrictions on cross-table FK references. Referential integrity is maintained at the application layer.
+
 
 ---
 
@@ -489,7 +488,7 @@ HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
 | `protocol_instance` | `deviation` | `protocol_instance_id` | JPA `CascadeType.ALL` | Deviations fully managed by parent. |
 | `step_instance` | `deviation` | `step_instance_id` | No cascade (DB level) | Reference only; not cascade-deleted. |
 
-> `event_log` has no FK relationships due to partitioning. Cross-references maintained at the application layer.
+
 
 ---
 
@@ -587,79 +586,3 @@ Content varies by audit event type:
 |------------|---------|
 | STEP_COMPLETED | `{"protocolInstanceId": "pi-uuid-...", "actionId": "anc-visit-1", "completionStatus": "ON_TIME"}` |
 | PROTOCOL_LOADED | `{"url": "http://openphc.org/.../anc-high-risk", "version": "2.1", "actionCount": 9, "triggerIndexEntries": 24}` |
-
----
-
-## 13. Partitioning Management
-
-The `event_log` table uses **monthly range partitioning** on `received_at`.
-
-### Current Partitions
-
-| Partition | Range |
-|---|---|
-| `event_log_2026_02` | 2026-02-01 to 2026-03-01 |
-| `event_log_2026_03` | 2026-03-01 to 2026-04-01 |
-| `event_log_2026_04` | 2026-04-01 to 2026-05-01 |
-| `event_log_2026_05` | 2026-05-01 to 2026-06-01 |
-| `event_log_2026_06` | 2026-06-01 to 2026-07-01 |
-
-### Automated Partition Management (pg_cron)
-
-Partition lifecycle is managed by **pg_cron**, a PostgreSQL extension that runs scheduled SQL inside the database.
-
-#### Prerequisites
-
-```sql
--- pg_cron must be in shared_preload_libraries (requires PostgreSQL restart once)
--- Then enable the extension:
-CREATE EXTENSION IF NOT EXISTS pg_cron;
-```
-
-#### Creating New Partitions
-
-A scheduled job creates next month's partition on the 1st of each month:
-
-```sql
-SELECT cron.schedule(
-    'create-event-log-partition',
-    '0 0 1 * *',   -- midnight on the 1st of every month
-    $$
-    DO $$
-    DECLARE
-        next_month DATE := date_trunc('month', now()) + interval '1 month';
-        partition_name TEXT := 'event_log_' || to_char(next_month, 'YYYY_MM');
-        start_bound TEXT := to_char(next_month, 'YYYY-MM-DD');
-        end_bound TEXT := to_char(next_month + interval '1 month', 'YYYY-MM-DD');
-    BEGIN
-        EXECUTE format(
-            'CREATE TABLE IF NOT EXISTS %I PARTITION OF event_log FOR VALUES FROM (%L) TO (%L)',
-            partition_name, start_bound, end_bound
-        );
-    END $$;
-    $$
-);
-```
-
-#### Archiving Old Partitions
-
-A scheduled job detaches partitions older than 6 months on the 2nd of each month:
-
-```sql
-SELECT cron.schedule(
-    'archive-event-log-partition',
-    '0 1 2 * *',   -- 01:00 on the 2nd of every month
-    $$
-    DO $$
-    DECLARE
-        cutoff DATE := date_trunc('month', now()) - interval '6 months';
-        partition_name TEXT := 'event_log_' || to_char(cutoff, 'YYYY_MM');
-    BEGIN
-        EXECUTE format('ALTER TABLE event_log DETACH PARTITION %I', partition_name);
-        EXECUTE format('ALTER TABLE %I SET SCHEMA archive', partition_name);
-    END $$;
-    $$
-);
-```
-
-> The unique constraint `(cloudevents_id, source, received_at)` includes `received_at` because PostgreSQL requires the partition key in unique constraints.
