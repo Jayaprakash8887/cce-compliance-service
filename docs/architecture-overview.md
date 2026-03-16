@@ -108,18 +108,15 @@ flowchart TD
     S3["Step 3: Extract Resource Info<br/>from payload (data)"] --> EXPL
 
     EXPL{"Step 4: Explicit Match?<br/>(actionId on CloudEvent)"}
-    EXPL -->|"Yes"| EXPLM["processExplicitMatch()<br/>Bypass Tier 1/2"]
+    EXPL -->|"Yes"| EXPLM["processExplicitMatch()<br/>Bypass matching"]
     EXPL -->|"No"| S5
     EXPLM --> DONE["Return"]
 
-    S5["Step 5: Tier 1 Structural Match<br/>(trigger_index GROUP BY + HAVING)"]
-    S5 --> S5b
-    S5b["Step 5b: Condition-Only Triggers<br/>(in-memory, Tier 2 only)"] --> S6
-    S6["Step 6: Tier 2 Condition Eval<br/>(JSONLogic / FHIRPath)"] --> S7
+    S5["Step 5: Two-Tier Matching<br/>(see §5.4 for detailed flow)"] --> S6
 
-    S7{"Result Classification"}
-    S7 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
-    S7 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
+    S6{"Result Classification"}
+    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
+    S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
 ```
 
 ### 4.1 Resource Extraction
@@ -171,6 +168,8 @@ For each Tier 1 candidate, evaluates the trigger's `condition` expression.  **Tr
 
 ### 5.4 How Matching Works — Step by Step
 
+> **Terminology:** In FHIR, `PlanDefinition.action[]` defines the steps of a protocol. In CCE, each `action` is a **step definition** — a template that becomes a `step_instance` when matched for a specific patient. Throughout this section, "step definition" and "action" are used interchangeably.
+
 A trigger definition has three filter components. Each component is **independent** — a trigger may use any combination:
 
 | Component | FHIR Path | What it checks |
@@ -195,7 +194,7 @@ flowchart TD
     HAS_F2 -->|"Yes"| TIER1["Tier 1 Query: GROUP BY + HAVING enforces ALL codeFilters match"]
     HAS_F2 -->|"No (F1 only)"| S1["Scenario 1: (F1) Match on resource type alone"]
 
-    TIER1 --> TIER1_RESULT["Tier 1 Result Set\n(actions matching F1+F2)"]
+    TIER1 --> TIER1_RESULT["Tier 1 Result Set\n(step definitions matching F1+F2)"]
 
     TIER1_RESULT --> HAS_F3{"Has F3? (condition)"}
     HAS_F3 -->|"No"| S2["Scenario 2 (F1,F2) - Step created"]
@@ -238,18 +237,18 @@ Each scenario is **mutually exclusive** — a trigger belongs to exactly one sce
 Scenarios 2 and 3 both require Tier 1 matching (F1+F2). The Tier 1 query is executed **once**, and its result set is **reused**:
 
 1. The `trigger_index` query runs once, returning all `(protocolDefinitionId, actionId)` pairs where all code filters match.
-2. For **Scenario 2** actions (no condition): the Tier 1 result is final — step instances are created immediately.
-3. For **Scenario 3** actions (has condition): the same Tier 1 result is filtered through Tier 2 condition evaluation. There is **no re-query** of `trigger_index`.
+2. For **Scenario 2** step definitions (no condition): the Tier 1 result is final — step instances are created immediately.
+3. For **Scenario 3** step definitions (has condition): the same Tier 1 result is filtered through Tier 2 condition evaluation. There is **no re-query** of `trigger_index`.
 
 ```
-Tier 1 Result Set ──┬── actions without condition ──► Scenario 2 → create steps
+Tier 1 Result Set ──┬── step definitions without condition ──► Scenario 2 → create step instances
                     │
-                    └── actions with condition ──► Tier 2 eval ──► Scenario 3 → create steps (if true)
+                    └── step definitions with condition ──► Tier 2 eval ──► Scenario 3 → create step instances (if true)
 ```
 
 #### Example Trigger (Scenario 3: F1,F2,F3)
 
-Consider an action with a trigger that requires an `Encounter` (F1) with **four** code filters (F2) and a condition (F3):
+Consider a step definition (`action`) with a trigger that requires an `Encounter` (F1) with **four** code filters (F2) and a condition (F3):
 
 ```json
 "trigger": [
@@ -297,10 +296,10 @@ At **protocol load time**, this trigger is decomposed into 4 `trigger_index` row
 
 When an inbound `Encounter` event arrives:
 
-1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks all 4 `(path, system, code)` tuples. `HAVING COUNT(DISTINCT path) = 4` ensures **all four** code filters match. If the payload is missing any one (e.g., no `serviceType` code), this action is eliminated.
-2. **Tier 2 (F3)** — Since this action has a condition, the Tier 1 result is passed to Tier 2. The JSONLogic expression `{"==": [{"var": "class.code"}, "AMB"]}` is evaluated against the payload. Only if it returns `true` does this action produce a step instance.
+1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks all 4 `(path, system, code)` tuples. `HAVING COUNT(DISTINCT path) = 4` ensures **all four** code filters match. If the payload is missing any one (e.g., no `serviceType` code), this step definition is eliminated.
+2. **Tier 2 (F3)** — Since this step definition has a condition, the Tier 1 result is passed to Tier 2. The JSONLogic expression `{"==": [{"var": "class.code"}, "AMB"]}` is evaluated against the payload. Only if it returns `true` does this step definition produce a step instance.
 
-> **Key point:** A step instance is created for **every** action that survives its matching scenario. If 3 different actions match a single inbound event (e.g., one via Scenario 2, one via Scenario 3, one via Scenario 4), 3 separate step instances are created.
+> **Key point:** A step instance is created for **every** step definition that survives its matching scenario. If 3 different step definitions match a single inbound event (e.g., one via Scenario 2, one via Scenario 3, one via Scenario 4), 3 separate step instances are created.
 
 ## 6. State Machines
 
