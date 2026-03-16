@@ -187,25 +187,25 @@ Every trigger in the system falls into **exactly one** of these four scenarios:
 
 ```mermaid
 flowchart TD
-    EVENT["Inbound CloudEvent"] --> F1_CHECK{"F1: resource_type\nmatch in trigger_index?"}
+    EVENT["Inbound CloudEvent"] --> F1_CHECK{"F1: resource_type - match in trigger_index?"}
 
-    F1_CHECK -->|"Yes"| HAS_F2{"Has F2?\n(codeFilter entries)"}
-    F1_CHECK -->|"No"| F3_ONLY{"F3-only triggers\n(condition-only,\nheld in-memory)"}
+    F1_CHECK -->|"Yes"| HAS_F2{"Has F2? (codeFilter entries)"}
+    F1_CHECK -->|"No"| F3_ONLY{"F3-only triggers (condition-only, held in-memory)"}
 
-    HAS_F2 -->|"Yes"| TIER1["Tier 1 Query:\nGROUP BY + HAVING\nenforces ALL codeFilters match"]
-    HAS_F2 -->|"No (F1 only)"| S1["Scenario 1\n(F1)\nMatch on resource type alone"]
+    HAS_F2 -->|"Yes"| TIER1["Tier 1 Query: GROUP BY + HAVING enforces ALL codeFilters match"]
+    HAS_F2 -->|"No (F1 only)"| S1["Scenario 1: (F1) Match on resource type alone"]
 
     TIER1 --> TIER1_RESULT["Tier 1 Result Set\n(actions matching F1+F2)"]
 
-    TIER1_RESULT --> HAS_F3{"Has F3?\n(condition)"}
-    HAS_F3 -->|"No"| S2["Scenario 2\n(F1,F2)\nStep created"]
+    TIER1_RESULT --> HAS_F3{"Has F3? (condition)"}
+    HAS_F3 -->|"No"| S2["Scenario 2 (F1,F2) - Step created"]
     HAS_F3 -->|"Yes"| TIER2["Tier 2: Evaluate condition\nagainst payload"]
 
-    TIER2 -->|"true"| S3["Scenario 3\n(F1,F2,F3)\nStep created"]
+    TIER2 -->|"true"| S3["Scenario 3 (F1,F2,F3) - Step created"]
     TIER2 -->|"false"| REJECT["No match — eliminated"]
 
-    F3_ONLY --> EVAL_F3["Tier 2: Evaluate condition\nagainst payload"]
-    EVAL_F3 -->|"true"| S4["Scenario 4\n(F3 only)\nStep created"]
+    F3_ONLY --> EVAL_F3["Tier 2: Evaluate condition against payload"]
+    EVAL_F3 -->|"true"| S4["Scenario 4 (F3 only) - Step created"]
     EVAL_F3 -->|"false"| REJECT2["No match — eliminated"]
 
     style S1 fill:#27AE60,stroke:#1E8449,color:white
