@@ -195,6 +195,8 @@ stateDiagram-v2
 
 `ACTIVE → COMPLETED | WITHDRAWN | EXPIRED`. Terminal states: `COMPLETED`, `WITHDRAWN`, `EXPIRED`.
 
+Protocol completion is **automatic** — when all steps reach terminal states (`COMPLETED`, `MISSED`, `SKIPPED`), the protocol transitions to `COMPLETED`. There is no manual complete endpoint; `WITHDRAWN` covers manual termination.
+
 ## 7. Security
 
 - **Authentication:** OAuth 2.0 JWT Bearer tokens via Keycloak (`cce-production` realm)

@@ -265,26 +265,7 @@ Manage patient protocol enrollment lifecycle.
 
 ---
 
-### 2.2 Complete Protocol Instance
-
-**`POST /v1/protocol-instances/{id}/complete`** — Mark a protocol as completed.
-
-**Required Scope:** `compliance:read` (Note: uses GET scope pattern)
-
-**Response:** `200 OK` — Updated `ProtocolInstanceDto`
-
-**Pre-conditions:** Protocol must be in `ACTIVE` status.
-
-**Error Responses:**
-
-| Status | Condition |
-|---|---|
-| `404 Not Found` | Protocol instance does not exist |
-| `409 Conflict` | Protocol is not in ACTIVE status |
-
----
-
-### 2.3 Withdraw Protocol Instance
+### 2.2 Withdraw Protocol Instance
 
 **`POST /v1/protocol-instances/{id}/withdraw`** — Withdraw a patient from a protocol.
 
@@ -483,7 +464,7 @@ All errors follow a consistent structure:
 | `id` | UUID | No | Unique identifier |
 | `protocolInstanceId` | UUID | No | FK to ProtocolInstance |
 | `stepInstanceId` | UUID | Yes | FK to StepInstance (null for protocol-level deviations) |
-| `deviationType` | String | No | `overdue`, `missed`, `ambiguous` |
+| `deviationType` | String | No | `overdue`, `missed` |
 | `detectedAt` | OffsetDateTime | No | Detection timestamp |
 | `intelligenceEventId` | UUID | Yes | ID of published intelligence event |
 | `metadata` | Map | Yes | Additional context (JSONB) |
@@ -504,7 +485,7 @@ All errors follow a consistent structure:
 | `data` | Map | Yes | Event payload (JSONB) |
 | `actionId` | String | Yes | Matched action ID |
 | `facilityId` | String | Yes | Facility identifier |
-| `processingStatus` | String | No | `matched`, `zero_match`, `ambiguous`, `duplicate` |
+| `processingStatus` | String | No | `matched`, `zero_match`, `duplicate` |
 | `protocolInstanceId` | UUID | Yes | Matched protocol instance |
 | `protocolDefinitionId` | UUID | Yes | Matched protocol definition |
 | `matchedStepInstanceId` | UUID | Yes | Matched step instance |
