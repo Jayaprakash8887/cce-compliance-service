@@ -281,7 +281,7 @@ Query patient compliance data.
 
 ### 3.1 List Patient Protocols
 
-**`GET /v1/patients/{patientId}/protocol-tracking`** — List all protocols for a patient.
+**`GET /v1/patients/{patientId}/protocol-instances`** — List all protocols for a patient.
 
 **Required Scope:** `compliance:read`
 
@@ -291,7 +291,7 @@ Query patient compliance data.
 
 ### 3.2 List Active Patient Protocols
 
-**`GET /v1/patients/{patientId}/protocol-tracking/active`** — List only active protocols.
+**`GET /v1/patients/{patientId}/protocol-instances/active`** — List only active protocols.
 
 **Required Scope:** `compliance:read`
 
@@ -301,7 +301,7 @@ Query patient compliance data.
 
 ### 3.3 Get Patient Protocol Detail
 
-**`GET /v1/patients/{patientId}/protocol-tracking/{protocolInstanceId}`** — Get detailed protocol view with steps and deviations.
+**`GET /v1/patients/{patientId}/protocol-instances/{protocolInstanceId}`** — Get detailed protocol view with steps and deviations.
 
 **Required Scope:** `compliance:read`
 
@@ -311,7 +311,7 @@ Query patient compliance data.
 
 ### 3.4 List Protocol Steps
 
-**`GET /v1/patients/{patientId}/protocol-tracking/{protocolInstanceId}/steps`**
+**`GET /v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/steps`**
 
 **Required Scope:** `compliance:read`
 
@@ -321,7 +321,7 @@ Query patient compliance data.
 
 ### 3.5 List Protocol Deviations
 
-**`GET /v1/patients/{patientId}/protocol-tracking/{protocolInstanceId}/deviations`**
+**`GET /v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/deviations`**
 
 **Required Scope:** `compliance:read`
 
