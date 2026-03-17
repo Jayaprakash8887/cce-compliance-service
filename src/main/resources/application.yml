@@ -54,14 +54,6 @@ spring:
         enable.idempotence: true
         max.in.flight.requests.per.connection: 5
 
-  # --- Security ---
-  security:
-    oauth2:
-      resourceserver:
-        jwt:
-          issuer-uri: ${KEYCLOAK_ISSUER_URI:http://localhost:8180/realms/cce-production}
-          jwk-set-uri: ${KEYCLOAK_JWK_SET_URI:http://localhost:8180/realms/cce-production/protocol/openid-connect/certs}
-
 # --- Custom Kafka Topics ---
 cce:
   kafka:

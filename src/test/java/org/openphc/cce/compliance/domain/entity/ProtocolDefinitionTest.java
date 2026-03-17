@@ -1,5 +1,7 @@
 package org.openphc.cce.compliance.domain.entity;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.compliance.domain.enums.ProtocolDefinitionStatus;
 
@@ -11,14 +13,18 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class ProtocolDefinitionTest {
 
+    private static final ObjectMapper objectMapper = new ObjectMapper();
+
     @Test
     void getCanonical_shouldReturnUrlPipeVersion() {
+        JsonNode definition = objectMapper.valueToTree(Map.of("resourceType", "PlanDefinition"));
+
         ProtocolDefinition pd = ProtocolDefinition.builder()
                 .id(UUID.randomUUID())
                 .url("http://openphc.org/fhir/PlanDefinition/anc-high-risk")
                 .version("2.1")
                 .status(ProtocolDefinitionStatus.ACTIVE)
-                .definition(Map.of("resourceType", "PlanDefinition"))
+                .definition(definition)
                 .loadedAt(OffsetDateTime.now())
                 .build();
 
@@ -31,7 +37,7 @@ class ProtocolDefinitionTest {
                 .url("http://example.org/protocol")
                 .version("1.0.0")
                 .status(ProtocolDefinitionStatus.ACTIVE)
-                .definition(Map.of())
+                .definition(objectMapper.createObjectNode())
                 .loadedAt(OffsetDateTime.now())
                 .build();
 
@@ -42,7 +48,7 @@ class ProtocolDefinitionTest {
     void builder_shouldSetAllFields() {
         UUID id = UUID.randomUUID();
         OffsetDateTime now = OffsetDateTime.now();
-        Map<String, Object> definition = Map.of("resourceType", "PlanDefinition", "status", "active");
+        JsonNode definition = objectMapper.valueToTree(Map.of("resourceType", "PlanDefinition", "status", "active"));
 
         ProtocolDefinition pd = ProtocolDefinition.builder()
                 .id(id)

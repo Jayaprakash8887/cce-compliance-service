@@ -1,12 +1,12 @@
 package org.openphc.cce.compliance.domain.entity;
 
-import io.hypersistence.utils.hibernate.type.json.JsonType;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.Type;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
-import java.util.Map;
 import java.util.UUID;
 
 @Entity
@@ -36,9 +36,9 @@ public class AuditLog {
     @Column(name = "resource_id")
     private String resourceId;
 
-    @Type(JsonType.class)
+    @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
-    private Map<String, Object> details;
+    private JsonNode details;
 
     @Column(name = "ip_address")
     private String ipAddress;
