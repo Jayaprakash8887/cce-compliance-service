@@ -1,5 +1,5 @@
 # ===== Build output =====
-target/
+build/
 
 # ===== IDE files =====
 .idea/
@@ -15,10 +15,9 @@ target/
 *.swo
 *~
 
-# ===== Maven =====
-.mvn/wrapper/maven-wrapper.jar
-.mvn/timing.properties
-!.mvn/wrapper/maven-wrapper.properties
+# ===== Gradle =====
+.gradle/
+!gradle/wrapper/gradle-wrapper.jar
 
 # ===== OS files =====
 .DS_Store
