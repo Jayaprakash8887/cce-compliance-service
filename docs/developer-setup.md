@@ -322,23 +322,23 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 
 ```bash
 # All tests
-mvn test
+./gradlew test
 
 # Specific test class
-mvn test -Dtest=ComplianceEngineTest
+./gradlew test --tests ComplianceEngineTest
 
 # Integration tests only (requires Docker)
-mvn verify -Pit
+./gradlew integrationTest
 
 # With test coverage
-mvn test jacoco:report
+./gradlew test jacocoTestReport
 ```
 
 ## 9. IDE Setup
 
 ### 9.1 IntelliJ IDEA
 
-1. Import as Maven project
+1. Import as Gradle project
 2. Set JDK to 21
 3. Enable annotation processing (for Lombok if added later)
 4. Configure Spring Boot run configuration:
@@ -350,7 +350,7 @@ mvn test jacoco:report
 
 1. Install "Extension Pack for Java" and "Spring Boot Extension Pack"
 2. Open the project folder
-3. VS Code auto-detects the Maven project
+3. VS Code auto-detects the Gradle project
 4. Use the Spring Boot Dashboard to run/debug
 
 ## 10. Logging
