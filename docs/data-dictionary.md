@@ -327,12 +327,18 @@ Uses `GROUP BY` + `HAVING` to enforce **AND semantics** — all codeFilter paths
 SELECT protocol_definition_id, action_id
 FROM trigger_index
 WHERE resource_type = :resourceType
-  AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
-    OR (path = :path2 AND code_system = :sys2 AND code_value = :code2)
-    OR (path = :path3 AND code_system = :sys3 AND code_value = :code3))
+  AND CONCAT(path, '|', code_system, '|', code_value) IN (:codeTriples)
 GROUP BY protocol_definition_id, action_id
-HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
+HAVING COUNT(DISTINCT path) = (
+    SELECT COUNT(DISTINCT t2.path)
+    FROM trigger_index t2
+    WHERE t2.protocol_definition_id = trigger_index.protocol_definition_id
+      AND t2.action_id = trigger_index.action_id
+      AND t2.resource_type = trigger_index.resource_type
+);
 ```
+
+The `:codeTriples` parameter is a list of `path|system|code` strings extracted from the inbound event payload. The correlated subquery counts the **total** distinct paths each action requires, so actions with different numbers of codeFilters are correctly evaluated in a single query.
 
 ### Load-Time Validation
 

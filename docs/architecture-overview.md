@@ -138,11 +138,18 @@ Inverted index lookup on the `trigger_index` table using `GROUP BY` + `HAVING` t
 SELECT protocol_definition_id, action_id
 FROM trigger_index
 WHERE resource_type = :resourceType
-  AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
-    OR (path = :path2 AND code_system = :sys2 AND code_value = :code2))
+  AND CONCAT(path, '|', code_system, '|', code_value) IN (:codeTriples)
 GROUP BY protocol_definition_id, action_id
-HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
+HAVING COUNT(DISTINCT path) = (
+    SELECT COUNT(DISTINCT t2.path)
+    FROM trigger_index t2
+    WHERE t2.protocol_definition_id = trigger_index.protocol_definition_id
+      AND t2.action_id = trigger_index.action_id
+      AND t2.resource_type = trigger_index.resource_type
+);
 ```
+
+The `:codeTriples` parameter is a list of `path|system|code` strings extracted from the inbound event payload. The correlated subquery counts the **total** distinct paths each action requires, ensuring actions with different numbers of codeFilters are correctly evaluated in a single query.
 
 The index is built at protocol load time by decomposing each action's `TriggerDefinition.data[].codeFilter[]` into `(resourceType, path, codeSystem, codeValue, protocolDefinitionId, actionId)` rows.
 
@@ -308,7 +315,7 @@ At **protocol load time**, this trigger is decomposed into 4 `trigger_index` row
 
 When an inbound `Encounter` event arrives:
 
-1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks all 4 `(path, system, code)` tuples. `HAVING COUNT(DISTINCT path) = 4` ensures **all four** code filters match. If the payload is missing any one (e.g., no `serviceType` code), this step definition is eliminated.
+1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks the inbound event's `path|system|code` triples against all 4 indexed rows. The correlated `HAVING` clause compares the matched path count against this action's total path count (4). If the payload is missing any one (e.g., no `serviceType` code), this step definition is eliminated.
 2. **Tier 2 (F3)** — Since this step definition has a condition, the Tier 1 result is passed to Tier 2. The JSONLogic expression `{"==": [{"var": "class.code"}, "AMB"]}` is evaluated against the payload. Only if it returns `true` does this step definition produce a step instance.
 
 > **Key point:** A step instance is created for **every** step definition that survives its matching scenario. If 3 different step definitions match a single inbound event (e.g., one via Scenario 1, one via Scenario 2, one via Scenario 4), 3 separate step instances are created.
