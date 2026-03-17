@@ -349,11 +349,10 @@ Protocol completion is **automatic** — when all steps reach terminal states (`
 
 ## 7. Security
 
-- **Authentication:** OAuth 2.0 JWT Bearer tokens via Keycloak (`cce-production` realm)
-- **Authorization:** `compliance:read` (GET), `compliance:write` (POST/DELETE protocol-definitions), actuator endpoints are public
-- **Stateless** — no server-side sessions, CSRF disabled
+- **Authentication & Authorization:** Handled by the **CCE API Gateway**. This service does not implement security directly — all requests arrive pre-authenticated.
+- Actuator endpoints are publicly accessible for health checks and monitoring.
 
-See [API Reference](api-reference.md) for endpoint-level details.
+See [API Reference](api-reference.md) for endpoint details.
 
 ## 8. Observability
 
