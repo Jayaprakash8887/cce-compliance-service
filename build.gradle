@@ -25,7 +25,7 @@ repositories {
 }
 
 ext {
-    jsonLogicVersion = '1.1.0'
+    johnzonVersion = '2.0.2'
     hapiVersion = '7.6.0'
 }
 
@@ -47,7 +47,7 @@ dependencies {
     implementation "ca.uhn.hapi.fhir:hapi-fhir-structures-r4:${hapiVersion}"
 
     // Expression evaluation
-    implementation "io.github.jamsesso:json-logic-java:${jsonLogicVersion}"
+    implementation "org.apache.johnzon:johnzon-jsonlogic:${johnzonVersion}"
 
     // Observability
     implementation 'io.micrometer:micrometer-registry-prometheus'

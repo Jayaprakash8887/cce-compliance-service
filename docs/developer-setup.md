@@ -6,7 +6,7 @@
 |---|---|---|---|
 | **Java JDK** | 21 LTS | Yes | Build and runtime |
 | **Gradle** | 8.x | Yes | Build tool (via wrapper) |
-| **Docker** | 24+ | Recommended | Run PostgreSQL, Kafka, Keycloak locally |
+| **Docker** | 24+ | Recommended | Run PostgreSQL, Kafka locally |
 | **Docker Compose** | 2.x | Recommended | Orchestrate infrastructure |
 | **PostgreSQL** | 16+ | Yes | Primary database |
 | **Apache Kafka** | 3.x | Yes | Message broker |
@@ -65,15 +65,6 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
 
-  keycloak:
-    image: quay.io/keycloak/keycloak:23.0
-    command: start-dev
-    environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
-    ports:
-      - "8180:8080"
-
 volumes:
   pgdata:
 ```
@@ -131,13 +122,6 @@ All configuration can be overridden via environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker addresses |
-
-#### Security
-
-| Variable | Default | Description |
-|---|---|---|
-| `KEYCLOAK_ISSUER_URI` | `http://localhost:8180/realms/cce-production` | Keycloak realm issuer URI |
-| `KEYCLOAK_JWK_SET_URI` | `http://localhost:8180/realms/cce-production/protocol/openid-connect/certs` | JWKS endpoint |
 
 #### Server
 
@@ -267,7 +251,6 @@ docker run -d \
   -e DB_USERNAME=cce_compliance \
   -e DB_PASSWORD=changeme \
   -e KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092 \
-  -e KEYCLOAK_ISSUER_URI=http://host.docker.internal:8180/realms/cce-production \
   cce-compliance-service:latest
 ```
 
@@ -305,7 +288,6 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 |---|---|
 | `spring-boot-starter-test` | JUnit 5, Mockito, AssertJ |
 | `spring-kafka-test` | Kafka test utilities |
-| `spring-security-test` | Security context test helpers |
 
 ### 8.2 Test Categories
 
@@ -313,7 +295,7 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 |---|---|---|
 | Unit tests | `src/test/java` | Mocked dependencies |
 | Integration tests | `src/test/java` | Mocked dependencies (MockMvc, mocked repos/services) |
-| API tests | `src/test/java` | MockMvc + Spring Security test |
+| API tests | `src/test/java` | MockMvc |
 
 ### 8.3 Running Tests
 
@@ -383,7 +365,7 @@ LOGGING_LEVEL_ORG_OPENPHC_CCE_COMPLIANCE=DEBUG java -jar target/*.jar
 |---|---|---|
 | `Connection refused: localhost:5432` | PostgreSQL not running | Start PostgreSQL or Docker container |
 | `Connection refused: localhost:9092` | Kafka not running | Start Kafka or Docker container |
-| `401 Unauthorized` on API calls | Missing/invalid JWT token | Obtain token from Keycloak |
+| `401 Unauthorized` on API calls | Authentication handled by gateway | Ensure requests come through the API gateway |
 | `Flyway migration failed` | Schema conflicts | Check migration scripts, reset with `flyway:clean` (dev only) |
 | `Deserialization error` | Message format mismatch | Check producer serialization, trusted packages |
 | Build fails with `javac not found` | JDK not installed (JRE only) | Install JDK 21 or use Docker build |
@@ -416,30 +398,6 @@ kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
 
 ## 12. Security Notes for Development
 
-### 12.1 Disabling Security (Local Dev Only)
+Authentication and authorization are handled by the **CCE API Gateway**. This service does not implement security directly — all requests are expected to arrive pre-authenticated through the gateway.
 
-For local development without Keycloak, you can create a test security config that permits all requests. **Never deploy this to production.**
-
-### 12.2 Keycloak Setup
-
-1. Access Keycloak admin: `http://localhost:8180/admin` (admin/admin)
-2. Create realm: `cce-production`
-3. Create client: `compliance-service-client` (confidential)
-4. Create client scopes: `compliance:read`, `compliance:write`
-5. Create test user with appropriate scope assignments
-
-### 12.3 Obtaining a Token
-
-```bash
-# Get access token from Keycloak
-TOKEN=$(curl -s -X POST \
-  http://localhost:8180/realms/cce-production/protocol/openid-connect/token \
-  -d "grant_type=client_credentials" \
-  -d "client_id=compliance-service-client" \
-  -d "client_secret=<your-secret>" \
-  -d "scope=compliance:read compliance:write" \
-  | jq -r '.access_token')
-
-# Use token in API calls
-curl -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/protocol-definitions
-```
+For local development, requests can be made directly to the service without authentication.

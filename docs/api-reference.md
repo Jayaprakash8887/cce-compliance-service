@@ -2,26 +2,13 @@
 
 ## Overview
 
-The CCE Compliance Service exposes a RESTful API under the `/v1/` prefix. All endpoints require JWT authentication via Keycloak unless otherwise noted.
+The CCE Compliance Service exposes a RESTful API under the `/v1/` prefix. Authentication is handled by the **CCE API Gateway** — this service receives pre-authenticated requests.
 
 **Base URL:** `http://localhost:8080/v1`
 
 ## Authentication
 
-All API requests (except actuator endpoints) require a valid JWT Bearer token:
-
-```http
-Authorization: Bearer <jwt-access-token>
-```
-
-Tokens are obtained from Keycloak (`cce-production` realm).
-
-### Required Scopes
-
-| Scope | Grants Access To |
-|---|---|
-| `compliance:read` | All GET endpoints under `/v1/**` |
-| `compliance:write` | All POST/DELETE endpoints under `/v1/protocol-definitions/**` |
+Authentication and authorization are enforced at the API Gateway level. This service does not validate tokens directly. For local development, requests can be made without authentication.
 
 ---
 
@@ -33,7 +20,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`POST /v1/protocol-definitions`** — Load a new clinical protocol definition.
 
-**Required Scope:** `compliance:write`
 
 **Request Body:**
 
@@ -70,7 +56,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`GET /v1/protocol-definitions`** — List all active protocol definitions.
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK`
 
@@ -94,7 +79,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`GET /v1/protocol-definitions/{id}`**
 
-**Required Scope:** `compliance:read`
 
 **Path Parameters:**
 
@@ -116,7 +100,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`GET /v1/protocol-definitions/by-url?url={url}`**
 
-**Required Scope:** `compliance:read`
 
 **Query Parameters:**
 
@@ -132,7 +115,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`GET /v1/protocol-definitions/by-url-version?url={url}&version={version}`**
 
-**Required Scope:** `compliance:read`
 
 **Query Parameters:**
 
@@ -155,7 +137,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`POST /v1/protocol-definitions/{id}/retire`** — Retire a protocol definition and remove its trigger index.
 
-**Required Scope:** `compliance:write`
 
 **Path Parameters:**
 
@@ -176,7 +157,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`POST /v1/protocol-definitions/{id}/rebuild-index`** — Rebuild the trigger index from the stored definition.
 
-**Required Scope:** `compliance:write`
 
 **Path Parameters:**
 
@@ -194,7 +174,6 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **`DELETE /v1/protocol-definitions/{id}`** — Permanently delete a protocol definition.
 
-**Required Scope:** `compliance:write`
 
 **Path Parameters:**
 
@@ -227,7 +206,6 @@ Manage patient protocol enrollment lifecycle.
 
 **`GET /v1/protocol-instances/{id}`** — Get a protocol instance with its steps and deviations.
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK`
 
@@ -283,7 +261,6 @@ Query patient compliance data.
 
 **`GET /v1/patients/{patientId}/protocol-instances`** — List all protocols for a patient.
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK` — `List<ProtocolInstanceDto>` (without steps/deviations)
 
@@ -293,7 +270,6 @@ Query patient compliance data.
 
 **`GET /v1/patients/{patientId}/protocol-instances/active`** — List only active protocols.
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK` — `List<ProtocolInstanceDto>`
 
@@ -303,7 +279,6 @@ Query patient compliance data.
 
 **`GET /v1/patients/{patientId}/protocol-instances/{protocolInstanceId}`** — Get detailed protocol view with steps and deviations.
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK` — `ProtocolInstanceDto` (includes `steps[]` and `deviations[]`)
 
@@ -313,7 +288,6 @@ Query patient compliance data.
 
 **`GET /v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/steps`**
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK` — `List<StepInstanceDto>`
 
@@ -323,7 +297,6 @@ Query patient compliance data.
 
 **`GET /v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/deviations`**
 
-**Required Scope:** `compliance:read`
 
 **Response:** `200 OK` — `List<DeviationDto>`
 
@@ -337,7 +310,6 @@ Returns compliance deviations detected by the scheduler for this protocol instan
 
 **`GET /v1/patients/{patientId}/events?page={page}&size={size}`** — Paginated event log for a patient.
 
-**Required Scope:** `compliance:read`
 
 **Query Parameters:**
 

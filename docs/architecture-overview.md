@@ -10,7 +10,7 @@ graph TB
         INTEL["CCE Intelligence Service"]
         EHR["CCE Collector Service"]
         SCHEDULER["CCE Scheduler Service"]
-        KEYCLOAK["Keycloak IAM"]
+        GATEWAY["CCE API Gateway<br/>(Auth & Routing)"]
     end
 
     subgraph CCE Compliance Service
@@ -39,7 +39,7 @@ graph TB
     KAFKA_P -->|"cce.intelligence.triggers"| INTEL
     API --> ENGINE
     API --> DB
-    KEYCLOAK -->|"JWT Validation"| API
+    GATEWAY -->|"Authenticated Requests"| API
 
     classDef service fill:#4A90D9,stroke:#2C5F8A,color:white
     classDef external fill:#7B8D8E,stroke:#566573,color:white
@@ -47,12 +47,12 @@ graph TB
     classDef broker fill:#E67E22,stroke:#D35400,color:white
 
     class API,ENGINE,KAFKA_C,KAFKA_P,FHIR,EXPR service
-    class EHR,SCHEDULER,INTEL,KEYCLOAK external
+    class EHR,SCHEDULER,INTEL,GATEWAY external
     class DB data
     class KAFKA broker
 ```
 
-**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics, alerting (CCE Intelligence Service), or user authentication (Keycloak).
+**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics, alerting (CCE Intelligence Service), or authentication/authorization (handled by the API Gateway).
 
 ## 2. Technology Stack
 
@@ -63,11 +63,10 @@ graph TB
 | **Persistence** | Spring Data JPA / Hibernate | 6.x | ORM and data access |
 | **Database** | PostgreSQL | 16 | JSONB, GIN indexes |
 | **Migration** | Flyway | 10.x | Schema version management |
-| **JSONB Mapping** | Hypersistence Utils | 3.7.3 | JPA ↔ PostgreSQL JSONB |
+| **JSONB Mapping** | Hibernate 6 `@JdbcTypeCode(SqlTypes.JSON)` | 6.x | Native JPA ↔ PostgreSQL JSONB |
 | **Messaging** | Spring Kafka | 3.x | Event-driven messaging |
 | **FHIR** | FHIR Libraries | 4.0.1 | FHIR R4 PlanDefinition parsing & validation |
-| **Expression** | json-logic-java | 1.0.7 | Tier 2 conditional evaluation (JSONLogic) |
-| **Security** | Spring Security OAuth2 | 6.x | JWT authentication (Keycloak) |
+| **Expression** | Apache Johnzon JsonLogic | 2.0.2 | Tier 2 conditional evaluation (JSONLogic) |
 | **Metrics** | Micrometer + Prometheus | 1.x | Application metrics |
 | **Tracing** | OpenTelemetry | 1.x | Distributed tracing |
 | **Testing** | JUnit 5 + Mockito | 5.x / 5.x | Unit testing with mocked dependencies |
@@ -169,7 +168,7 @@ For each Tier 1 candidate, evaluates the trigger's `condition` expression.  **Tr
 | `protocol` | Protocol context (`protocolCanonical`, `status`) |
 
 **Supported languages:**
-- `text/jsonlogic` — via `io.github.jamsesso.jsonlogic.JsonLogic`
+- `text/jsonlogic` — via Apache Johnzon `JsonLogic`
 - `text/fhirpath` — via FHIR `IFhirPath` engine (R4)
 - Any other — rejected with `UnsupportedExpressionLanguageException`
 
