@@ -5,7 +5,7 @@
 | Tool | Version | Required | Purpose |
 |---|---|---|---|
 | **Java JDK** | 21 LTS | Yes | Build and runtime |
-| **Maven** | 3.9+ | Yes | Build tool |
+| **Gradle** | 8.x | Yes | Build tool (via wrapper) |
 | **Docker** | 24+ | Recommended | Run PostgreSQL, Kafka, Keycloak locally |
 | **Docker Compose** | 2.x | Recommended | Orchestrate infrastructure |
 | **PostgreSQL** | 16+ | Yes | Primary database |
@@ -22,10 +22,10 @@ git clone <repository-url>
 cd cce-compliance-service
 
 # Build (skip tests for fast iteration)
-mvn clean package -DskipTests
+./gradlew build -x test
 
 # Build with tests
-mvn clean verify
+./gradlew build
 ```
 
 ### 2.2 Start Infrastructure with Docker
@@ -89,14 +89,14 @@ docker compose ps
 ### 2.3 Run the Application
 
 ```bash
-# Using Maven
-mvn spring-boot:run
+# Using Gradle
+./gradlew bootRun
 
 # Or using the JAR
-java -jar target/compliance-service-0.1.0-SNAPSHOT.jar
+java -jar build/libs/compliance-service-0.1.0-SNAPSHOT.jar
 
 # With custom configuration
-DB_HOST=localhost DB_PORT=5432 java -jar target/compliance-service-0.1.0-SNAPSHOT.jar
+DB_HOST=localhost DB_PORT=5432 java -jar build/libs/compliance-service-0.1.0-SNAPSHOT.jar
 ```
 
 ### 2.4 Verify Health
@@ -210,7 +210,8 @@ cce-compliance-service/
 │               └── V1__initial_schema.sql
 ├── Dockerfile                          # Multi-stage Docker build
 ├── .gitignore
-└── pom.xml                             # Maven build configuration
+├── build.gradle                        # Gradle build configuration
+└── settings.gradle                     # Gradle settings
 ```
 
 ## 5. Database Setup
@@ -233,13 +234,13 @@ GRANT ALL ON SCHEMA public TO cce_compliance;
 Migrations are applied automatically on application startup. To run manually:
 
 ```bash
-# Using Maven Flyway plugin (if configured)
-mvn flyway:migrate -Dflyway.url=jdbc:postgresql://localhost:5432/cce_compliance \
-                   -Dflyway.user=cce_compliance \
-                   -Dflyway.password=changeme
+# Using Gradle Flyway plugin (if configured)
+./gradlew flywayMigrate -Dflyway.url=jdbc:postgresql://localhost:5432/cce_compliance \
+                        -Dflyway.user=cce_compliance \
+                        -Dflyway.password=changeme
 
 # Check migration status
-mvn flyway:info
+./gradlew flywayInfo
 ```
 
 ### 5.3 Current Migrations
@@ -274,8 +275,8 @@ docker run -d \
 
 ```
 Stage 1: Build (eclipse-temurin:21-jdk-alpine)
-  → Copy pom.xml, download dependencies
-  → Copy source, run mvn package
+  → Copy build.gradle, settings.gradle, download dependencies
+  → Copy source, run ./gradlew build
 
 Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
   → Create non-root user 'cce' (UID 1001)
@@ -289,13 +290,12 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 
 | Command | Purpose |
 |---|---|
-| `mvn clean compile` | Compile sources |
-| `mvn clean package -DskipTests` | Build JAR without tests |
-| `mvn clean verify` | Build + run all tests |
-| `mvn clean test` | Run unit tests only |
-| `mvn dependency:tree` | Show dependency tree |
-| `mvn versions:display-dependency-updates` | Check for dependency updates |
-| `mvn spring-boot:run` | Run application via Maven |
+| `./gradlew build -x test` | Build without tests |
+| `./gradlew build` | Build + run all tests |
+| `./gradlew test` | Run unit tests only |
+| `./gradlew dependencies` | Show dependency tree |
+| `./gradlew dependencyUpdates` | Check for dependency updates |
+| `./gradlew bootRun` | Run application via Gradle |
 
 ## 8. Testing
 
