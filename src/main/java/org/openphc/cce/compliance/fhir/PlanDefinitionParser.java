@@ -1,7 +1,6 @@
 package org.openphc.cce.compliance.fhir;
 
 import ca.uhn.fhir.context.FhirContext;
-import ca.uhn.fhir.parser.DataFormatException;
 import ca.uhn.fhir.parser.IParser;
 import org.hl7.fhir.r4.model.*;
 import org.openphc.cce.compliance.domain.entity.TriggerIndex;
