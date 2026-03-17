@@ -304,18 +304,15 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 | Dependency | Purpose |
 |---|---|
 | `spring-boot-starter-test` | JUnit 5, Mockito, AssertJ |
-| `spring-kafka-test` | Embedded Kafka for integration tests |
+| `spring-kafka-test` | Kafka test utilities |
 | `spring-security-test` | Security context test helpers |
-| `testcontainers-postgresql` | Real PostgreSQL in tests |
-| `testcontainers-kafka` | Real Kafka in tests |
-| `h2` | In-memory DB for unit tests |
 
 ### 8.2 Test Categories
 
 | Category | Location | Infrastructure |
 |---|---|---|
 | Unit tests | `src/test/java` | Mocked dependencies |
-| Integration tests | `src/test/java` | Testcontainers (PostgreSQL + Kafka) |
+| Integration tests | `src/test/java` | Mocked dependencies (MockMvc, mocked repos/services) |
 | API tests | `src/test/java` | MockMvc + Spring Security test |
 
 ### 8.3 Running Tests
@@ -326,9 +323,6 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 
 # Specific test class
 ./gradlew test --tests ComplianceEngineTest
-
-# Integration tests only (requires Docker)
-./gradlew integrationTest
 
 # With test coverage
 ./gradlew test jacocoTestReport
