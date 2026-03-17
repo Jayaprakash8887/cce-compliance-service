@@ -10,7 +10,7 @@ graph TB
         INTEL["CCE Intelligence Service"]
         EHR["CCE Collector Service"]
         SCHEDULER["CCE Scheduler Service"]
-        KEYCLOAK["Keycloak IAM"]
+        GATEWAY["CCE API Gateway<br/>(Auth & Routing)"]
     end
 
     subgraph CCE Compliance Service
@@ -39,7 +39,7 @@ graph TB
     KAFKA_P -->|"cce.intelligence.triggers"| INTEL
     API --> ENGINE
     API --> DB
-    KEYCLOAK -->|"JWT Validation"| API
+    GATEWAY -->|"Authenticated Requests"| API
 
     classDef service fill:#4A90D9,stroke:#2C5F8A,color:white
     classDef external fill:#7B8D8E,stroke:#566573,color:white
@@ -47,12 +47,12 @@ graph TB
     classDef broker fill:#E67E22,stroke:#D35400,color:white
 
     class API,ENGINE,KAFKA_C,KAFKA_P,FHIR,EXPR service
-    class EHR,SCHEDULER,INTEL,KEYCLOAK external
+    class EHR,SCHEDULER,INTEL,GATEWAY external
     class DB data
     class KAFKA broker
 ```
 
-**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics, alerting (CCE Intelligence Service), or user authentication (Keycloak).
+**This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics, alerting (CCE Intelligence Service), or authentication/authorization (handled by the API Gateway).
 
 ## 2. Technology Stack
 
@@ -63,11 +63,10 @@ graph TB
 | **Persistence** | Spring Data JPA / Hibernate | 6.x | ORM and data access |
 | **Database** | PostgreSQL | 16 | JSONB, GIN indexes |
 | **Migration** | Flyway | 10.x | Schema version management |
-| **JSONB Mapping** | Hypersistence Utils | 3.7.3 | JPA ↔ PostgreSQL JSONB |
+| **JSONB Mapping** | Hibernate 6 `@JdbcTypeCode(SqlTypes.JSON)` | 6.x | Native JPA ↔ PostgreSQL JSONB |
 | **Messaging** | Spring Kafka | 3.x | Event-driven messaging |
 | **FHIR** | FHIR Libraries | 4.0.1 | FHIR R4 PlanDefinition parsing & validation |
-| **Expression** | json-logic-java | 1.0.7 | Tier 2 conditional evaluation (JSONLogic) |
-| **Security** | Spring Security OAuth2 | 6.x | JWT authentication (Keycloak) |
+| **Expression** | Apache Johnzon JsonLogic | 2.0.2 | Tier 2 conditional evaluation (JSONLogic) |
 | **Metrics** | Micrometer + Prometheus | 1.x | Application metrics |
 | **Tracing** | OpenTelemetry | 1.x | Distributed tracing |
 | **Testing** | JUnit 5 + Mockito | 5.x / 5.x | Unit testing with mocked dependencies |
@@ -138,11 +137,18 @@ Inverted index lookup on the `trigger_index` table using `GROUP BY` + `HAVING` t
 SELECT protocol_definition_id, action_id
 FROM trigger_index
 WHERE resource_type = :resourceType
-  AND ((path = :path1 AND code_system = :sys1 AND code_value = :code1)
-    OR (path = :path2 AND code_system = :sys2 AND code_value = :code2))
+  AND CONCAT(path, '|', code_system, '|', code_value) IN (:codeTriples)
 GROUP BY protocol_definition_id, action_id
-HAVING COUNT(DISTINCT path) = :totalCodeFilterCount;
+HAVING COUNT(DISTINCT path) = (
+    SELECT COUNT(DISTINCT t2.path)
+    FROM trigger_index t2
+    WHERE t2.protocol_definition_id = trigger_index.protocol_definition_id
+      AND t2.action_id = trigger_index.action_id
+      AND t2.resource_type = trigger_index.resource_type
+);
 ```
+
+The `:codeTriples` parameter is a list of `path|system|code` strings extracted from the inbound event payload. The correlated subquery counts the **total** distinct paths each action requires, ensuring actions with different numbers of codeFilters are correctly evaluated in a single query.
 
 The index is built at protocol load time by decomposing each action's `TriggerDefinition.data[].codeFilter[]` into `(resourceType, path, codeSystem, codeValue, protocolDefinitionId, actionId)` rows.
 
@@ -162,7 +168,7 @@ For each Tier 1 candidate, evaluates the trigger's `condition` expression.  **Tr
 | `protocol` | Protocol context (`protocolCanonical`, `status`) |
 
 **Supported languages:**
-- `text/jsonlogic` — via `io.github.jamsesso.jsonlogic.JsonLogic`
+- `text/jsonlogic` — via Apache Johnzon `JsonLogic`
 - `text/fhirpath` — via FHIR `IFhirPath` engine (R4)
 - Any other — rejected with `UnsupportedExpressionLanguageException`
 
@@ -308,7 +314,7 @@ At **protocol load time**, this trigger is decomposed into 4 `trigger_index` row
 
 When an inbound `Encounter` event arrives:
 
-1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks all 4 `(path, system, code)` tuples. `HAVING COUNT(DISTINCT path) = 4` ensures **all four** code filters match. If the payload is missing any one (e.g., no `serviceType` code), this step definition is eliminated.
+1. **Tier 1 (F1+F2)** — The query matches on `resource_type = 'Encounter'` and checks the inbound event's `path|system|code` triples against all 4 indexed rows. The correlated `HAVING` clause compares the matched path count against this action's total path count (4). If the payload is missing any one (e.g., no `serviceType` code), this step definition is eliminated.
 2. **Tier 2 (F3)** — Since this step definition has a condition, the Tier 1 result is passed to Tier 2. The JSONLogic expression `{"==": [{"var": "class.code"}, "AMB"]}` is evaluated against the payload. Only if it returns `true` does this step definition produce a step instance.
 
 > **Key point:** A step instance is created for **every** step definition that survives its matching scenario. If 3 different step definitions match a single inbound event (e.g., one via Scenario 1, one via Scenario 2, one via Scenario 4), 3 separate step instances are created.
@@ -343,11 +349,10 @@ Protocol completion is **automatic** — when all steps reach terminal states (`
 
 ## 7. Security
 
-- **Authentication:** OAuth 2.0 JWT Bearer tokens via Keycloak (`cce-production` realm)
-- **Authorization:** `compliance:read` (GET), `compliance:write` (POST/DELETE protocol-definitions), actuator endpoints are public
-- **Stateless** — no server-side sessions, CSRF disabled
+- **Authentication & Authorization:** Handled by the **CCE API Gateway**. This service does not implement security directly — all requests arrive pre-authenticated.
+- Actuator endpoints are publicly accessible for health checks and monitoring.
 
-See [API Reference](api-reference.md) for endpoint-level details.
+See [API Reference](api-reference.md) for endpoint details.
 
 ## 8. Observability
 

@@ -1,0 +1,89 @@
+# ==============================================================================
+# CCE Compliance Service — Application Configuration
+# ==============================================================================
+
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: cce-compliance-service
+
+  # --- DataSource ---
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cce_compliance}
+    username: ${DB_USERNAME:cce_compliance}
+    password: ${DB_PASSWORD:changeme}
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:20}
+
+  # --- JPA / Hibernate ---
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  # --- Flyway ---
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+  # --- Kafka Consumer ---
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    listener:
+      ack-mode: manual
+      concurrency: 3
+    consumer:
+      group-id: cce-compliance-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      properties:
+        isolation.level: read_committed
+        max.poll.records: 100
+        max.poll.interval.ms: 300000
+    producer:
+      acks: all
+      retries: 3
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+
+# --- Custom Kafka Topics ---
+cce:
+  kafka:
+    topics:
+      inbound-events: cce.events.inbound
+      scheduler-triggers: cce.scheduler.triggers
+      intelligence-triggers: cce.intelligence.triggers
+
+# --- Actuator ---
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+      probes:
+        enabled: true
+  tracing:
+    sampling:
+      probability: 1.0
+  metrics:
+    tags:
+      application: cce-compliance-service
+
+# --- Logging ---
+logging:
+  level:
+    root: INFO
+    org.apache.kafka: WARN
+    org.hibernate: WARN
+    org.openphc.cce.compliance: INFO
