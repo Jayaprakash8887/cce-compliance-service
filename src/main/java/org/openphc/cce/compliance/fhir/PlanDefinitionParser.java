@@ -14,19 +14,18 @@ import java.util.UUID;
 @Component
 public class PlanDefinitionParser {
 
-    private final FhirContext fhirContext;
+    private final IParser fhirJsonParser;
 
     public PlanDefinitionParser(FhirContext fhirContext) {
-        this.fhirContext = fhirContext;
+        this.fhirJsonParser = fhirContext.newJsonParser();
+        this.fhirJsonParser.setParserErrorHandler(new ca.uhn.fhir.parser.StrictErrorHandler());
     }
 
     /**
      * Parse PlanDefinition JSON into a FHIR PlanDefinition resource.
      */
     public PlanDefinition parse(String json) {
-        IParser parser = fhirContext.newJsonParser();
-        parser.setParserErrorHandler(new ca.uhn.fhir.parser.StrictErrorHandler());
-        return parser.parseResource(PlanDefinition.class, json);
+        return fhirJsonParser.parseResource(PlanDefinition.class, json);
     }
 
     /**
