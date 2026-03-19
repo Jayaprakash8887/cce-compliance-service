@@ -1,6 +1,5 @@
 package org.openphc.cce.compliance.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.persistence.EntityNotFoundException;
@@ -11,12 +10,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.*;
-import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage;
@@ -40,13 +37,13 @@ class StepInstanceServiceTest {
     private StepInstanceRepository stepInstanceRepository;
 
     @Mock
-    private DeviationRepository deviationRepository;
-
-    @Mock
     private PlanDefinitionParser planDefinitionParser;
 
     @Mock
     private ProtocolInstanceService protocolInstanceService;
+
+    @Mock
+    private DeviationService deviationService;
 
     @Mock
     private AuditService auditService;
@@ -58,8 +55,8 @@ class StepInstanceServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        service = new StepInstanceService(stepInstanceRepository, deviationRepository,
-                planDefinitionParser, protocolInstanceService, auditService, objectMapper);
+        service = new StepInstanceService(stepInstanceRepository,
+                planDefinitionParser, protocolInstanceService, deviationService, auditService);
     }
 
     @Nested
@@ -303,7 +300,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.DUE, step.getState());
-            verify(deviationRepository, never()).save(any());
+            verify(deviationService, never()).recordDeviation(any(), any(), any(), anyMap());
         }
 
         @Test
@@ -325,9 +322,8 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.OVERDUE, step.getState());
 
-            ArgumentCaptor<Deviation> captor = ArgumentCaptor.forClass(Deviation.class);
-            verify(deviationRepository).save(captor.capture());
-            assertEquals(DeviationType.OVERDUE, captor.getValue().getDeviationType());
+            verify(deviationService).recordDeviation(
+                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.OVERDUE), anyMap());
         }
 
         @Test
@@ -349,10 +345,8 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.MISSED, step.getState());
 
-            ArgumentCaptor<Deviation> captor = ArgumentCaptor.forClass(Deviation.class);
-            verify(deviationRepository).save(captor.capture());
-            assertEquals(DeviationType.MISSED, captor.getValue().getDeviationType());
-            assertNotNull(captor.getValue().getMetadata());
+            verify(deviationService).recordDeviation(
+                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.MISSED), anyMap());
 
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }

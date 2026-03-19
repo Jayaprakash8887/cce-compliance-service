@@ -1,14 +1,11 @@
 package org.openphc.cce.compliance.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
-import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.CompletionStatus;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
 import org.openphc.cce.compliance.domain.enums.StepState;
-import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage;
@@ -17,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
@@ -38,24 +34,21 @@ public class StepInstanceService {
             StepState.PENDING, StepState.DUE, StepState.OVERDUE);
 
     private final StepInstanceRepository stepInstanceRepository;
-    private final DeviationRepository deviationRepository;
     private final PlanDefinitionParser planDefinitionParser;
     private final ProtocolInstanceService protocolInstanceService;
+    private final DeviationService deviationService;
     private final AuditService auditService;
-    private final ObjectMapper objectMapper;
 
     public StepInstanceService(StepInstanceRepository stepInstanceRepository,
-                               DeviationRepository deviationRepository,
                                PlanDefinitionParser planDefinitionParser,
                                ProtocolInstanceService protocolInstanceService,
-                               AuditService auditService,
-                               ObjectMapper objectMapper) {
+                               DeviationService deviationService,
+                               AuditService auditService) {
         this.stepInstanceRepository = stepInstanceRepository;
-        this.deviationRepository = deviationRepository;
         this.planDefinitionParser = planDefinitionParser;
         this.protocolInstanceService = protocolInstanceService;
+        this.deviationService = deviationService;
         this.auditService = auditService;
-        this.objectMapper = objectMapper;
     }
 
     /**
@@ -189,21 +182,12 @@ public class StepInstanceService {
     private void createDeviation(StepInstance step, DeviationType deviationType) {
         ProtocolInstance protocolInstance = step.getProtocolInstance();
 
-        Deviation deviation = Deviation.builder()
-                .protocolInstance(protocolInstance)
-                .stepInstance(step)
-                .deviationType(deviationType)
-                .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .metadata(objectMapper.valueToTree(Map.of(
-                        "actionId", step.getActionId(),
-                        "stepState", step.getState().name(),
-                        "protocolCanonical", protocolInstance.getProtocolCanonical())))
-                .build();
+        Map<String, Object> metadata = Map.of(
+                "actionId", step.getActionId(),
+                "stepState", step.getState().name(),
+                "protocolCanonical", protocolInstance.getProtocolCanonical());
 
-        deviationRepository.save(deviation);
-
-        log.info("Created {} deviation for step {} (protocolInstance={})",
-                deviationType, step.getId(), protocolInstance.getId());
+        deviationService.recordDeviation(protocolInstance, step, deviationType, metadata);
     }
 
     /**
