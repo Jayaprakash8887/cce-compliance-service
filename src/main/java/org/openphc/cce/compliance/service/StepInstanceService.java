@@ -14,9 +14,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,9 +30,7 @@ public class StepInstanceService {
 
     private static final Logger log = LoggerFactory.getLogger(StepInstanceService.class);
 
-    private static final Set<StepState> SKIPPABLE_STATES = Set.of(
-            StepState.PENDING, StepState.DUE, StepState.OVERDUE);
-    private static final Set<StepState> COMPLETABLE_STATES = Set.of(
+    private static final Set<StepState> ACTIONABLE_STATES = Set.of(
             StepState.PENDING, StepState.DUE, StepState.OVERDUE);
 
     private final StepInstanceRepository stepInstanceRepository;
@@ -81,17 +81,18 @@ public class StepInstanceService {
      * if the protocol is now complete.
      */
     public void completeStep(StepInstance step, UUID matchedEventId, String completedBySource) {
-        if (!COMPLETABLE_STATES.contains(step.getState())) {
+        if (!ACTIONABLE_STATES.contains(step.getState())) {
             throw new IllegalStateException(
                     "Cannot complete step in state " + step.getState() + ": " + step.getId());
         }
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        CompletionStatus completionStatus = determineCompletionStatus(step, now);
         step.setState(StepState.COMPLETED);
         step.setCompletedAt(now);
         step.setMatchedEventId(matchedEventId);
         step.setCompletedBySource(completedBySource);
-        step.setCompletionStatus(determineCompletionStatus(step, now));
+        step.setCompletionStatus(completionStatus);
 
         stepInstanceRepository.save(step);
 
@@ -117,7 +118,7 @@ public class StepInstanceService {
     public void skipStep(UUID stepId) {
         StepInstance step = findByIdOrThrow(stepId);
 
-        if (!SKIPPABLE_STATES.contains(step.getState())) {
+        if (!ACTIONABLE_STATES.contains(step.getState())) {
             throw new IllegalStateException(
                     "Cannot skip step in state " + step.getState() + ": " + stepId);
         }
@@ -182,10 +183,18 @@ public class StepInstanceService {
     private void createDeviation(StepInstance step, DeviationType deviationType) {
         ProtocolInstance protocolInstance = step.getProtocolInstance();
 
-        Map<String, Object> metadata = Map.of(
-                "actionId", step.getActionId(),
-                "stepState", step.getState().name(),
-                "protocolCanonical", protocolInstance.getProtocolCanonical());
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        metadata.put("transitionType", deviationType == DeviationType.OVERDUE
+                ? "DUE_TO_OVERDUE" : "OVERDUE_TO_MISSED");
+        if (deviationType == DeviationType.OVERDUE && step.getDueDate() != null) {
+            metadata.put("daysOverdue",
+                    Duration.between(step.getDueDate(), now).toDays());
+        }
+        if (deviationType == DeviationType.MISSED && step.getMissedDate() != null) {
+            metadata.put("daysPastMissedDate",
+                    Duration.between(step.getMissedDate(), now).toDays());
+        }
 
         deviationService.recordDeviation(protocolInstance, step, deviationType, metadata);
     }
@@ -258,7 +267,7 @@ public class StepInstanceService {
             case "wk" -> completedAt.plus(offsetAmount * 7, ChronoUnit.DAYS);
             case "mo" -> completedAt.plusMonths(offsetAmount);
             case "a" -> completedAt.plusYears(offsetAmount);
-            default -> completedAt.plus(offsetAmount, ChronoUnit.DAYS);
+            default -> throw new IllegalArgumentException("Unknown time unit: " + unit);
         };
     }
 

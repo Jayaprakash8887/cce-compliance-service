@@ -5,7 +5,6 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.Deviation;
@@ -16,8 +15,6 @@ import org.openphc.cce.compliance.domain.enums.DeviationType;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
 import org.openphc.cce.compliance.domain.enums.StepState;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
-import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
-import org.openphc.cce.compliance.kafka.producer.IntelligenceTriggerProducer;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -35,9 +32,6 @@ class DeviationServiceTest {
     private DeviationRepository deviationRepository;
 
     @Mock
-    private IntelligenceTriggerProducer intelligenceTriggerProducer;
-
-    @Mock
     private AuditService auditService;
 
     private DeviationService service;
@@ -47,12 +41,11 @@ class DeviationServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        service = new DeviationService(deviationRepository, intelligenceTriggerProducer,
-                auditService, objectMapper);
+        service = new DeviationService(deviationRepository, auditService, objectMapper);
     }
 
     @Test
-    void recordOverdueDeviation_persistsAndPublishes() {
+    void recordOverdueDeviation_persistsCorrectly() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
         StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
         Map<String, Object> metadata = Map.of("transitionType", "DUE_TO_OVERDUE");
@@ -70,15 +63,13 @@ class DeviationServiceTest {
         assertEquals(protocolInstance, result.getProtocolInstance());
         assertEquals(step, result.getStepInstance());
         assertNotNull(result.getDetectedAt());
-        assertNotNull(result.getIntelligenceEventId());
         assertNotNull(result.getMetadata());
 
-        // Verify deviation saved twice (initial + intelligenceEventId update)
-        verify(deviationRepository, times(2)).save(any(Deviation.class));
+        verify(deviationRepository).save(any(Deviation.class));
     }
 
     @Test
-    void recordMissedDeviation_publishesIntelligenceTrigger() {
+    void recordMissedDeviation_persistsCorrectly() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
         StepInstance step = buildStep(protocolInstance, StepState.MISSED);
         Map<String, Object> metadata = Map.of("transitionType", "OVERDUE_TO_MISSED");
@@ -89,22 +80,12 @@ class DeviationServiceTest {
             return d;
         });
 
-        service.recordDeviation(protocolInstance, step, DeviationType.MISSED, metadata);
+        Deviation result = service.recordDeviation(protocolInstance, step, DeviationType.MISSED, metadata);
 
-        ArgumentCaptor<IntelligenceTriggerEvent> captor = ArgumentCaptor.forClass(IntelligenceTriggerEvent.class);
-        verify(intelligenceTriggerProducer).publishTrigger(captor.capture());
-
-        IntelligenceTriggerEvent event = captor.getValue();
-        assertNotNull(event.getId());
-        assertEquals("cce.compliance.deviation.missed", event.getType());
-        assertEquals(protocolInstance.getPatientId(), event.getSubject());
-        assertEquals(protocolInstance.getId(), event.getProtocolInstanceId());
-        assertEquals(step.getId(), event.getStepInstanceId());
-        assertEquals("MISSED", event.getDeviationType());
-        assertEquals(step.getState().name(), event.getStepState());
-        assertEquals(step.getActionId(), event.getActionId());
-        assertEquals(protocolInstance.getProtocolCanonical(), event.getProtocolCanonical());
-        assertNotNull(event.getDetectedAt());
+        assertNotNull(result.getId());
+        assertEquals(DeviationType.MISSED, result.getDeviationType());
+        assertEquals(protocolInstance, result.getProtocolInstance());
+        assertEquals(step, result.getStepInstance());
     }
 
     @Test
@@ -139,14 +120,10 @@ class DeviationServiceTest {
 
         assertNotNull(result.getId());
         assertNull(result.getMetadata());
-
-        ArgumentCaptor<IntelligenceTriggerEvent> captor = ArgumentCaptor.forClass(IntelligenceTriggerEvent.class);
-        verify(intelligenceTriggerProducer).publishTrigger(captor.capture());
-        assertNull(captor.getValue().getMetadata());
     }
 
     @Test
-    void recordDeviation_storesIntelligenceEventIdOnDeviation() {
+    void recordDeviation_doesNotPublishIntelligenceTrigger() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
         StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
 
@@ -156,33 +133,10 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.recordDeviation(protocolInstance, step, DeviationType.OVERDUE,
-                Map.of("key", "value"));
+        Deviation result = service.recordDeviation(protocolInstance, step, DeviationType.OVERDUE, null);
 
-        // Verify the intelligenceEventId matches the event published
-        ArgumentCaptor<IntelligenceTriggerEvent> eventCaptor = ArgumentCaptor.forClass(IntelligenceTriggerEvent.class);
-        verify(intelligenceTriggerProducer).publishTrigger(eventCaptor.capture());
-
-        assertEquals(eventCaptor.getValue().getId(), result.getIntelligenceEventId());
-    }
-
-    @Test
-    void recordDeviation_eventContainsDeviationId() {
-        ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.MISSED);
-
-        when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
-            Deviation d = invocation.getArgument(0);
-            if (d.getId() == null) d.setId(UUID.randomUUID());
-            return d;
-        });
-
-        Deviation result = service.recordDeviation(protocolInstance, step, DeviationType.MISSED, null);
-
-        ArgumentCaptor<IntelligenceTriggerEvent> captor = ArgumentCaptor.forClass(IntelligenceTriggerEvent.class);
-        verify(intelligenceTriggerProducer).publishTrigger(captor.capture());
-
-        assertEquals(result.getId(), captor.getValue().getDeviationId());
+        // Intelligence trigger publishing is deferred to a future phase
+        assertNull(result.getIntelligenceEventId());
     }
 
     // --- Helpers ---

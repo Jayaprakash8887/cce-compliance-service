@@ -266,7 +266,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 
 ## 6. deviation
 
-Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. 
+Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. Intelligence trigger publishing upon deviation is reserved for a future phase (will be driven by PlanDefinition-level configuration).
 
 ### Columns
 
@@ -277,7 +277,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | `step_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `step_instance.id`. |
 | `deviation_type` | `VARCHAR` | **NOT NULL** | — | Type classification. See [DeviationType](#deviationtype). |
 | `detected_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Detection timestamp. |
-| `intelligence_event_id` | `UUID` | Yes | — | Links to the intelligence event published to Kafka. |
+| `intelligence_event_id` | `UUID` | Yes | — | Reserved for future phase: links to the intelligence event published to Kafka when PlanDefinition-driven intelligence triggers are enabled. `NULL` in release 1.0.0. |
 | `metadata` | `JSONB` | Yes | — | Deviation-specific details. See [JSONB: deviation metadata](#deviation--metadata). |
 
 ### Constraints & Indexes
@@ -553,12 +553,20 @@ The `definition` column stores the complete FHIR R4 PlanDefinition resource. Key
 
 ### deviation — `metadata`
 
-Content varies by deviation type:
+Contains deviation-type-specific timing information not captured by entity relationships:
+
+| Field | Type | Presence | Description |
+|-------|------|----------|-------------|
+| `transitionType` | String | Always | Scheduler transition that caused the deviation: `"DUE_TO_OVERDUE"` or `"OVERDUE_TO_MISSED"` |
+| `daysOverdue` | Long | OVERDUE only | Number of days past the step's `due_date` at detection time |
+| `daysPastMissedDate` | Long | MISSED only | Number of days past the step's `missed_date` at detection time |
+
+**Examples:**
 
 | Type | Example |
 |------|---------|
-| OVERDUE | `{"due_date": "2026-03-12T00:00:00Z", "tolerance_days": 3}` |
-| MISSED | `{"due_date": "2026-03-12T00:00:00Z", "overdue_date": "2026-03-15T00:00:00Z", "days_overdue": 14}` |
+| OVERDUE | `{"transitionType": "DUE_TO_OVERDUE", "daysOverdue": 3}` |
+| MISSED | `{"transitionType": "OVERDUE_TO_MISSED", "daysPastMissedDate": 0}` |
 
 
 ### event_log — `data`
