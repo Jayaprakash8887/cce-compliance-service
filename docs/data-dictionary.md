@@ -278,7 +278,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | `deviation_type` | `VARCHAR` | **NOT NULL** | — | Type classification. See [DeviationType](#deviationtype). |
 | `detected_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Detection timestamp. |
 | `intelligence_event_id` | `UUID` | Yes | — | Reserved for future phase: links to the intelligence event published to Kafka when PlanDefinition-driven intelligence triggers are enabled. `NULL` in release 1.0.0. |
-| `metadata` | `JSONB` | Yes | — | Deviation-specific details. See [JSONB: deviation metadata](#deviation--metadata). |
+| `metadata` | `JSONB` | Yes | — | Deviation-type-specific timing details. See [JSONB: deviation metadata](#deviation--metadata). |
 
 ### Constraints & Indexes
 
@@ -553,20 +553,19 @@ The `definition` column stores the complete FHIR R4 PlanDefinition resource. Key
 
 ### deviation — `metadata`
 
-Contains deviation-type-specific timing information not captured by entity relationships:
+Contains deviation-type-specific timing information. 
 
 | Field | Type | Presence | Description |
 |-------|------|----------|-------------|
-| `transitionType` | String | Always | Scheduler transition that caused the deviation: `"DUE_TO_OVERDUE"` or `"OVERDUE_TO_MISSED"` |
 | `daysOverdue` | Long | OVERDUE only | Number of days past the step's `due_date` at detection time |
 | `daysPastMissedDate` | Long | MISSED only | Number of days past the step's `missed_date` at detection time |
 
 **Examples:**
 
 | Type | Example |
-|------|---------|
-| OVERDUE | `{"transitionType": "DUE_TO_OVERDUE", "daysOverdue": 3}` |
-| MISSED | `{"transitionType": "OVERDUE_TO_MISSED", "daysPastMissedDate": 0}` |
+|------|---------||
+| OVERDUE | `{"daysOverdue": 3}` |
+| MISSED | `{"daysPastMissedDate": 0}` |
 
 
 ### event_log — `data`

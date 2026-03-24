@@ -323,7 +323,8 @@ class StepInstanceServiceTest {
             assertEquals(StepState.OVERDUE, step.getState());
 
             verify(deviationService).recordDeviation(
-                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.OVERDUE), anyMap());
+                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.OVERDUE),
+                    any());
         }
 
         @Test
@@ -346,7 +347,8 @@ class StepInstanceServiceTest {
             assertEquals(StepState.MISSED, step.getState());
 
             verify(deviationService).recordDeviation(
-                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.MISSED), anyMap());
+                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.MISSED),
+                    any());
 
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }

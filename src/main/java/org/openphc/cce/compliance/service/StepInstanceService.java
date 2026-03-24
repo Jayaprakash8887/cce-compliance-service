@@ -185,8 +185,6 @@ public class StepInstanceService {
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put("transitionType", deviationType == DeviationType.OVERDUE
-                ? "DUE_TO_OVERDUE" : "OVERDUE_TO_MISSED");
         if (deviationType == DeviationType.OVERDUE && step.getDueDate() != null) {
             metadata.put("daysOverdue",
                     Duration.between(step.getDueDate(), now).toDays());
@@ -196,7 +194,8 @@ public class StepInstanceService {
                     Duration.between(step.getMissedDate(), now).toDays());
         }
 
-        deviationService.recordDeviation(protocolInstance, step, deviationType, metadata);
+        deviationService.recordDeviation(protocolInstance, step, deviationType,
+                metadata.isEmpty() ? null : metadata);
     }
 
     /**

@@ -48,7 +48,7 @@ class DeviationServiceTest {
     void recordOverdueDeviation_persistsCorrectly() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
         StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
-        Map<String, Object> metadata = Map.of("transitionType", "DUE_TO_OVERDUE");
+        Map<String, Object> metadata = Map.of("daysOverdue", 3L);
 
         when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
             Deviation d = invocation.getArgument(0);
@@ -56,7 +56,8 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.recordDeviation(protocolInstance, step, DeviationType.OVERDUE, metadata);
+        Deviation result = service.recordDeviation(protocolInstance, step,
+                DeviationType.OVERDUE, metadata);
 
         assertNotNull(result.getId());
         assertEquals(DeviationType.OVERDUE, result.getDeviationType());
@@ -72,7 +73,7 @@ class DeviationServiceTest {
     void recordMissedDeviation_persistsCorrectly() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
         StepInstance step = buildStep(protocolInstance, StepState.MISSED);
-        Map<String, Object> metadata = Map.of("transitionType", "OVERDUE_TO_MISSED");
+        Map<String, Object> metadata = Map.of("daysPastMissedDate", 0L);
 
         when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
             Deviation d = invocation.getArgument(0);
@@ -80,7 +81,8 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.recordDeviation(protocolInstance, step, DeviationType.MISSED, metadata);
+        Deviation result = service.recordDeviation(protocolInstance, step,
+                DeviationType.MISSED, metadata);
 
         assertNotNull(result.getId());
         assertEquals(DeviationType.MISSED, result.getDeviationType());
