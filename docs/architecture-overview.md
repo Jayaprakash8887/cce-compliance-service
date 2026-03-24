@@ -332,14 +332,15 @@ stateDiagram-v2
     PENDING --> COMPLETED : completeStep()
     DUE --> COMPLETED : completeStep()
     OVERDUE --> COMPLETED : completeStep()
-    PENDING --> SKIPPED : skipStep()
-    DUE --> SKIPPED : skipStep()
+    OVERDUE --> SKIPPED : scheduler(OVERDUE_TO_MISSED) [could]
     COMPLETED --> [*]
     MISSED --> [*]
     SKIPPED --> [*]
 ```
 
 **Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE).
+
+**Required behavior:** Steps with `requiredBehavior=could` (from `PlanDefinition.action.requiredBehavior`) are optional. When the scheduler fires `OVERDUE_TO_MISSED` on a `could` step, it transitions to `SKIPPED` (no deviation) instead of `MISSED`. Additionally, when any step completes, preceding `could` steps still in actionable states are auto-skipped.
 
 ### 6.2 Protocol Instance
 

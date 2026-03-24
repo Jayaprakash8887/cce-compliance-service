@@ -197,9 +197,14 @@ sequenceDiagram
         DevSvc->>DB: INSERT INTO deviation
     else OVERDUE_TO_MISSED
         StepSvc->>StepSvc: Verify state == OVERDUE
-        StepSvc->>DB: UPDATE state = MISSED
-        StepSvc->>DevSvc: recordDeviation(MISSED)
-        DevSvc->>DB: INSERT INTO deviation
+        alt requiredBehavior == could
+            StepSvc->>DB: UPDATE state = SKIPPED
+            Note right of StepSvc: No deviation for optional steps
+        else requiredBehavior == must (or null)
+            StepSvc->>DB: UPDATE state = MISSED
+            StepSvc->>DevSvc: recordDeviation(MISSED)
+            DevSvc->>DB: INSERT INTO deviation
+        end
     end
 
     Consumer->>Kafka: Acknowledge offset

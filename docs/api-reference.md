@@ -302,7 +302,9 @@ Query patient compliance data.
 
 Returns compliance deviations detected by the scheduler for this protocol instance:
 - **`OVERDUE`** — step was not completed by its `overdueDate` (scheduler transition `DUE → OVERDUE`)
-- **`MISSED`** — step was not completed by its `missedDate` (scheduler transition `OVERDUE → MISSED`)
+- **`MISSED`** — step with `requiredBehavior=must` was not completed by its `missedDate` (scheduler transition `OVERDUE → MISSED`)
+
+> **Note:** Steps with `requiredBehavior=could` transition to `SKIPPED` instead of `MISSED` and do **not** produce a deviation.
 
 ---
 
@@ -430,6 +432,7 @@ All errors follow a consistent structure:
 | `completedBySource` | String | Yes | Source system that completed the step |
 | `completionStatus` | String | Yes | `on_time`, `early`, `late` |
 | `matchedEventId` | UUID | Yes | EventLog ID that triggered completion |
+| `requiredBehavior` | String | Yes | FHIR `requiredBehavior` code: `must`, `could`, `must-unless-documented` |
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |
 

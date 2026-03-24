@@ -76,7 +76,7 @@ class StepInstanceServiceTest {
             });
 
             StepInstance result = service.createStep(protocolInstance, "bp-check", 0,
-                    dueDate, overdueDate, missedDate);
+                    dueDate, overdueDate, missedDate, "must");
 
             assertNotNull(result.getId());
             assertEquals("bp-check", result.getActionId());
@@ -97,6 +97,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.PENDING, dueDate, dueDate.plusDays(3));
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             UUID eventId = UUID.randomUUID();
             service.completeStep(step, eventId, "test-source");
@@ -119,6 +120,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.DUE, pastDue, futureOverdue);
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -133,6 +135,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.OVERDUE, pastDue, pastOverdue);
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -143,14 +146,6 @@ class StepInstanceServiceTest {
         @Test
         void terminalState_throwsIllegalState() {
             StepInstance step = buildStep(StepState.COMPLETED, null, null);
-
-            assertThrows(IllegalStateException.class,
-                    () -> service.completeStep(step, UUID.randomUUID(), "src"));
-        }
-
-        @Test
-        void skippedState_throwsIllegalState() {
-            StepInstance step = buildStep(StepState.SKIPPED, null, null);
 
             assertThrows(IllegalStateException.class,
                     () -> service.completeStep(step, UUID.randomUUID(), "src"));
@@ -180,6 +175,7 @@ class StepInstanceServiceTest {
                 if (s.getId() == null) s.setId(UUID.randomUUID());
                 return s;
             });
+            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             // Mock parser to return action metadata with relatedActions
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
@@ -190,9 +186,9 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedActionInfo("bp-check", "after-end",
                                     BigDecimal.valueOf(7), "d")),
-                            null, null),
+                            null, null, "must"),
                     new PlanDefinitionParser.ActionMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), null, 3));
+                            List.of(), List.of(), null, 3, "must"));
             when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
@@ -213,69 +209,6 @@ class StepInstanceServiceTest {
             assertNotNull(dependentStep.getDueDate());
             assertNotNull(dependentStep.getOverdueDate());
             assertNotNull(dependentStep.getMissedDate());
-        }
-    }
-
-    @Nested
-    class SkipStep {
-
-        @Test
-        void pendingStep_skipsSuccessfully() {
-            UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.PENDING, null, null);
-            step.setId(stepId);
-
-            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
-            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-            service.skipStep(stepId);
-
-            assertEquals(StepState.SKIPPED, step.getState());
-            verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
-        }
-
-        @Test
-        void dueStep_skipsSuccessfully() {
-            UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.DUE, null, null);
-            step.setId(stepId);
-
-            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
-            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-            service.skipStep(stepId);
-
-            assertEquals(StepState.SKIPPED, step.getState());
-        }
-
-        @Test
-        void completedStep_throwsIllegalState() {
-            UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.COMPLETED, null, null);
-            step.setId(stepId);
-
-            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
-
-            assertThrows(IllegalStateException.class, () -> service.skipStep(stepId));
-        }
-
-        @Test
-        void missedStep_throwsIllegalState() {
-            UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.MISSED, null, null);
-            step.setId(stepId);
-
-            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
-
-            assertThrows(IllegalStateException.class, () -> service.skipStep(stepId));
-        }
-
-        @Test
-        void notFound_throwsEntityNotFound() {
-            UUID stepId = UUID.randomUUID();
-            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.empty());
-
-            assertThrows(EntityNotFoundException.class, () -> service.skipStep(stepId));
         }
     }
 
@@ -404,6 +337,195 @@ class StepInstanceServiceTest {
 
             assertThrows(EntityNotFoundException.class,
                     () -> service.applySchedulerTransition(trigger));
+        }
+    }
+
+    @Nested
+    class AutoSkipOptionalSteps {
+
+        @Test
+        void completingStep_autoSkipsPrecedingCouldSteps() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            StepInstance optionalStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("optional-lab")
+                    .repeatIndex(0)
+                    .state(StepState.DUE)
+                    .requiredBehavior("could")
+                    .build();
+
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("mandatory-visit")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(optionalStep, completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+
+            assertEquals(StepState.SKIPPED, optionalStep.getState());
+        }
+
+        @Test
+        void completingStep_doesNotSkipMustSteps() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            StepInstance mustStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("mandatory-lab")
+                    .repeatIndex(0)
+                    .state(StepState.DUE)
+                    .requiredBehavior("must")
+                    .build();
+
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("visit")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(mustStep, completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+
+            assertEquals(StepState.DUE, mustStep.getState());
+        }
+
+        @Test
+        void completingStep_doesNotSkipAlreadyTerminalCouldSteps() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            StepInstance completedOptional = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("optional-lab")
+                    .repeatIndex(0)
+                    .state(StepState.COMPLETED)
+                    .requiredBehavior("could")
+                    .build();
+
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("visit")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(completedOptional, completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+
+            assertEquals(StepState.COMPLETED, completedOptional.getState());
+        }
+    }
+
+    @Nested
+    class SchedulerSkipForOptionalSteps {
+
+        @Test
+        void overdueToMissed_couldStep_becomesSkipped_noDeviation() {
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            step.setId(stepId);
+            step.setRequiredBehavior("could");
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("OVERDUE_TO_MISSED")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.SKIPPED, step.getState());
+            verify(deviationService, never()).recordDeviation(any(), any(), any(), any());
+            verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
+        }
+
+        @Test
+        void overdueToMissed_mustStep_becomesMissed_withDeviation() {
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            step.setId(stepId);
+            step.setRequiredBehavior("must");
+            step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("OVERDUE_TO_MISSED")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.MISSED, step.getState());
+            verify(deviationService).recordDeviation(eq(step.getProtocolInstance()), eq(step),
+                    eq(DeviationType.MISSED), any());
+        }
+
+        @Test
+        void overdueToMissed_nullRequiredBehavior_becomesMissed() {
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            step.setId(stepId);
+            step.setRequiredBehavior(null);
+            step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("OVERDUE_TO_MISSED")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.MISSED, step.getState());
+            verify(deviationService).recordDeviation(any(), any(), eq(DeviationType.MISSED), any());
         }
     }
 

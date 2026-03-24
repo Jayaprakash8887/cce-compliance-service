@@ -56,7 +56,8 @@ public class StepInstanceService {
      */
     public StepInstance createStep(ProtocolInstance protocolInstance, String actionId,
                                    int repeatIndex, OffsetDateTime dueDate,
-                                   OffsetDateTime overdueDate, OffsetDateTime missedDate) {
+                                   OffsetDateTime overdueDate, OffsetDateTime missedDate,
+                                   String requiredBehavior) {
         StepInstance step = StepInstance.builder()
                 .protocolInstance(protocolInstance)
                 .actionId(actionId)
@@ -65,6 +66,7 @@ public class StepInstanceService {
                 .dueDate(dueDate)
                 .overdueDate(overdueDate)
                 .missedDate(missedDate)
+                .requiredBehavior(requiredBehavior)
                 .build();
 
         step = stepInstanceRepository.save(step);
@@ -108,25 +110,8 @@ public class StepInstanceService {
         // Progressive step instantiation
         createDependentSteps(step);
 
-        // Check if protocol is now complete
-        protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
-    }
-
-    /**
-     * Skip a step. Only allowed from PENDING, DUE, or OVERDUE states.
-     */
-    public void skipStep(UUID stepId) {
-        StepInstance step = findByIdOrThrow(stepId);
-
-        if (!ACTIONABLE_STATES.contains(step.getState())) {
-            throw new IllegalStateException(
-                    "Cannot skip step in state " + step.getState() + ": " + stepId);
-        }
-
-        step.setState(StepState.SKIPPED);
-        stepInstanceRepository.save(step);
-
-        log.info("Skipped step: stepId={}, actionId={}", stepId, step.getActionId());
+        // Auto-skip preceding optional (could) steps that are still actionable
+        autoSkipPrecedingOptionalSteps(step);
 
         // Check if protocol is now complete
         protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -146,9 +131,15 @@ public class StepInstanceService {
                 createDeviation(step, DeviationType.OVERDUE);
             }
             case "OVERDUE_TO_MISSED" -> {
-                applyTransition(step, StepState.OVERDUE, StepState.MISSED);
-                createDeviation(step, DeviationType.MISSED);
-                // Check if protocol is now complete (MISSED is terminal)
+                if ("could".equals(step.getRequiredBehavior())) {
+                    applyTransition(step, StepState.OVERDUE, StepState.SKIPPED);
+                    log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
+                            step.getId());
+                } else {
+                    applyTransition(step, StepState.OVERDUE, StepState.MISSED);
+                    createDeviation(step, DeviationType.MISSED);
+                }
+                // Check if protocol is now complete (MISSED/SKIPPED are terminal)
                 protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
             }
             default -> throw new IllegalArgumentException(
@@ -238,11 +229,38 @@ public class StepInstanceService {
                 missedDate = overdueDate.plusDays(targetAction.toleranceDays());
             }
 
+            String requiredBehavior = targetAction != null ? targetAction.requiredBehavior() : null;
+
             createStep(protocolInstance, relatedAction.actionId(),
-                    completedStep.getRepeatIndex(), dueDate, overdueDate, missedDate);
+                    completedStep.getRepeatIndex(), dueDate, overdueDate, missedDate,
+                    requiredBehavior);
 
             log.info("Progressive instantiation: created step {} due at {} (triggered by {})",
                     relatedAction.actionId(), dueDate, completedStep.getActionId());
+        }
+    }
+
+    /**
+     * Auto-skip preceding optional steps when a subsequent step completes.
+     * Steps with requiredBehavior=could that are still in PENDING/DUE/OVERDUE
+     * within the same protocol instance are automatically skipped.
+     */
+    private void autoSkipPrecedingOptionalSteps(StepInstance completedStep) {
+        List<StepInstance> siblings = stepInstanceRepository
+                .findByProtocolInstanceId(completedStep.getProtocolInstance().getId());
+
+        for (StepInstance sibling : siblings) {
+            if (sibling.getId().equals(completedStep.getId())) continue;
+            if (!"could".equals(sibling.getRequiredBehavior())) continue;
+            if (!ACTIONABLE_STATES.contains(sibling.getState())) continue;
+
+            sibling.setState(StepState.SKIPPED);
+            stepInstanceRepository.save(sibling);
+
+            log.info("Auto-skipped optional step {} (actionId={}, requiredBehavior=could) " +
+                            "due to completion of step {} (actionId={})",
+                    sibling.getId(), sibling.getActionId(),
+                    completedStep.getId(), completedStep.getActionId());
         }
     }
 

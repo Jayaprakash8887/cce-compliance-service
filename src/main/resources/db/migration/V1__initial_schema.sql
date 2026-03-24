@@ -61,6 +61,7 @@ CREATE TABLE step_instance (
     completed_by_source     VARCHAR,
     completion_status       VARCHAR,
     matched_event_id        UUID,
+    required_behavior       VARCHAR,
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
@@ -70,7 +71,9 @@ CREATE TABLE step_instance (
     CONSTRAINT step_instance_state_check
         CHECK (state IN ('PENDING', 'DUE', 'OVERDUE', 'MISSED', 'COMPLETED', 'SKIPPED')),
     CONSTRAINT step_instance_completion_status_check
-        CHECK (completion_status IN ('EARLY', 'ON_TIME', 'LATE'))
+        CHECK (completion_status IN ('EARLY', 'ON_TIME', 'LATE')),
+    CONSTRAINT step_instance_required_behavior_check
+        CHECK (required_behavior IN ('must', 'could', 'must-unless-documented'))
 );
 
 CREATE INDEX idx_step_instance_protocol ON step_instance (protocol_instance_id);

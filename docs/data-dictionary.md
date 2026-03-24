@@ -198,7 +198,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven) or `→ COMPLETED` (event-driven) or `→ SKIPPED` (manual). Repeating steps are differentiated by `repeat_index`.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`.
 
 ### Columns
 
@@ -216,6 +216,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completed_by_source` | `VARCHAR` | Yes | — | CloudEvent `source` that completed this step. |
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
 | `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
+| `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 
@@ -227,6 +228,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | Foreign Key | `step_instance_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Check | — | `state IN ('PENDING', 'DUE', 'OVERDUE', 'MISSED', 'COMPLETED', 'SKIPPED')` |
 | Check | — | `completion_status IN ('ON_TIME', 'EARLY', 'LATE')` |
+| Check | — | `required_behavior IN ('must', 'could', 'must-unless-documented')` |
 | B-tree Index | `idx_step_instance_protocol` | `protocol_instance_id` — All steps within a protocol instance. |
 | Partial B-tree | `idx_step_instance_state` | `state WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Active (non-terminal) steps. |
 | Partial B-tree | `idx_step_instance_due_date` | `due_date WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Scheduler time-based transitions. |
@@ -252,14 +254,14 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
          │   missed     │
          │   cutoff     ▼
          │         ┌──────────┐
-         │         │  MISSED  │
+         │         │  MISSED  │    (must)
          │         └──────────┘
-         │
-         │  manual skip
-         ▼
-    ┌──────────┐
-    │ SKIPPED  │
-    └──────────┘
+         │   missed     │
+         │   cutoff     │ (could)
+         │   (could)    ▼
+         │         ┌──────────┐
+         │         │ SKIPPED  │
+         │         └──────────┘
 ```
 
 ---
@@ -445,12 +447,12 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 
 | Value | Description | Transitions From | Transitions To |
 |-------|-------------|-----------------|----------------|
-| `PENDING` | Created but not yet due. | *(initial)* | `DUE`, `COMPLETED`, `SKIPPED` |
-| `DUE` | Due date reached. | `PENDING` | `OVERDUE`, `COMPLETED`, `SKIPPED` |
-| `OVERDUE` | Tolerance window expired. Deviation recorded. | `DUE` | `MISSED`, `COMPLETED`, `SKIPPED` |
-| `MISSED` | Missed cutoff exceeded. Deviation recorded. | `OVERDUE` | *(terminal)* |
+| `PENDING` | Created but not yet due. | *(initial)* | `DUE`, `COMPLETED` |
+| `DUE` | Due date reached. | `PENDING` | `OVERDUE`, `COMPLETED` |
+| `OVERDUE` | Tolerance window expired. Deviation recorded (for `must` steps). | `DUE` | `MISSED`, `SKIPPED`, `COMPLETED` |
+| `MISSED` | Missed cutoff exceeded. Deviation recorded. Only for `must` steps. | `OVERDUE` | *(terminal)* |
 | `COMPLETED` | Completed by a matching inbound event. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
-| `SKIPPED` | Manually skipped by an operator. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
+| `SKIPPED` | Optional step (`requiredBehavior=could`) auto-skipped by scheduler or when a subsequent step completes. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
 
 ### CompletionStatus
 
