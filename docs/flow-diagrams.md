@@ -267,7 +267,7 @@ flowchart TD
     RD --> D1["Create Deviation entity"]
     D1 --> D2["Set deviationType"]
     D2 --> D3["Set detectedAt = now()"]
-    D3 --> D4["Build metadata:<br/>transitionType, daysOverdue/daysPastMissedDate"]
+    D3 --> D4["Build metadata:<br/>daysOverdue/daysPastMissedDate"]
     D4 --> D5["Link to ProtocolInstance + StepInstance"]
     D5 --> D6["Persist to DB"]
     D6 --> D7["Audit: DEVIATION_DETECTED"]
