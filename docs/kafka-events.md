@@ -294,13 +294,16 @@ Published when a compliance deviation is detected (future phase).
 ```java
 @KafkaListener(topics = "${cce.kafka.topics.inbound-events}")
 public void consume(CloudEventMessage event, Acknowledgment ack) {
-    MDC.put("correlationId", event.getCorrelationId());
+    MDC.put("correlationId", event.getCorrelationid());
+    MDC.put("source", event.getSource());
+    MDC.put("eventType", event.getType());
+    MDC.put("subject", event.getSubject());
     try {
         complianceEngine.processInboundEvent(event);
         ack.acknowledge();  // Only on success
     } catch (Exception e) {
         log.error("Failed to process inbound event", e);
-        errorCounter.increment();
+        errorCounter.increment();  // cce.consumer.inbound.errors
         // DO NOT acknowledge — Kafka will redeliver
     } finally {
         MDC.clear();
@@ -320,12 +323,13 @@ public void consume(CloudEventMessage event, Acknowledgment ack) {
     }
 )
 public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
-    MDC.put("correlationId", trigger.getCorrelationId());
+    MDC.put("correlationId", trigger.getCorrelationid());
     try {
         stepInstanceService.applySchedulerTransition(trigger);
         ack.acknowledge();
     } catch (Exception e) {
         log.error("Failed to process scheduler trigger", e);
+        errorCounter.increment();  // cce.consumer.scheduler.errors
         // DO NOT acknowledge
     } finally {
         MDC.clear();

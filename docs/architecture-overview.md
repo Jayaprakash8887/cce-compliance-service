@@ -87,7 +87,7 @@ org.openphc.cce.compliance
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
 │   └── producer/                              # (reserved for future phase)
-├── service/                                   # 8 business logic classes
+├── service/                                   # 9 business logic services + 3 supporting records
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
 
@@ -364,8 +364,11 @@ See [API Reference](api-reference.md) for endpoint details.
 | `cce.events.processed` | Counter | Total inbound events processed |
 | `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
+| `cce.events.zero_match` | Counter | Events with zero trigger matches |
 | `cce.events.intelligence.published` | Counter | Intelligence trigger events published (future phase) |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
+| `cce.consumer.inbound.errors` | Counter | Inbound event consumer processing errors |
+| `cce.consumer.scheduler.errors` | Counter | Scheduler trigger consumer processing errors |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |
 
 ### 8.2 Logging & Tracing

@@ -157,6 +157,17 @@ public class StepInstanceService {
         return stepInstanceRepository.findByProtocolInstanceId(protocolInstanceId);
     }
 
+    /**
+     * Find the first actionable step (PENDING, DUE, OVERDUE) for a given protocol instance and actionId.
+     * Returns null if no actionable step exists.
+     */
+    @Transactional(readOnly = true)
+    public StepInstance findActionableStep(UUID protocolInstanceId, String actionId) {
+        List<StepInstance> steps = stepInstanceRepository
+                .findByProtocolInstanceIdAndActionIdAndStateIn(protocolInstanceId, actionId, ACTIONABLE_STATES);
+        return steps.isEmpty() ? null : steps.get(0);
+    }
+
     private void applyTransition(StepInstance step, StepState expectedState, StepState newState) {
         if (step.getState() != expectedState) {
             log.warn("Step {} is in state {} — expected {} for transition to {}. Skipping.",
@@ -211,10 +222,16 @@ public class StepInstanceService {
             return;
         }
 
-        OffsetDateTime completedAt = completedStep.getCompletedAt();
-
         for (PlanDefinitionParser.RelatedActionInfo relatedAction : completedActionMetadata.relatedActions()) {
-            OffsetDateTime dueDate = calculateDueDate(completedAt, relatedAction);
+            // after-start: offset from when predecessor became active (dueDate)
+            // after-end (default): offset from when predecessor completed (completedAt)
+            OffsetDateTime baseTime = "after-start".equals(relatedAction.relationship())
+                    ? completedStep.getDueDate()
+                    : completedStep.getCompletedAt();
+            if (baseTime == null) {
+                baseTime = completedStep.getCompletedAt();
+            }
+            OffsetDateTime dueDate = calculateDueDate(baseTime, relatedAction);
 
             // Find the target action's timing for overdue/missed dates
             var targetAction = actions.stream()
@@ -222,21 +239,42 @@ public class StepInstanceService {
                     .findFirst()
                     .orElse(null);
 
-            OffsetDateTime overdueDate = null;
-            OffsetDateTime missedDate = null;
-            if (targetAction != null && targetAction.toleranceDays() != null) {
-                overdueDate = dueDate.plusDays(targetAction.toleranceDays());
-                missedDate = overdueDate.plusDays(targetAction.toleranceDays());
-            }
-
             String requiredBehavior = targetAction != null ? targetAction.requiredBehavior() : null;
 
-            createStep(protocolInstance, relatedAction.actionId(),
-                    completedStep.getRepeatIndex(), dueDate, overdueDate, missedDate,
-                    requiredBehavior);
+            // Create step instances — if timing specifies recurring, create N instances
+            int repeatCount = 1;
+            java.math.BigDecimal repeatPeriod = null;
+            String repeatPeriodUnit = null;
+            if (targetAction != null && targetAction.timing() != null) {
+                PlanDefinitionParser.TimingInfo timing = targetAction.timing();
+                if (timing.count() != null && timing.count() > 1) {
+                    repeatCount = timing.count();
+                    repeatPeriod = timing.period();
+                    repeatPeriodUnit = timing.periodUnit();
+                }
+            }
 
-            log.info("Progressive instantiation: created step {} due at {} (triggered by {})",
-                    relatedAction.actionId(), dueDate, completedStep.getActionId());
+            for (int i = 0; i < repeatCount; i++) {
+                OffsetDateTime instanceDueDate = dueDate;
+                if (i > 0 && repeatPeriod != null && repeatPeriodUnit != null) {
+                    instanceDueDate = addOffset(dueDate, repeatPeriod.longValue() * i, repeatPeriodUnit);
+                }
+
+                OffsetDateTime instanceOverdueDate = null;
+                OffsetDateTime instanceMissedDate = null;
+                if (targetAction != null && targetAction.toleranceDays() != null) {
+                    instanceOverdueDate = instanceDueDate.plusDays(targetAction.toleranceDays());
+                    instanceMissedDate = instanceOverdueDate.plusDays(targetAction.toleranceDays());
+                }
+
+                createStep(protocolInstance, relatedAction.actionId(),
+                        i, instanceDueDate, instanceOverdueDate, instanceMissedDate,
+                        requiredBehavior);
+
+                log.info("Progressive instantiation: created step {} (repeat {}/{}) due at {} (triggered by {}, relationship={})",
+                        relatedAction.actionId(), i, repeatCount, instanceDueDate,
+                        completedStep.getActionId(), relatedAction.relationship());
+            }
         }
     }
 
@@ -264,26 +302,30 @@ public class StepInstanceService {
         }
     }
 
-    private OffsetDateTime calculateDueDate(OffsetDateTime completedAt,
+    private OffsetDateTime calculateDueDate(OffsetDateTime baseTime,
                                             PlanDefinitionParser.RelatedActionInfo relatedAction) {
         if (relatedAction.offsetValue() == null) {
-            return completedAt;
+            return baseTime;
         }
 
         long offsetAmount = relatedAction.offsetValue().longValue();
         String unit = relatedAction.offsetUnit();
 
         if (unit == null) {
-            return completedAt;
+            return baseTime;
         }
 
+        return addOffset(baseTime, offsetAmount, unit);
+    }
+
+    private OffsetDateTime addOffset(OffsetDateTime base, long amount, String unit) {
         return switch (unit) {
-            case "d" -> completedAt.plus(offsetAmount, ChronoUnit.DAYS);
-            case "h" -> completedAt.plus(offsetAmount, ChronoUnit.HOURS);
-            case "min" -> completedAt.plus(offsetAmount, ChronoUnit.MINUTES);
-            case "wk" -> completedAt.plus(offsetAmount * 7, ChronoUnit.DAYS);
-            case "mo" -> completedAt.plusMonths(offsetAmount);
-            case "a" -> completedAt.plusYears(offsetAmount);
+            case "d" -> base.plus(amount, ChronoUnit.DAYS);
+            case "h" -> base.plus(amount, ChronoUnit.HOURS);
+            case "min" -> base.plus(amount, ChronoUnit.MINUTES);
+            case "wk" -> base.plus(amount * 7, ChronoUnit.DAYS);
+            case "mo" -> base.plusMonths(amount);
+            case "a" -> base.plusYears(amount);
             default -> throw new IllegalArgumentException("Unknown time unit: " + unit);
         };
     }

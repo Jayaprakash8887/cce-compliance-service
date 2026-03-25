@@ -66,6 +66,7 @@ erDiagram
         varchar completed_by_source
         varchar completion_status
         uuid matched_event_id
+        varchar required_behavior
         timestamptz created_at
         timestamptz updated_at
     }

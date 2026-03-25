@@ -93,8 +93,10 @@ sequenceDiagram
                 Parser-->>Engine: dependent actions
                 loop For each dependent action
                     Engine->>Parser: computeRelatedActionOffset(action, actionId)
-                    Engine->>StepInst: createStep(protocol, depActionId, dueDate)
-                    StepInst->>DB: INSERT INTO step_instance (state=PENDING)
+                    Note over StepInst: Relationship determines base time:<br/>after-end → completedAt, after-start → dueDate
+                    Note over StepInst: If TimingInfo.count > 1 → create N recurring<br/>instances with staggered due dates
+                    Engine->>StepInst: createDependentSteps(protocol, depAction, base, offset)
+                    StepInst->>DB: INSERT INTO step_instance(s) (state=PENDING)
                 end
 
                 Engine->>EventLog: updateMatchResult(MATCHED)
