@@ -172,6 +172,8 @@ sequenceDiagram
 
 ## 3. Scheduler-Driven State Transitions
 
+> The Scheduler Service polls `step_instance` for time-threshold crossings and publishes trigger messages to Kafka. See [Architecture Overview §1.1](architecture-overview.md#11-scheduler-service-contract) for the polling query, lease mechanism, and ownership boundaries. The diagram below shows the Compliance Service side — receiving and processing those triggers.
+
 ```mermaid
 sequenceDiagram
     autonumber
