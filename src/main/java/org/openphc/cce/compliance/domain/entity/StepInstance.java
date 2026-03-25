@@ -58,6 +58,9 @@ public class StepInstance {
     @Column(name = "matched_event_id")
     private UUID matchedEventId;
 
+    @Column(name = "required_behavior")
+    private String requiredBehavior;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

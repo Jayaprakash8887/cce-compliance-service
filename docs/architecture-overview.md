@@ -2,7 +2,7 @@
 
 ## 1. System Context
 
-The **CCE Compliance Service** is a core microservice within the **Clinical Compliance Engine (CCE)** platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps, detecting deviations, and publishing intelligence triggers for downstream analytics.
+The **CCE Compliance Service** is a core microservice within the **Clinical Compliance Engine (CCE)** platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps, and detecting deviations. Intelligence trigger publishing to downstream analytics is reserved for a future phase (will be driven by PlanDefinition-level configuration).
 
 ```mermaid
 graph TB
@@ -86,7 +86,7 @@ org.openphc.cce.compliance
 │   ├── config/                                # Consumer/Producer factories, topic bindings
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
-│   └── producer/                              # IntelligenceTriggerProducer
+│   └── producer/                              # (reserved for future phase)
 ├── service/                                   # 8 business logic classes
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
@@ -114,7 +114,7 @@ flowchart TD
     S5["Step 5: Two-Tier Matching<br/>(see §5.4 for detailed flow)"] --> S6
 
     S6{"Result Classification"}
-    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Intelligence rule evaluation"]
+    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation"]
     S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
 ```
 
@@ -332,14 +332,15 @@ stateDiagram-v2
     PENDING --> COMPLETED : completeStep()
     DUE --> COMPLETED : completeStep()
     OVERDUE --> COMPLETED : completeStep()
-    PENDING --> SKIPPED : skipStep()
-    DUE --> SKIPPED : skipStep()
+    OVERDUE --> SKIPPED : scheduler(OVERDUE_TO_MISSED) [could]
     COMPLETED --> [*]
     MISSED --> [*]
     SKIPPED --> [*]
 ```
 
 **Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE).
+
+**Required behavior:** Steps with `requiredBehavior=could` (from `PlanDefinition.action.requiredBehavior`) are optional. When the scheduler fires `OVERDUE_TO_MISSED` on a `could` step, it transitions to `SKIPPED` (no deviation) instead of `MISSED`. Additionally, when any step completes, preceding `could` steps still in actionable states are auto-skipped.
 
 ### 6.2 Protocol Instance
 
@@ -363,6 +364,7 @@ See [API Reference](api-reference.md) for endpoint details.
 | `cce.events.processed` | Counter | Total inbound events processed |
 | `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
+| `cce.events.intelligence.published` | Counter | Intelligence trigger events published (future phase) |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |
 

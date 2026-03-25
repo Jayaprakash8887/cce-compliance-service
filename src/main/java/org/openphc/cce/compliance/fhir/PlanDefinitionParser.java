@@ -177,13 +177,19 @@ public class PlanDefinitionParser {
         // Extract tolerance-days extension
         Integer toleranceDays = extractToleranceDays(action);
 
+        // Extract requiredBehavior
+        String requiredBehavior = action.hasRequiredBehavior()
+                ? action.getRequiredBehavior().toCode()
+                : null;
+
         return new ActionMetadata(
                 action.getId(),
                 action.getTitle(),
                 triggers,
                 relatedActions,
                 timingInfo,
-                toleranceDays
+                toleranceDays,
+                requiredBehavior
         );
     }
 
@@ -231,7 +237,8 @@ public class PlanDefinitionParser {
             List<TriggerInfo> triggers,
             List<RelatedActionInfo> relatedActions,
             TimingInfo timing,
-            Integer toleranceDays
+            Integer toleranceDays,
+            String requiredBehavior
     ) {}
 
     public record TriggerInfo(

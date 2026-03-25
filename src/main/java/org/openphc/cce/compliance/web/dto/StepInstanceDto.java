@@ -23,4 +23,5 @@ public class StepInstanceDto {
     private String completedBySource;
     private String completionStatus;
     private UUID matchedEventId;
+    private String requiredBehavior;
 }

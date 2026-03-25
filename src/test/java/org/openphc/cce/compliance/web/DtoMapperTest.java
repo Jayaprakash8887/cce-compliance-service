@@ -150,6 +150,7 @@ class DtoMapperTest {
                 .completedBySource("urn:source:lab-system")
                 .completionStatus(CompletionStatus.ON_TIME)
                 .matchedEventId(matchedEventId)
+                .requiredBehavior("must")
                 .build();
 
         StepInstanceDto dto = mapper.toDto(entity);
@@ -165,6 +166,7 @@ class DtoMapperTest {
         assertEquals("urn:source:lab-system", dto.getCompletedBySource());
         assertEquals("ON_TIME", dto.getCompletionStatus());
         assertEquals(matchedEventId, dto.getMatchedEventId());
+        assertEquals("must", dto.getRequiredBehavior());
     }
 
     @Test
@@ -183,6 +185,7 @@ class DtoMapperTest {
         assertNull(dto.getCompletedAt());
         assertNull(dto.getCompletionStatus());
         assertNull(dto.getMatchedEventId());
+        assertNull(dto.getRequiredBehavior());
     }
 
     @Test

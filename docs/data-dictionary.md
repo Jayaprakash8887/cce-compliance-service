@@ -198,7 +198,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven) or `→ COMPLETED` (event-driven) or `→ SKIPPED` (manual). Repeating steps are differentiated by `repeat_index`.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`.
 
 ### Columns
 
@@ -216,6 +216,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completed_by_source` | `VARCHAR` | Yes | — | CloudEvent `source` that completed this step. |
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
 | `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
+| `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 
@@ -227,6 +228,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | Foreign Key | `step_instance_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Check | — | `state IN ('PENDING', 'DUE', 'OVERDUE', 'MISSED', 'COMPLETED', 'SKIPPED')` |
 | Check | — | `completion_status IN ('ON_TIME', 'EARLY', 'LATE')` |
+| Check | — | `required_behavior IN ('must', 'could', 'must-unless-documented')` |
 | B-tree Index | `idx_step_instance_protocol` | `protocol_instance_id` — All steps within a protocol instance. |
 | Partial B-tree | `idx_step_instance_state` | `state WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Active (non-terminal) steps. |
 | Partial B-tree | `idx_step_instance_due_date` | `due_date WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Scheduler time-based transitions. |
@@ -252,21 +254,21 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
          │   missed     │
          │   cutoff     ▼
          │         ┌──────────┐
-         │         │  MISSED  │
+         │         │  MISSED  │    (must)
          │         └──────────┘
-         │
-         │  manual skip
-         ▼
-    ┌──────────┐
-    │ SKIPPED  │
-    └──────────┘
+         │   missed     │
+         │   cutoff     │ (could)
+         │   (could)    ▼
+         │         ┌──────────┐
+         │         │ SKIPPED  │
+         │         └──────────┘
 ```
 
 ---
 
 ## 6. deviation
 
-Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. 
+Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. Intelligence trigger publishing upon deviation is reserved for a future phase (will be driven by PlanDefinition-level configuration).
 
 ### Columns
 
@@ -277,8 +279,8 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | `step_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `step_instance.id`. |
 | `deviation_type` | `VARCHAR` | **NOT NULL** | — | Type classification. See [DeviationType](#deviationtype). |
 | `detected_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Detection timestamp. |
-| `intelligence_event_id` | `UUID` | Yes | — | Links to the intelligence event published to Kafka. |
-| `metadata` | `JSONB` | Yes | — | Deviation-specific details. See [JSONB: deviation metadata](#deviation--metadata). |
+| `intelligence_event_id` | `UUID` | Yes | — | Reserved for future phase: links to the intelligence event published to Kafka when PlanDefinition-driven intelligence triggers are enabled. `NULL` in release 1.0.0. |
+| `metadata` | `JSONB` | Yes | — | Deviation-type-specific timing details. See [JSONB: deviation metadata](#deviation--metadata). |
 
 ### Constraints & Indexes
 
@@ -445,12 +447,12 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 
 | Value | Description | Transitions From | Transitions To |
 |-------|-------------|-----------------|----------------|
-| `PENDING` | Created but not yet due. | *(initial)* | `DUE`, `COMPLETED`, `SKIPPED` |
-| `DUE` | Due date reached. | `PENDING` | `OVERDUE`, `COMPLETED`, `SKIPPED` |
-| `OVERDUE` | Tolerance window expired. Deviation recorded. | `DUE` | `MISSED`, `COMPLETED`, `SKIPPED` |
-| `MISSED` | Missed cutoff exceeded. Deviation recorded. | `OVERDUE` | *(terminal)* |
+| `PENDING` | Created but not yet due. | *(initial)* | `DUE`, `COMPLETED` |
+| `DUE` | Due date reached. | `PENDING` | `OVERDUE`, `COMPLETED` |
+| `OVERDUE` | Tolerance window expired. Deviation recorded (for `must` steps). | `DUE` | `MISSED`, `SKIPPED`, `COMPLETED` |
+| `MISSED` | Missed cutoff exceeded. Deviation recorded. Only for `must` steps. | `OVERDUE` | *(terminal)* |
 | `COMPLETED` | Completed by a matching inbound event. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
-| `SKIPPED` | Manually skipped by an operator. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
+| `SKIPPED` | Optional step (`requiredBehavior=could`) auto-skipped by scheduler or when a subsequent step completes. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
 
 ### CompletionStatus
 
@@ -553,12 +555,19 @@ The `definition` column stores the complete FHIR R4 PlanDefinition resource. Key
 
 ### deviation — `metadata`
 
-Content varies by deviation type:
+Contains deviation-type-specific timing information. 
+
+| Field | Type | Presence | Description |
+|-------|------|----------|-------------|
+| `daysOverdue` | Long | OVERDUE only | Number of days past the step's `due_date` at detection time |
+| `daysPastMissedDate` | Long | MISSED only | Number of days past the step's `missed_date` at detection time |
+
+**Examples:**
 
 | Type | Example |
-|------|---------|
-| OVERDUE | `{"due_date": "2026-03-12T00:00:00Z", "tolerance_days": 3}` |
-| MISSED | `{"due_date": "2026-03-12T00:00:00Z", "overdue_date": "2026-03-15T00:00:00Z", "days_overdue": 14}` |
+|------|---------||
+| OVERDUE | `{"daysOverdue": 3}` |
+| MISSED | `{"daysPastMissedDate": 0}` |
 
 
 ### event_log — `data`

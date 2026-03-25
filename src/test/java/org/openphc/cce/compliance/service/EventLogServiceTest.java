@@ -73,7 +73,7 @@ class EventLogServiceTest {
 
         when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        EventLog result = eventLogService.recordEvent(message, ProcessingStatus.ZERO_MATCH);
+        eventLogService.recordEvent(message, ProcessingStatus.ZERO_MATCH);
 
         ArgumentCaptor<EventLog> captor = ArgumentCaptor.forClass(EventLog.class);
         verify(eventLogRepository).save(captor.capture());
@@ -139,7 +139,7 @@ class EventLogServiceTest {
 
         when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
 
-        EventLog result = eventLogService.recordEvent(message, ProcessingStatus.ZERO_MATCH);
+        eventLogService.recordEvent(message, ProcessingStatus.ZERO_MATCH);
 
         ArgumentCaptor<EventLog> captor = ArgumentCaptor.forClass(EventLog.class);
         verify(eventLogRepository).save(captor.capture());

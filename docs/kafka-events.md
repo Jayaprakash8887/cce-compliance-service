@@ -14,7 +14,7 @@ graph LR
     subgraph CCE Compliance Service
         C1["InboundEventConsumer"]
         C2["SchedulerTriggerConsumer"]
-        P1["IntelligenceTriggerProducer"]
+        P1["IntelligenceTriggerProducer<br/>(future phase)"]
     end
 
     subgraph Outbound Topics
@@ -42,7 +42,7 @@ graph LR
 |---|---|---|---|
 | `cce.events.inbound` | Inbound | `cce-compliance-service` | Clinical events from CCE Collector Service |
 | `cce.scheduler.triggers` | Inbound | `cce-compliance-service` | Timer-based state transitions |
-| `cce.intelligence.triggers` | Outbound | — | Deviation alerts for analytics |
+| `cce.intelligence.triggers` | Outbound | — | Deviation alerts for analytics (**future phase** — not published in 1.0.0) |
 
 ## 3. Consumer Configuration
 
@@ -235,7 +235,9 @@ graph LR
 
 ### 5.3 IntelligenceTriggerEvent (Outbound — `cce.intelligence.triggers`)
 
-Published when a compliance deviation is detected.
+> **Future Phase:** Intelligence trigger publishing upon deviation detection is **not active in release 1.0.0**. The `IntelligenceTriggerEvent` model exists in the codebase for schema documentation. The producer will be implemented in a future phase when intelligence event publishing is configurable per-PlanDefinition. The schema below documents the planned message format.
+
+Published when a compliance deviation is detected (future phase).
 
 ```json
 {
@@ -266,7 +268,7 @@ Published when a compliance deviation is detected.
 | `protocolInstanceId` | UUID | Protocol instance |
 | `stepInstanceId` | UUID | Step that deviated |
 | `deviationId` | UUID | Deviation record ID |
-| `deviationType` | String | `overdue`, `missed`, or `ambiguous` |
+| `deviationType` | String | `overdue` or `missed` |
 | `stepState` | String | Current step state |
 | `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |
@@ -282,7 +284,6 @@ Published when a compliance deviation is detected.
 |---|---|---|
 | `cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE | Warning |
 | `cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED | Critical |
-| `cce.compliance.deviation.ambiguous` | Multiple protocol matches for an event | Info |
 
 ---
 
@@ -336,23 +337,9 @@ public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
 
 ## 7. Producer Implementations
 
-### 7.1 IntelligenceTriggerProducer
+### 7.1 IntelligenceTriggerProducer (Future Phase)
 
-```java
-public void publishTrigger(IntelligenceTriggerEvent event) {
-    String key = event.getProtocolInstanceId().toString();
-    kafkaTemplate.send(topics.getIntelligenceTriggers(), key, event)
-        .whenComplete((result, ex) -> {
-            if (ex != null) {
-                log.error("Failed to publish intelligence trigger", ex);
-            } else {
-                log.info("Published intelligence trigger: {}", event.getId());
-            }
-        });
-}
-```
-
-**Key strategy:** `protocolInstanceId` ensures partition locality for all events related to a protocol.
+> **Not implemented in release 1.0.0.** The producer will be created in a future phase when intelligence trigger publishing is configurable per-PlanDefinition. The planned key strategy is `protocolInstanceId` for partition locality.
 
 ## 8. Ordering & Delivery Guarantees
 

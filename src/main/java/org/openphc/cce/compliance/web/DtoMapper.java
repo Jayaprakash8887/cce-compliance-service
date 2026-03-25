@@ -50,6 +50,7 @@ public class DtoMapper {
                 .completedBySource(entity.getCompletedBySource())
                 .completionStatus(entity.getCompletionStatus() != null ? entity.getCompletionStatus().name() : null)
                 .matchedEventId(entity.getMatchedEventId())
+                .requiredBehavior(entity.getRequiredBehavior())
                 .build();
     }
 

@@ -1,14 +1,11 @@
 package org.openphc.cce.compliance.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.persistence.EntityNotFoundException;
-import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.CompletionStatus;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
 import org.openphc.cce.compliance.domain.enums.StepState;
-import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage;
@@ -17,10 +14,11 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,30 +30,25 @@ public class StepInstanceService {
 
     private static final Logger log = LoggerFactory.getLogger(StepInstanceService.class);
 
-    private static final Set<StepState> SKIPPABLE_STATES = Set.of(
-            StepState.PENDING, StepState.DUE, StepState.OVERDUE);
-    private static final Set<StepState> COMPLETABLE_STATES = Set.of(
+    private static final Set<StepState> ACTIONABLE_STATES = Set.of(
             StepState.PENDING, StepState.DUE, StepState.OVERDUE);
 
     private final StepInstanceRepository stepInstanceRepository;
-    private final DeviationRepository deviationRepository;
     private final PlanDefinitionParser planDefinitionParser;
     private final ProtocolInstanceService protocolInstanceService;
+    private final DeviationService deviationService;
     private final AuditService auditService;
-    private final ObjectMapper objectMapper;
 
     public StepInstanceService(StepInstanceRepository stepInstanceRepository,
-                               DeviationRepository deviationRepository,
                                PlanDefinitionParser planDefinitionParser,
                                ProtocolInstanceService protocolInstanceService,
-                               AuditService auditService,
-                               ObjectMapper objectMapper) {
+                               DeviationService deviationService,
+                               AuditService auditService) {
         this.stepInstanceRepository = stepInstanceRepository;
-        this.deviationRepository = deviationRepository;
         this.planDefinitionParser = planDefinitionParser;
         this.protocolInstanceService = protocolInstanceService;
+        this.deviationService = deviationService;
         this.auditService = auditService;
-        this.objectMapper = objectMapper;
     }
 
     /**
@@ -63,7 +56,8 @@ public class StepInstanceService {
      */
     public StepInstance createStep(ProtocolInstance protocolInstance, String actionId,
                                    int repeatIndex, OffsetDateTime dueDate,
-                                   OffsetDateTime overdueDate, OffsetDateTime missedDate) {
+                                   OffsetDateTime overdueDate, OffsetDateTime missedDate,
+                                   String requiredBehavior) {
         StepInstance step = StepInstance.builder()
                 .protocolInstance(protocolInstance)
                 .actionId(actionId)
@@ -72,6 +66,7 @@ public class StepInstanceService {
                 .dueDate(dueDate)
                 .overdueDate(overdueDate)
                 .missedDate(missedDate)
+                .requiredBehavior(requiredBehavior)
                 .build();
 
         step = stepInstanceRepository.save(step);
@@ -88,17 +83,18 @@ public class StepInstanceService {
      * if the protocol is now complete.
      */
     public void completeStep(StepInstance step, UUID matchedEventId, String completedBySource) {
-        if (!COMPLETABLE_STATES.contains(step.getState())) {
+        if (!ACTIONABLE_STATES.contains(step.getState())) {
             throw new IllegalStateException(
                     "Cannot complete step in state " + step.getState() + ": " + step.getId());
         }
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        CompletionStatus completionStatus = determineCompletionStatus(step, now);
         step.setState(StepState.COMPLETED);
         step.setCompletedAt(now);
         step.setMatchedEventId(matchedEventId);
         step.setCompletedBySource(completedBySource);
-        step.setCompletionStatus(determineCompletionStatus(step, now));
+        step.setCompletionStatus(completionStatus);
 
         stepInstanceRepository.save(step);
 
@@ -114,25 +110,8 @@ public class StepInstanceService {
         // Progressive step instantiation
         createDependentSteps(step);
 
-        // Check if protocol is now complete
-        protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
-    }
-
-    /**
-     * Skip a step. Only allowed from PENDING, DUE, or OVERDUE states.
-     */
-    public void skipStep(UUID stepId) {
-        StepInstance step = findByIdOrThrow(stepId);
-
-        if (!SKIPPABLE_STATES.contains(step.getState())) {
-            throw new IllegalStateException(
-                    "Cannot skip step in state " + step.getState() + ": " + stepId);
-        }
-
-        step.setState(StepState.SKIPPED);
-        stepInstanceRepository.save(step);
-
-        log.info("Skipped step: stepId={}, actionId={}", stepId, step.getActionId());
+        // Auto-skip preceding optional (could) steps that are still actionable
+        autoSkipPrecedingOptionalSteps(step);
 
         // Check if protocol is now complete
         protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -152,9 +131,15 @@ public class StepInstanceService {
                 createDeviation(step, DeviationType.OVERDUE);
             }
             case "OVERDUE_TO_MISSED" -> {
-                applyTransition(step, StepState.OVERDUE, StepState.MISSED);
-                createDeviation(step, DeviationType.MISSED);
-                // Check if protocol is now complete (MISSED is terminal)
+                if ("could".equals(step.getRequiredBehavior())) {
+                    applyTransition(step, StepState.OVERDUE, StepState.SKIPPED);
+                    log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
+                            step.getId());
+                } else {
+                    applyTransition(step, StepState.OVERDUE, StepState.MISSED);
+                    createDeviation(step, DeviationType.MISSED);
+                }
+                // Check if protocol is now complete (MISSED/SKIPPED are terminal)
                 protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
             }
             default -> throw new IllegalArgumentException(
@@ -189,21 +174,19 @@ public class StepInstanceService {
     private void createDeviation(StepInstance step, DeviationType deviationType) {
         ProtocolInstance protocolInstance = step.getProtocolInstance();
 
-        Deviation deviation = Deviation.builder()
-                .protocolInstance(protocolInstance)
-                .stepInstance(step)
-                .deviationType(deviationType)
-                .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .metadata(objectMapper.valueToTree(Map.of(
-                        "actionId", step.getActionId(),
-                        "stepState", step.getState().name(),
-                        "protocolCanonical", protocolInstance.getProtocolCanonical())))
-                .build();
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (deviationType == DeviationType.OVERDUE && step.getDueDate() != null) {
+            metadata.put("daysOverdue",
+                    Duration.between(step.getDueDate(), now).toDays());
+        }
+        if (deviationType == DeviationType.MISSED && step.getMissedDate() != null) {
+            metadata.put("daysPastMissedDate",
+                    Duration.between(step.getMissedDate(), now).toDays());
+        }
 
-        deviationRepository.save(deviation);
-
-        log.info("Created {} deviation for step {} (protocolInstance={})",
-                deviationType, step.getId(), protocolInstance.getId());
+        deviationService.recordDeviation(protocolInstance, step, deviationType,
+                metadata.isEmpty() ? null : metadata);
     }
 
     /**
@@ -246,11 +229,38 @@ public class StepInstanceService {
                 missedDate = overdueDate.plusDays(targetAction.toleranceDays());
             }
 
+            String requiredBehavior = targetAction != null ? targetAction.requiredBehavior() : null;
+
             createStep(protocolInstance, relatedAction.actionId(),
-                    completedStep.getRepeatIndex(), dueDate, overdueDate, missedDate);
+                    completedStep.getRepeatIndex(), dueDate, overdueDate, missedDate,
+                    requiredBehavior);
 
             log.info("Progressive instantiation: created step {} due at {} (triggered by {})",
                     relatedAction.actionId(), dueDate, completedStep.getActionId());
+        }
+    }
+
+    /**
+     * Auto-skip preceding optional steps when a subsequent step completes.
+     * Steps with requiredBehavior=could that are still in PENDING/DUE/OVERDUE
+     * within the same protocol instance are automatically skipped.
+     */
+    private void autoSkipPrecedingOptionalSteps(StepInstance completedStep) {
+        List<StepInstance> siblings = stepInstanceRepository
+                .findByProtocolInstanceId(completedStep.getProtocolInstance().getId());
+
+        for (StepInstance sibling : siblings) {
+            if (sibling.getId().equals(completedStep.getId())) continue;
+            if (!"could".equals(sibling.getRequiredBehavior())) continue;
+            if (!ACTIONABLE_STATES.contains(sibling.getState())) continue;
+
+            sibling.setState(StepState.SKIPPED);
+            stepInstanceRepository.save(sibling);
+
+            log.info("Auto-skipped optional step {} (actionId={}, requiredBehavior=could) " +
+                            "due to completion of step {} (actionId={})",
+                    sibling.getId(), sibling.getActionId(),
+                    completedStep.getId(), completedStep.getActionId());
         }
     }
 
@@ -274,7 +284,7 @@ public class StepInstanceService {
             case "wk" -> completedAt.plus(offsetAmount * 7, ChronoUnit.DAYS);
             case "mo" -> completedAt.plusMonths(offsetAmount);
             case "a" -> completedAt.plusYears(offsetAmount);
-            default -> completedAt.plus(offsetAmount, ChronoUnit.DAYS);
+            default -> throw new IllegalArgumentException("Unknown time unit: " + unit);
         };
     }
 

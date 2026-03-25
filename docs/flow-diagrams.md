@@ -97,22 +97,8 @@ sequenceDiagram
                     StepInst->>DB: INSERT INTO step_instance (state=PENDING)
                 end
 
-                Note over Engine,ExprEval: Evaluate Intelligence Rules
-                loop For each sub-action (intelligence rules)
-                    Engine->>Parser: isIntelligenceRule(subAction)
-                    alt Is Intelligence Rule
-                        Engine->>ExprEval: evaluate(language, expression, vars)
-                        ExprEval-->>Engine: boolean
-                    end
-                end
-
                 Engine->>EventLog: updateMatchResult(MATCHED)
                 Engine->>Audit: auditSystem("event.processing", "matched", ...)
-            else Multiple Matches (Ambiguous)
-                Engine->>EventLog: updateMatchResult(AMBIGUOUS)
-                loop For each match
-                    Engine->>Engine: recordDeviation(AMBIGUOUS)
-                end
             else No Matches
                 Engine->>EventLog: updateMatchResult(ZERO_MATCH)
             end
@@ -192,7 +178,6 @@ sequenceDiagram
     participant Consumer as SchedulerTriggerConsumer
     participant StepSvc as StepInstanceService
     participant DevSvc as DeviationService
-    participant Producer as IntelligenceTriggerProducer
     participant DB as PostgreSQL
 
     Scheduler->>Kafka: Publish SchedulerTriggerMessage
@@ -210,15 +195,16 @@ sequenceDiagram
         StepSvc->>DB: UPDATE state = OVERDUE
         StepSvc->>DevSvc: recordDeviation(OVERDUE)
         DevSvc->>DB: INSERT INTO deviation
-        DevSvc->>Producer: publishTrigger(IntelligenceTriggerEvent)
-        Producer->>Kafka: Send to cce.intelligence.triggers
     else OVERDUE_TO_MISSED
         StepSvc->>StepSvc: Verify state == OVERDUE
-        StepSvc->>DB: UPDATE state = MISSED
-        StepSvc->>DevSvc: recordDeviation(MISSED)
-        DevSvc->>DB: INSERT INTO deviation
-        DevSvc->>Producer: publishTrigger(IntelligenceTriggerEvent)
-        Producer->>Kafka: Send to cce.intelligence.triggers
+        alt requiredBehavior == could
+            StepSvc->>DB: UPDATE state = SKIPPED
+            Note right of StepSvc: No deviation for optional steps
+        else requiredBehavior == must (or null)
+            StepSvc->>DB: UPDATE state = MISSED
+            StepSvc->>DevSvc: recordDeviation(MISSED)
+            DevSvc->>DB: INSERT INTO deviation
+        end
     end
 
     Consumer->>Kafka: Acknowledge offset
@@ -268,33 +254,28 @@ flowchart TD
     W --> X["Update Event Log<br/>matchedStepInstanceId"]
 ```
 
-## 5. Deviation Detection & Intelligence Publishing
+## 5. Deviation Detection & Recording
+
+> **Note:** Intelligence trigger publishing upon deviation is reserved for a future phase (will be driven by PlanDefinition-level configuration).
 
 ```mermaid
 flowchart TD
     subgraph "Deviation Triggers"
         T1["Scheduler: DUE → OVERDUE"]
         T2["Scheduler: OVERDUE → MISSED"]
-        T3["Engine: Ambiguous Match"]
     end
 
     T1 -->|"type=OVERDUE"| RD
     T2 -->|"type=MISSED"| RD
-    T3 -->|"type=AMBIGUOUS"| RD
 
     RD["DeviationService.recordDeviation()"]
     RD --> D1["Create Deviation entity"]
     D1 --> D2["Set deviationType"]
     D2 --> D3["Set detectedAt = now()"]
-    D3 --> D4["Link to ProtocolInstance + StepInstance"]
-    D4 --> D5["Persist to DB"]
-
-    D5 --> PUB["publishIntelligenceTrigger()"]
-    PUB --> E1["Build IntelligenceTriggerEvent"]
-    E1 --> E2["Set type = cce.compliance.deviation.{type}"]
-    E2 --> E3["Include context:<br/>protocolInstanceId, stepInstanceId,<br/>deviationId, actionId, patientId,<br/>facilityId, protocolCanonical"]
-    E3 --> E4["IntelligenceTriggerProducer.publishTrigger()"]
-    E4 --> KAFKA["Kafka: cce.intelligence.triggers<br/>key = protocolInstanceId"]
+    D3 --> D4["Build metadata:<br/>daysOverdue/daysPastMissedDate"]
+    D4 --> D5["Link to ProtocolInstance + StepInstance"]
+    D5 --> D6["Persist to DB"]
+    D6 --> D7["Audit: DEVIATION_DETECTED"]
 ```
 
 ## 7. REST API Request Flow
