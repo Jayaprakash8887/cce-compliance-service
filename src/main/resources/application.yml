@@ -61,6 +61,7 @@ cce:
       inbound-events: cce.events.inbound
       scheduler-triggers: cce.scheduler.triggers
       intelligence-triggers: cce.intelligence.triggers
+      default-partitions: 25
     retry:
       max-attempts: 3
       backoff-interval-ms: 1000

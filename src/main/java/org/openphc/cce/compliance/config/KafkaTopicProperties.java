@@ -14,4 +14,5 @@ public class KafkaTopicProperties {
     private String inboundEvents;
     private String schedulerTriggers;
     private String intelligenceTriggers;
+    private int defaultPartitions = 25;
 }

@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.kafka.KafkaProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
+import org.springframework.kafka.config.TopicBuilder;
 import org.springframework.kafka.core.*;
 import org.springframework.kafka.listener.CommonErrorHandler;
 import org.springframework.kafka.listener.ContainerProperties;
@@ -21,6 +22,7 @@ import org.springframework.kafka.support.serializer.JsonDeserializer;
 import org.springframework.kafka.support.serializer.JsonSerializer;
 import org.springframework.util.backoff.FixedBackOff;
 
+import org.apache.kafka.clients.admin.NewTopic;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -81,5 +83,42 @@ public class KafkaConfig {
     @Bean
     public KafkaTemplate<String, Object> kafkaTemplate(ProducerFactory<String, Object> producerFactory) {
         return new KafkaTemplate<>(producerFactory);
+    }
+
+    // ── Topic declarations ──
+
+    @Bean
+    public NewTopic inboundEventsTopic(KafkaTopicProperties topicProperties) {
+        return TopicBuilder.name(topicProperties.getInboundEvents())
+                .partitions(topicProperties.getDefaultPartitions())
+                .build();
+    }
+
+    @Bean
+    public NewTopic schedulerTriggersTopic(KafkaTopicProperties topicProperties) {
+        return TopicBuilder.name(topicProperties.getSchedulerTriggers())
+                .partitions(topicProperties.getDefaultPartitions())
+                .build();
+    }
+
+    @Bean
+    public NewTopic intelligenceTriggersTopic(KafkaTopicProperties topicProperties) {
+        return TopicBuilder.name(topicProperties.getIntelligenceTriggers())
+                .partitions(topicProperties.getDefaultPartitions())
+                .build();
+    }
+
+    @Bean
+    public NewTopic inboundEventsDlqTopic(KafkaTopicProperties topicProperties) {
+        return TopicBuilder.name(topicProperties.getInboundEvents() + ".dlq")
+                .partitions(topicProperties.getDefaultPartitions())
+                .build();
+    }
+
+    @Bean
+    public NewTopic schedulerTriggersDlqTopic(KafkaTopicProperties topicProperties) {
+        return TopicBuilder.name(topicProperties.getSchedulerTriggers() + ".dlq")
+                .partitions(topicProperties.getDefaultPartitions())
+                .build();
     }
 }
