@@ -8,14 +8,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
 
 /**
  * Kafka consumer for inbound clinical events from the Collector Service.
- * Delegates to ComplianceEngine and acknowledges only on successful processing.
- * On failure, exceptions propagate to the container's DefaultErrorHandler which
- * retries with backoff and routes to DLQ after exhausting retries.
+ * Delegates to ComplianceEngine for processing. Offset is committed automatically
+ * per record on success. On failure, exceptions propagate to the container's
+ * DefaultErrorHandler which retries with backoff and routes to DLQ after exhausting retries.
  */
 @Component
 public class InboundEventConsumer {
@@ -31,7 +30,7 @@ public class InboundEventConsumer {
     }
 
     @KafkaListener(topics = "${cce.kafka.topics.inbound-events}")
-    public void consume(CloudEventMessage event, Acknowledgment ack) {
+    public void consume(CloudEventMessage event) {
         MDC.put("correlationId", event.getCorrelationid());
         MDC.put("source", event.getSource());
         MDC.put("eventType", event.getType());
@@ -39,7 +38,6 @@ public class InboundEventConsumer {
         try {
             log.debug("Received inbound event: cloudeventsId={}, source={}", event.getId(), event.getSource());
             complianceEngine.processInboundEvent(event);
-            ack.acknowledge();
         } catch (Exception e) {
             errorCounter.increment();
             throw e; // Propagate to DefaultErrorHandler for retry + DLQ
