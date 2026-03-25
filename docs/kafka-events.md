@@ -76,18 +76,18 @@ spring.kafka:
       max.poll.records: 100
       max.poll.interval.ms: 300000
   listener:
-    ack-mode: manual
+    ack-mode: record
     concurrency: 3
 ```
 
 | Setting | Value | Rationale |
 |---|---|---|
 | `auto-offset-reset` | `earliest` | Process all events from beginning on first join |
-| `enable-auto-commit` | `false` | Manual acknowledgment for at-least-once delivery |
+| `enable-auto-commit` | `false` | Framework-managed offset commits (not Kafka auto-commit) |
 | `isolation.level` | `read_committed` | Only consume committed messages (transactional producers) |
 | `max.poll.records` | `100` | Batch size per poll |
 | `max.poll.interval.ms` | `300000` | 5-minute max processing time before rebalance |
-| `ack-mode` | `MANUAL` | Explicit acknowledgment after processing |
+| `ack-mode` | `RECORD` | Offset committed automatically per record after successful processing |
 | `concurrency` | `3` | 3 concurrent listener threads per instance |
 
 ### 3.2 Deserialization
@@ -332,14 +332,13 @@ Published when a compliance deviation is detected (future phase).
 
 ```java
 @KafkaListener(topics = "${cce.kafka.topics.inbound-events}")
-public void consume(CloudEventMessage event, Acknowledgment ack) {
+public void consume(CloudEventMessage event) {
     MDC.put("correlationId", event.getCorrelationid());
     MDC.put("source", event.getSource());
     MDC.put("eventType", event.getType());
     MDC.put("subject", event.getSubject());
     try {
         complianceEngine.processInboundEvent(event);
-        ack.acknowledge();  // Only on success
     } catch (Exception e) {
         errorCounter.increment();  // cce.consumer.inbound.errors
         throw e; // Propagate to DefaultErrorHandler for retry + DLQ
@@ -349,7 +348,7 @@ public void consume(CloudEventMessage event, Acknowledgment ack) {
 }
 ```
 
-**Behavior on failure:** Exception propagates to `DefaultErrorHandler` → retries with backoff → routes to `cce.events.inbound.dlq` after exhausting retries.
+**Behavior on failure:** Exception propagates to `DefaultErrorHandler` → retries with backoff → routes to `cce.events.inbound.dlq` after exhausting retries. Offset is committed automatically on success (`AckMode.RECORD`).
 
 ### 6.2 SchedulerTriggerConsumer
 
@@ -360,11 +359,10 @@ public void consume(CloudEventMessage event, Acknowledgment ack) {
         "spring.json.value.default.type=org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage"
     }
 )
-public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
+public void consume(SchedulerTriggerMessage trigger) {
     MDC.put("correlationId", trigger.getCorrelationid());
     try {
         stepInstanceService.applySchedulerTransition(trigger);
-        ack.acknowledge();
     } catch (Exception e) {
         errorCounter.increment();  // cce.consumer.scheduler.errors
         throw e; // Propagate to DefaultErrorHandler for retry + DLQ
@@ -386,7 +384,7 @@ public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
 
 | Guarantee | Mechanism |
 |---|---|
-| **At-least-once delivery** | Manual acknowledgment + no auto-commit |
+| **At-least-once delivery** | `AckMode.RECORD` + `DefaultErrorHandler` + no auto-commit |
 | **Idempotency (consumer)** | `(cloudeventsId, source)` deduplication in event_log |
 | **Idempotency (producer)** | `enable.idempotence=true` on producer |
 | **Ordering (per partition)** | Key-based routing ensures ordering per patient/protocol |
