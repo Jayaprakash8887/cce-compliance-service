@@ -164,7 +164,7 @@ class StepInstanceServiceTest {
     class ProgressiveInstantiation {
 
         @Test
-        void completedStepWithRelatedActions_createsDependentSteps() {
+        void completedStepWithRelatedActions_afterEnd_useCompletedAt() {
             ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
             OffsetDateTime dueDate = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
             StepInstance step = buildStepWithProtocol(protocolInstance, "initial-enrollment",
@@ -198,7 +198,6 @@ class StepInstanceServiceTest {
             verify(stepInstanceRepository, atLeast(2)).save(captor.capture());
 
             List<StepInstance> savedSteps = captor.getAllValues();
-            // Find the dependent step (not the completed one)
             StepInstance dependentStep = savedSteps.stream()
                     .filter(s -> "bp-check".equals(s.getActionId()))
                     .findFirst()
@@ -209,6 +208,110 @@ class StepInstanceServiceTest {
             assertNotNull(dependentStep.getDueDate());
             assertNotNull(dependentStep.getOverdueDate());
             assertNotNull(dependentStep.getMissedDate());
+            // after-end uses completedAt as base — dueDate should be ~7 days from completedAt
+            assertTrue(dependentStep.getDueDate().isAfter(step.getCompletedAt().plusDays(6)));
+        }
+
+        @Test
+        void completedStepWithRelatedActions_afterStart_useDueDate() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime dueDate = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
+            StepInstance step = buildStepWithProtocol(protocolInstance, "initial-enrollment",
+                    StepState.PENDING, dueDate, dueDate.plusDays(3));
+
+            when(stepInstanceRepository.save(any(StepInstance.class))).thenAnswer(invocation -> {
+                StepInstance s = invocation.getArgument(0);
+                if (s.getId() == null) s.setId(UUID.randomUUID());
+                return s;
+            });
+            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
+                    new PlanDefinitionParser.ActionMetadata("initial-enrollment", "Enrollment",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedActionInfo("bp-check", "after-start",
+                                    BigDecimal.valueOf(14), "d")),
+                            null, null, "must"),
+                    new PlanDefinitionParser.ActionMetadata("bp-check", "BP Check",
+                            List.of(), List.of(), null, 3, "must"));
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+
+            service.completeStep(step, UUID.randomUUID(), "test-source");
+
+            ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
+            verify(stepInstanceRepository, atLeast(2)).save(captor.capture());
+
+            StepInstance dependentStep = captor.getAllValues().stream()
+                    .filter(s -> "bp-check".equals(s.getActionId()))
+                    .findFirst()
+                    .orElse(null);
+
+            assertNotNull(dependentStep, "Dependent step bp-check should be created");
+            // after-start uses predecessor's dueDate as base
+            OffsetDateTime expectedDue = dueDate.plusDays(14);
+            assertEquals(expectedDue.toLocalDate(), dependentStep.getDueDate().toLocalDate());
+        }
+
+        @Test
+        void recurringSteps_createsMultipleInstances() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime dueDate = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
+            StepInstance step = buildStepWithProtocol(protocolInstance, "initial-enrollment",
+                    StepState.PENDING, dueDate, dueDate.plusDays(3));
+
+            when(stepInstanceRepository.save(any(StepInstance.class))).thenAnswer(invocation -> {
+                StepInstance s = invocation.getArgument(0);
+                if (s.getId() == null) s.setId(UUID.randomUUID());
+                return s;
+            });
+            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            // Target action has timing: count=3, period=7 days
+            PlanDefinitionParser.TimingInfo timing = new PlanDefinitionParser.TimingInfo(
+                    3, 1, BigDecimal.valueOf(7), "d");
+
+            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
+                    new PlanDefinitionParser.ActionMetadata("initial-enrollment", "Enrollment",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedActionInfo("bp-check", "after-end",
+                                    BigDecimal.valueOf(7), "d")),
+                            null, null, "must"),
+                    new PlanDefinitionParser.ActionMetadata("bp-check", "BP Check",
+                            List.of(), List.of(), timing, 3, "must"));
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+
+            service.completeStep(step, UUID.randomUUID(), "test-source");
+
+            ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
+            verify(stepInstanceRepository, atLeast(4)).save(captor.capture());
+
+            List<StepInstance> bpSteps = captor.getAllValues().stream()
+                    .filter(s -> "bp-check".equals(s.getActionId()))
+                    .toList();
+
+            assertEquals(3, bpSteps.size(), "Should create 3 recurring step instances");
+
+            // Verify repeat indices
+            assertEquals(0, bpSteps.get(0).getRepeatIndex());
+            assertEquals(1, bpSteps.get(1).getRepeatIndex());
+            assertEquals(2, bpSteps.get(2).getRepeatIndex());
+
+            // Verify staggered due dates (each 7 days apart)
+            OffsetDateTime firstDue = bpSteps.get(0).getDueDate();
+            assertEquals(firstDue.plusDays(7).toLocalDate(), bpSteps.get(1).getDueDate().toLocalDate());
+            assertEquals(firstDue.plusDays(14).toLocalDate(), bpSteps.get(2).getDueDate().toLocalDate());
+
+            // Each should have overdue and missed dates
+            for (StepInstance s : bpSteps) {
+                assertNotNull(s.getOverdueDate());
+                assertNotNull(s.getMissedDate());
+            }
         }
     }
 

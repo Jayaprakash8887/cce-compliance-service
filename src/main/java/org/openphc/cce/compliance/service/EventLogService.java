@@ -1,6 +1,5 @@
 package org.openphc.cce.compliance.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.openphc.cce.compliance.domain.entity.EventLog;
 import org.openphc.cce.compliance.domain.enums.ProcessingStatus;
 import org.openphc.cce.compliance.domain.repository.EventLogRepository;
@@ -20,11 +19,9 @@ public class EventLogService {
     private static final Logger log = LoggerFactory.getLogger(EventLogService.class);
 
     private final EventLogRepository eventLogRepository;
-    private final ObjectMapper objectMapper;
 
-    public EventLogService(EventLogRepository eventLogRepository, ObjectMapper objectMapper) {
+    public EventLogService(EventLogRepository eventLogRepository) {
         this.eventLogRepository = eventLogRepository;
-        this.objectMapper = objectMapper;
     }
 
     @Transactional(readOnly = true)
@@ -42,7 +39,7 @@ public class EventLogService {
                 .eventTime(message.getTime())
                 .receivedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationId(message.getCorrelationid())
-                .data(objectMapper.valueToTree(message.getData()))
+                .data(message.getData())
                 .facilityId(message.getFacilityid())
                 .processingStatus(status)
                 .build();

@@ -54,6 +54,65 @@ graph TB
 
 **This service does NOT handle:** event collection/ingestion (CCE Collector Service), scheduling (CCE Scheduler Service), analytics, alerting (CCE Intelligence Service), or authentication/authorization (handled by the API Gateway).
 
+### 1.1 Scheduler Service Contract
+
+The **CCE Scheduler Service** is a headless background service with no REST API. It drives time-based step state transitions by polling the Compliance Service's `step_instance` table and publishing trigger messages to Kafka. Communication between the two services is **exclusively via Kafka** — there are no direct service-to-service HTTP calls.
+
+```mermaid
+sequenceDiagram
+    participant DB as PostgreSQL<br/>(owned by Compliance Service)
+    participant Scheduler as CCE Scheduler Service
+    participant Kafka as Apache Kafka
+    participant Consumer as SchedulerTriggerConsumer<br/>(Compliance Service)
+    participant StepSvc as StepInstanceService
+
+    loop Polling interval
+        Scheduler->>DB: Poll step_instance for due transitions
+        Note over Scheduler,DB: SELECT where state/date thresholds met<br/>Lease via scheduler_lease to prevent duplicates
+        DB-->>Scheduler: Steps needing transition
+
+        loop For each step
+            Scheduler->>Kafka: Publish SchedulerTriggerMessage<br/>(stepInstanceId, transitionType, triggeredAt)
+        end
+    end
+
+    Kafka->>Consumer: Deliver to cce.scheduler.triggers
+    Consumer->>StepSvc: applySchedulerTransition()
+    StepSvc->>DB: UPDATE step_instance state
+```
+
+#### Polling Query
+
+The Scheduler Service identifies steps that need transitions using:
+
+```sql
+SELECT s FROM StepInstance s WHERE
+  (s.state = 'PENDING' AND s.dueDate <= :now) OR
+  (s.state = 'DUE' AND s.overdueDate <= :now) OR
+  (s.state = 'OVERDUE' AND s.missedDate <= :now)
+ORDER BY COALESCE(s.dueDate, s.overdueDate, s.missedDate) ASC
+```
+
+Each condition maps to a specific `transitionType`:
+
+| Condition | Transition Type | Effect on Compliance Service |
+|---|---|---|
+| `state = PENDING` AND `dueDate ≤ now` | `PENDING_TO_DUE` | Step becomes actionable |
+| `state = DUE` AND `overdueDate ≤ now` | `DUE_TO_OVERDUE` | Deviation recorded (`OVERDUE`) |
+| `state = OVERDUE` AND `missedDate ≤ now` | `OVERDUE_TO_MISSED` | `MISSED` (must) or `SKIPPED` (could) |
+
+#### Ownership & Coordination
+
+| Aspect | Owner | Details |
+|---|---|---|
+| **`step_instance` table** | Compliance Service | Schema, writes, Flyway migrations |
+| **`scheduler_lease` table** | Scheduler Service | Prevents duplicate trigger publishing across Scheduler instances |
+| **Polling reads** | Scheduler Service | Read-only access to `step_instance` (state, dueDate, overdueDate, missedDate) |
+| **State writes** | Compliance Service | Only the Compliance Service updates `step_instance.state` — the Scheduler never writes to it |
+| **Kafka topic** | Shared | `cce.scheduler.triggers` — Scheduler produces, Compliance consumes |
+
+> **Key invariant:** The Scheduler Service is a **read-only observer** of `step_instance`. It detects when a time threshold is crossed and notifies the Compliance Service via Kafka. The Compliance Service is the sole authority for state transitions — this ensures all business rules (requiredBehavior, deviation recording, auto-skip) are enforced in one place.
+
 ## 2. Technology Stack
 
 | Category | Technology | Version | Purpose |
@@ -87,7 +146,7 @@ org.openphc.cce.compliance
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
 │   └── producer/                              # (reserved for future phase)
-├── service/                                   # 8 business logic classes
+├── service/                                   # 9 business logic services + 3 supporting records
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
 
@@ -364,8 +423,11 @@ See [API Reference](api-reference.md) for endpoint details.
 | `cce.events.processed` | Counter | Total inbound events processed |
 | `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
+| `cce.events.zero_match` | Counter | Events with zero trigger matches |
 | `cce.events.intelligence.published` | Counter | Intelligence trigger events published (future phase) |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
+| `cce.consumer.inbound.errors` | Counter | Inbound event consumer processing errors |
+| `cce.consumer.scheduler.errors` | Counter | Scheduler trigger consumer processing errors |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |
 
 ### 8.2 Logging & Tracing
@@ -388,8 +450,9 @@ See [API Reference](api-reference.md) for endpoint details.
 
 ### 9.2 Kafka
 
-- **Consumer errors:** Message NOT acknowledged → Kafka redelivers
-- **Processing errors:** Message NOT acknowledged → Kafka redelivers
+- **Consumer errors:** Exception propagates to `DefaultErrorHandler` → retries with 1-second fixed backoff (up to 3 attempts) → routes to DLQ topic (`<topic>.dlq`) after exhausting retries
+- **Dead Letter Queue:** Failed records are published to `cce.events.inbound.dlq` or `cce.scheduler.triggers.dlq` with original headers preserved
+- **Retry configuration:** `cce.kafka.retry.max-attempts` (default 3), `cce.kafka.retry.backoff-interval-ms` (default 1000)
 - **Producer:** Idempotent with `acks=all`
 - **Deserialization:** `ErrorHandlingDeserializer` wraps errors gracefully
 

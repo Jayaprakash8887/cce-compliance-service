@@ -183,8 +183,11 @@ cce-compliance-service/
 │       │   ├── config/          # Spring configuration
 │       │   ├── domain/          # Entities, enums, repositories
 │       │   ├── fhir/            # FHIR parsing, JSONLogic & FHIRPath expression evaluation
-│       │   ├── kafka/           # Kafka consumers, producers, models
-│       │   ├── service/         # Business logic
+│       │   ├── kafka/           # Kafka consumers, models, config
+│       │   │   ├── config/      # Consumer/Producer factories, topic bindings
+│       │   │   ├── consumer/    # InboundEventConsumer, SchedulerTriggerConsumer
+│       │   │   └── model/       # CloudEventMessage, SchedulerTriggerMessage, IntelligenceTriggerEvent
+│       │   ├── service/         # Business logic (ComplianceEngine + supporting services)
 │       │   └── web/             # REST controllers, DTOs, exception handler
 │       └── resources/
 │           ├── application.yml

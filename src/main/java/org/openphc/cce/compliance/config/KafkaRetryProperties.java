@@ -6,13 +6,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 
 @Component
-@ConfigurationProperties(prefix = "cce.kafka.topics")
+@ConfigurationProperties(prefix = "cce.kafka.retry")
 @Getter
 @Setter
-public class KafkaTopicProperties {
+public class KafkaRetryProperties {
 
-    private String inboundEvents;
-    private String schedulerTriggers;
-    private String intelligenceTriggers;
-    private int defaultPartitions = 25;
+    private long maxAttempts = 3;
+    private long backoffIntervalMs = 1000;
 }

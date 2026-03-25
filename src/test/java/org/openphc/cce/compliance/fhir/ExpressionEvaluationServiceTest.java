@@ -1,12 +1,14 @@
 package org.openphc.cce.compliance.fhir;
 
 import ca.uhn.fhir.context.FhirContext;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,30 +16,35 @@ import static org.junit.jupiter.api.Assertions.*;
 class ExpressionEvaluationServiceTest {
 
     private ExpressionEvaluationService service;
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
         FhirContext fhirContext = FhirContext.forR4();
-        ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         service = new ExpressionEvaluationService(fhirContext, objectMapper);
+    }
+
+    private JsonNode toJsonNode(Object obj) {
+        return objectMapper.valueToTree(obj);
     }
 
     // ── Null/empty expression ──
 
     @Test
     void evaluate_nullExpression_returnsTrue() {
-        assertTrue(service.evaluate("text/jsonlogic", null, Map.of()));
+        assertTrue(service.evaluate("text/jsonlogic", null, toJsonNode(Map.of())));
     }
 
     @Test
     void evaluate_emptyExpression_returnsTrue() {
-        assertTrue(service.evaluate("text/jsonlogic", "", Map.of()));
+        assertTrue(service.evaluate("text/jsonlogic", "", toJsonNode(Map.of())));
     }
 
     @Test
     void evaluate_blankExpression_returnsTrue() {
-        assertTrue(service.evaluate("text/jsonlogic", "   ", Map.of()));
+        assertTrue(service.evaluate("text/jsonlogic", "   ", toJsonNode(Map.of())));
     }
 
     // ── Unsupported language ──
@@ -46,7 +53,7 @@ class ExpressionEvaluationServiceTest {
     void evaluate_unsupportedLanguage_throwsException() {
         UnsupportedExpressionLanguageException ex = assertThrows(
                 UnsupportedExpressionLanguageException.class,
-                () -> service.evaluate("text/cql", "{}", Map.of())
+                () -> service.evaluate("text/cql", "{}", toJsonNode(Map.of()))
         );
         assertEquals("text/cql", ex.getLanguage());
         assertTrue(ex.getMessage().contains("text/cql"));
@@ -62,8 +69,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {">":[{"var":"event.value"},10]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("value", 15));
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("value", 15));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -71,8 +78,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {">":[{"var":"event.value"},10]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("value", 5));
-            assertFalse(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("value", 5));
+            assertFalse(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -80,8 +87,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {"<":[{"var":"event.age"},65]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("age", 30));
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("age", 30));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -89,8 +96,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {"==":[{"var":"event.status"},1]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("status", 1));
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("status", 1));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -98,8 +105,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {"==":[{"var":"event.resourceType"},"Encounter"]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("resourceType", "Encounter"));
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("resourceType", "Encounter"));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -107,8 +114,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {"==":[{"var":"event.resourceType"},"Observation"]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("resourceType", "Encounter"));
-            assertFalse(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("resourceType", "Encounter"));
+            assertFalse(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -116,16 +123,14 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {"==":[{"var":"event.code.coding.0.code"},"high-risk"]}
                     """;
-            Map<String, Object> context = Map.of(
-                    "event", Map.of(
-                            "code", Map.of(
-                                    "coding", java.util.List.of(
-                                            Map.of("system", "http://example.org", "code", "high-risk")
-                                    )
+            JsonNode eventData = toJsonNode(Map.of(
+                    "code", Map.of(
+                            "coding", List.of(
+                                    Map.of("system", "http://example.org", "code", "high-risk")
                             )
                     )
-            );
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            ));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -136,8 +141,8 @@ class ExpressionEvaluationServiceTest {
                         {"<":[{"var":"event.value"},100]}
                     ]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("value", 50));
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("value", 50));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -148,8 +153,8 @@ class ExpressionEvaluationServiceTest {
                         {"<":[{"var":"event.value"},100]}
                     ]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("value", 200));
-            assertFalse(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("value", 200));
+            assertFalse(service.evaluate("text/jsonlogic", rule, eventData));
         }
 
         @Test
@@ -157,8 +162,8 @@ class ExpressionEvaluationServiceTest {
             String rule = """
                     {"in":[{"var":"event.category"},["urgent","emergent"]]}
                     """;
-            Map<String, Object> context = Map.of("event", Map.of("category", "urgent"));
-            assertTrue(service.evaluate("text/jsonlogic", rule, context));
+            JsonNode eventData = toJsonNode(Map.of("category", "urgent"));
+            assertTrue(service.evaluate("text/jsonlogic", rule, eventData));
         }
     }
 
@@ -169,44 +174,38 @@ class ExpressionEvaluationServiceTest {
 
         @Test
         void evaluatesPatientResourcePath() {
-            Map<String, Object> context = Map.of(
-                    "event", Map.of(
-                            "resourceType", "Patient",
-                            "id", "patient-1",
-                            "active", true
-                    )
-            );
-            assertTrue(service.evaluate("text/fhirpath", "Patient.active", context));
+            JsonNode eventData = toJsonNode(Map.of(
+                    "resourceType", "Patient",
+                    "id", "patient-1",
+                    "active", true
+            ));
+            assertTrue(service.evaluate("text/fhirpath", "Patient.active", eventData));
         }
 
         @Test
         void evaluatesPatientResourcePath_false() {
-            Map<String, Object> context = Map.of(
-                    "event", Map.of(
-                            "resourceType", "Patient",
-                            "id", "patient-1",
-                            "active", false
-                    )
-            );
-            assertFalse(service.evaluate("text/fhirpath", "Patient.active", context));
+            JsonNode eventData = toJsonNode(Map.of(
+                    "resourceType", "Patient",
+                    "id", "patient-1",
+                    "active", false
+            ));
+            assertFalse(service.evaluate("text/fhirpath", "Patient.active", eventData));
         }
 
         @Test
         void evaluatesResourceTypeExists() {
-            Map<String, Object> context = Map.of(
-                    "event", Map.of(
-                            "resourceType", "Encounter",
-                            "id", "enc-1",
-                            "status", "finished"
-                    )
-            );
+            JsonNode eventData = toJsonNode(Map.of(
+                    "resourceType", "Encounter",
+                    "id", "enc-1",
+                    "status", "finished"
+            ));
             // Encounter.status.exists() → true
-            assertTrue(service.evaluate("text/fhirpath", "Encounter.status.exists()", context));
+            assertTrue(service.evaluate("text/fhirpath", "Encounter.status.exists()", eventData));
         }
 
         @Test
         void noEventInContext_returnsFalse() {
-            assertFalse(service.evaluate("text/fhirpath", "Patient.active", Map.of()));
+            assertFalse(service.evaluate("text/fhirpath", "Patient.active", null));
         }
     }
 }

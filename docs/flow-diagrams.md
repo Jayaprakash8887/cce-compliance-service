@@ -93,8 +93,10 @@ sequenceDiagram
                 Parser-->>Engine: dependent actions
                 loop For each dependent action
                     Engine->>Parser: computeRelatedActionOffset(action, actionId)
-                    Engine->>StepInst: createStep(protocol, depActionId, dueDate)
-                    StepInst->>DB: INSERT INTO step_instance (state=PENDING)
+                    Note over StepInst: Relationship determines base time:<br/>after-end → completedAt, after-start → dueDate
+                    Note over StepInst: If TimingInfo.count > 1 → create N recurring<br/>instances with staggered due dates
+                    Engine->>StepInst: createDependentSteps(protocol, depAction, base, offset)
+                    StepInst->>DB: INSERT INTO step_instance(s) (state=PENDING)
                 end
 
                 Engine->>EventLog: updateMatchResult(MATCHED)
@@ -169,6 +171,8 @@ sequenceDiagram
 ```
 
 ## 3. Scheduler-Driven State Transitions
+
+> The Scheduler Service polls `step_instance` for time-threshold crossings and publishes trigger messages to Kafka. See [Architecture Overview §1.1](architecture-overview.md#11-scheduler-service-contract) for the polling query, lease mechanism, and ownership boundaries. The diagram below shows the Compliance Service side — receiving and processing those triggers.
 
 ```mermaid
 sequenceDiagram
@@ -339,14 +343,17 @@ flowchart TD
     A["Kafka delivers message"] --> B["Consumer receives message"]
     B --> C{"Deserialization OK?"}
     C -->|"No"| D["ErrorHandlingDeserializer<br/>wraps error"]
-    D --> E["Log error + skip"]
+    D --> D2["Route to DLQ"]
 
     C -->|"Yes"| F["Set MDC correlationId"]
     F --> G["Delegate to service"]
     G --> H{"Processing OK?"}
     H -->|"Yes"| I["Acknowledge offset"]
-    H -->|"No"| J["Log error"]
-    J --> K["Increment error counter"]
-    K --> L["DO NOT Acknowledge"]
-    L --> M["Kafka redelivers<br/>(at next poll)"]
+    H -->|"No"| J["Increment error counter"]
+    J --> K{"Retries remaining?<br/>(default: 3)"}
+    K -->|"Yes"| L["Wait backoff (1s)"]
+    L --> G
+    K -->|"No"| M["Publish to &lt;topic&gt;.dlq"]
+    M --> N["Acknowledge original offset"]
+    N --> O["Log DLQ routing"]
 ```

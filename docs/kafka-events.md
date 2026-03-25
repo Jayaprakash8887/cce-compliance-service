@@ -14,7 +14,13 @@ graph LR
     subgraph CCE Compliance Service
         C1["InboundEventConsumer"]
         C2["SchedulerTriggerConsumer"]
+        EH["DefaultErrorHandler<br/>retry + DLQ"]
         P1["IntelligenceTriggerProducer<br/>(future phase)"]
+    end
+
+    subgraph DLQ Topics
+        D1["cce.events.inbound.dlq"]
+        D2["cce.scheduler.triggers.dlq"]
     end
 
     subgraph Outbound Topics
@@ -23,17 +29,25 @@ graph LR
 
     T1 --> C1
     T2 --> C2
+    C1 -.->|"on failure"| EH
+    C2 -.->|"on failure"| EH
+    EH -->|"after retries"| D1
+    EH -->|"after retries"| D2
     P1 --> T3
 
     classDef inbound fill:#3498DB,stroke:#2980B9,color:white
     classDef outbound fill:#E67E22,stroke:#D35400,color:white
     classDef consumer fill:#2ECC71,stroke:#27AE60,color:white
     classDef producer fill:#9B59B6,stroke:#8E44AD,color:white
+    classDef dlq fill:#E74C3C,stroke:#C0392B,color:white
+    classDef errorHandler fill:#F39C12,stroke:#D35400,color:white
 
     class T1,T2 inbound
     class T3 outbound
     class C1,C2 consumer
     class P1 producer
+    class D1,D2 dlq
+    class EH errorHandler
 ```
 
 ## 2. Topic Reference
@@ -42,6 +56,8 @@ graph LR
 |---|---|---|---|
 | `cce.events.inbound` | Inbound | `cce-compliance-service` | Clinical events from CCE Collector Service |
 | `cce.scheduler.triggers` | Inbound | `cce-compliance-service` | Timer-based state transitions |
+| `cce.events.inbound.dlq` | DLQ | — | Dead letter queue for failed inbound events |
+| `cce.scheduler.triggers.dlq` | DLQ | — | Dead letter queue for failed scheduler triggers |
 | `cce.intelligence.triggers` | Outbound | — | Deviation alerts for analytics (**future phase** — not published in 1.0.0) |
 
 ## 3. Consumer Configuration
@@ -60,18 +76,18 @@ spring.kafka:
       max.poll.records: 100
       max.poll.interval.ms: 300000
   listener:
-    ack-mode: manual
+    ack-mode: record
     concurrency: 3
 ```
 
 | Setting | Value | Rationale |
 |---|---|---|
 | `auto-offset-reset` | `earliest` | Process all events from beginning on first join |
-| `enable-auto-commit` | `false` | Manual acknowledgment for at-least-once delivery |
+| `enable-auto-commit` | `false` | Framework-managed offset commits (not Kafka auto-commit) |
 | `isolation.level` | `read_committed` | Only consume committed messages (transactional producers) |
 | `max.poll.records` | `100` | Batch size per poll |
 | `max.poll.interval.ms` | `300000` | 5-minute max processing time before rebalance |
-| `ack-mode` | `MANUAL` | Explicit acknowledgment after processing |
+| `ack-mode` | `RECORD` | Offset committed automatically per record after successful processing |
 | `concurrency` | `3` | 3 concurrent listener threads per instance |
 
 ### 3.2 Deserialization
@@ -87,6 +103,27 @@ spring.json.trusted.packages: "org.openphc.cce.compliance.*"
 ```
 
 **Error handling:** If deserialization fails, `ErrorHandlingDeserializer` wraps the error gracefully instead of crashing the consumer.
+
+### 3.3 Retry & Dead Letter Queue
+
+```yaml
+cce.kafka:
+  retry:
+    max-attempts: 3           # Retry attempts before sending to DLQ
+    backoff-interval-ms: 1000 # Fixed interval between retries (ms)
+```
+
+Spring Kafka's `DefaultErrorHandler` is configured on the container factory with a `FixedBackOff` and a `DeadLetterPublishingRecoverer`. When a consumer listener throws an exception:
+
+1. **Retry** — The error handler retries the message up to `max-attempts` times with `backoff-interval-ms` between each attempt.
+2. **DLQ** — After exhausting retries, the failed record is published to the corresponding DLQ topic (`<original-topic>.dlq`).
+3. **Acknowledge** — The original offset is acknowledged (committed) so the consumer moves past the poison pill.
+
+| Setting | Value | Description |
+|---|---|---|
+| `max-attempts` | `3` | Number of retry attempts before DLQ |
+| `backoff-interval-ms` | `1000` | Fixed delay between retries (milliseconds) |
+| DLQ topic naming | `<topic>.dlq` | Convention: `cce.events.inbound.dlq`, `cce.scheduler.triggers.dlq` |
 
 ## 4. Producer Configuration
 
@@ -231,6 +268,8 @@ graph LR
     style M fill:#7F8C8D,color:white
 ```
 
+> **How does the Scheduler know when to fire?** The Scheduler Service polls `step_instance` (owned by the Compliance Service) for rows where the current time has crossed a date threshold (`dueDate`, `overdueDate`, or `missedDate`). It uses a `scheduler_lease` table to prevent duplicate publishes across instances. See [Architecture Overview §1.1 — Scheduler Service Contract](architecture-overview.md#11-scheduler-service-contract) for the full interaction model, polling query, and ownership boundaries.
+
 ---
 
 ### 5.3 IntelligenceTriggerEvent (Outbound — `cce.intelligence.triggers`)
@@ -293,22 +332,23 @@ Published when a compliance deviation is detected (future phase).
 
 ```java
 @KafkaListener(topics = "${cce.kafka.topics.inbound-events}")
-public void consume(CloudEventMessage event, Acknowledgment ack) {
-    MDC.put("correlationId", event.getCorrelationId());
+public void consume(CloudEventMessage event) {
+    MDC.put("correlationId", event.getCorrelationid());
+    MDC.put("source", event.getSource());
+    MDC.put("eventType", event.getType());
+    MDC.put("subject", event.getSubject());
     try {
         complianceEngine.processInboundEvent(event);
-        ack.acknowledge();  // Only on success
     } catch (Exception e) {
-        log.error("Failed to process inbound event", e);
-        errorCounter.increment();
-        // DO NOT acknowledge — Kafka will redeliver
+        errorCounter.increment();  // cce.consumer.inbound.errors
+        throw e; // Propagate to DefaultErrorHandler for retry + DLQ
     } finally {
         MDC.clear();
     }
 }
 ```
 
-**Behavior on failure:** Message is NOT acknowledged → Kafka redelivers on next poll.
+**Behavior on failure:** Exception propagates to `DefaultErrorHandler` → retries with backoff → routes to `cce.events.inbound.dlq` after exhausting retries. Offset is committed automatically on success (`AckMode.RECORD`).
 
 ### 6.2 SchedulerTriggerConsumer
 
@@ -319,14 +359,13 @@ public void consume(CloudEventMessage event, Acknowledgment ack) {
         "spring.json.value.default.type=org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage"
     }
 )
-public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
-    MDC.put("correlationId", trigger.getCorrelationId());
+public void consume(SchedulerTriggerMessage trigger) {
+    MDC.put("correlationId", trigger.getCorrelationid());
     try {
         stepInstanceService.applySchedulerTransition(trigger);
-        ack.acknowledge();
     } catch (Exception e) {
-        log.error("Failed to process scheduler trigger", e);
-        // DO NOT acknowledge
+        errorCounter.increment();  // cce.consumer.scheduler.errors
+        throw e; // Propagate to DefaultErrorHandler for retry + DLQ
     } finally {
         MDC.clear();
     }
@@ -345,7 +384,7 @@ public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
 
 | Guarantee | Mechanism |
 |---|---|
-| **At-least-once delivery** | Manual acknowledgment + no auto-commit |
+| **At-least-once delivery** | `AckMode.RECORD` + `DefaultErrorHandler` + no auto-commit |
 | **Idempotency (consumer)** | `(cloudeventsId, source)` deduplication in event_log |
 | **Idempotency (producer)** | `enable.idempotence=true` on producer |
 | **Ordering (per partition)** | Key-based routing ensures ordering per patient/protocol |
@@ -357,14 +396,15 @@ public void consume(SchedulerTriggerMessage trigger, Acknowledgment ack) {
 ```mermaid
 flowchart TD
     A["Message arrives"] --> B{"Deserialize OK?"}
-    B -->|"No"| C["ErrorHandlingDeserializer<br/>logs & skips"]
+    B -->|"No"| C["ErrorHandlingDeserializer<br/>wraps error"]
+    C --> DLQ_D["Route to DLQ"]
     B -->|"Yes"| D{"Process OK?"}
     D -->|"Yes"| E["Acknowledge"]
-    D -->|"No"| F["Log error"]
-    F --> G["Increment error metric"]
-    G --> H["Don't acknowledge"]
-    H --> I["Kafka redelivers"]
-    I --> J{"Idempotency check"}
-    J -->|"Duplicate"| K["Skip"]
-    J -->|"Not duplicate<br/>(prev attempt failed before event_log)"| D
+    D -->|"No"| F["Increment error metric"]
+    F --> G{"Retries remaining?"}
+    G -->|"Yes"| H["Wait backoff (1s)"]
+    H --> D
+    G -->|"No"| I["Publish to &lt;topic&gt;.dlq"]
+    I --> J["Acknowledge original offset"]
+    J --> K["Log DLQ routing"]
 ```
