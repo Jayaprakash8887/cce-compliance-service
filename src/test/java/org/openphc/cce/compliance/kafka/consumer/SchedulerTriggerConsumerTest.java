@@ -60,12 +60,12 @@ class SchedulerTriggerConsumerTest {
     class FailedProcessing {
 
         @Test
-        void processingException_notAcknowledged() {
+        void processingException_propagatesToErrorHandler() {
             SchedulerTriggerMessage trigger = buildTrigger();
             doThrow(new RuntimeException("Transition failed"))
                     .when(stepInstanceService).applySchedulerTransition(trigger);
 
-            consumer.consume(trigger, acknowledgment);
+            assertThrows(RuntimeException.class, () -> consumer.consume(trigger, acknowledgment));
 
             verify(stepInstanceService).applySchedulerTransition(trigger);
             verify(acknowledgment, never()).acknowledge();
@@ -77,7 +77,7 @@ class SchedulerTriggerConsumerTest {
             doThrow(new RuntimeException("Transition failed"))
                     .when(stepInstanceService).applySchedulerTransition(trigger);
 
-            consumer.consume(trigger, acknowledgment);
+            assertThrows(RuntimeException.class, () -> consumer.consume(trigger, acknowledgment));
 
             assertNull(MDC.get("correlationId"), "MDC should be cleared even after failure");
         }

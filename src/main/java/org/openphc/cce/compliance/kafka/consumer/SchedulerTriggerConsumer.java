@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 /**
  * Kafka consumer for scheduler-driven step state transitions from the Scheduler Service.
  * Delegates to StepInstanceService and acknowledges only on successful processing.
+ * On failure, exceptions propagate to the container's DefaultErrorHandler which
+ * retries with backoff and routes to DLQ after exhausting retries.
  */
 @Component
 public class SchedulerTriggerConsumer {
@@ -42,10 +44,8 @@ public class SchedulerTriggerConsumer {
             stepInstanceService.applySchedulerTransition(trigger);
             ack.acknowledge();
         } catch (Exception e) {
-            log.error("Failed to process scheduler trigger: stepInstanceId={}, transitionType={}",
-                    trigger.getStepInstanceId(), trigger.getTransitionType(), e);
             errorCounter.increment();
-            // DO NOT acknowledge — Kafka will redeliver
+            throw e; // Propagate to DefaultErrorHandler for retry + DLQ
         } finally {
             MDC.clear();
         }

@@ -14,6 +14,8 @@ import org.springframework.stereotype.Component;
 /**
  * Kafka consumer for inbound clinical events from the Collector Service.
  * Delegates to ComplianceEngine and acknowledges only on successful processing.
+ * On failure, exceptions propagate to the container's DefaultErrorHandler which
+ * retries with backoff and routes to DLQ after exhausting retries.
  */
 @Component
 public class InboundEventConsumer {
@@ -39,10 +41,8 @@ public class InboundEventConsumer {
             complianceEngine.processInboundEvent(event);
             ack.acknowledge();
         } catch (Exception e) {
-            log.error("Failed to process inbound event: cloudeventsId={}, source={}",
-                    event.getId(), event.getSource(), e);
             errorCounter.increment();
-            // DO NOT acknowledge — Kafka will redeliver
+            throw e; // Propagate to DefaultErrorHandler for retry + DLQ
         } finally {
             MDC.clear();
         }

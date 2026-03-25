@@ -343,14 +343,17 @@ flowchart TD
     A["Kafka delivers message"] --> B["Consumer receives message"]
     B --> C{"Deserialization OK?"}
     C -->|"No"| D["ErrorHandlingDeserializer<br/>wraps error"]
-    D --> E["Log error + skip"]
+    D --> D2["Route to DLQ"]
 
     C -->|"Yes"| F["Set MDC correlationId"]
     F --> G["Delegate to service"]
     G --> H{"Processing OK?"}
     H -->|"Yes"| I["Acknowledge offset"]
-    H -->|"No"| J["Log error"]
-    J --> K["Increment error counter"]
-    K --> L["DO NOT Acknowledge"]
-    L --> M["Kafka redelivers<br/>(at next poll)"]
+    H -->|"No"| J["Increment error counter"]
+    J --> K{"Retries remaining?<br/>(default: 3)"}
+    K -->|"Yes"| L["Wait backoff (1s)"]
+    L --> G
+    K -->|"No"| M["Publish to &lt;topic&gt;.dlq"]
+    M --> N["Acknowledge original offset"]
+    N --> O["Log DLQ routing"]
 ```

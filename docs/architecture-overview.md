@@ -450,8 +450,9 @@ See [API Reference](api-reference.md) for endpoint details.
 
 ### 9.2 Kafka
 
-- **Consumer errors:** Message NOT acknowledged → Kafka redelivers
-- **Processing errors:** Message NOT acknowledged → Kafka redelivers
+- **Consumer errors:** Exception propagates to `DefaultErrorHandler` → retries with 1-second fixed backoff (up to 3 attempts) → routes to DLQ topic (`<topic>.dlq`) after exhausting retries
+- **Dead Letter Queue:** Failed records are published to `cce.events.inbound.dlq` or `cce.scheduler.triggers.dlq` with original headers preserved
+- **Retry configuration:** `cce.kafka.retry.max-attempts` (default 3), `cce.kafka.retry.backoff-interval-ms` (default 1000)
 - **Producer:** Idempotent with `acks=all`
 - **Deserialization:** `ErrorHandlingDeserializer` wraps errors gracefully
 

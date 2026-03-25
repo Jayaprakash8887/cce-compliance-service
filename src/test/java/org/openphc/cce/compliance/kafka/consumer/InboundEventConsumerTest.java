@@ -66,12 +66,12 @@ class InboundEventConsumerTest {
     class FailedProcessing {
 
         @Test
-        void processingException_notAcknowledged() {
+        void processingException_propagatesToErrorHandler() {
             CloudEventMessage event = buildEvent();
             doThrow(new RuntimeException("Processing failed"))
                     .when(complianceEngine).processInboundEvent(event);
 
-            consumer.consume(event, acknowledgment);
+            assertThrows(RuntimeException.class, () -> consumer.consume(event, acknowledgment));
 
             verify(complianceEngine).processInboundEvent(event);
             verify(acknowledgment, never()).acknowledge();
@@ -83,7 +83,7 @@ class InboundEventConsumerTest {
             doThrow(new RuntimeException("Processing failed"))
                     .when(complianceEngine).processInboundEvent(event);
 
-            consumer.consume(event, acknowledgment);
+            assertThrows(RuntimeException.class, () -> consumer.consume(event, acknowledgment));
 
             assertNull(MDC.get("correlationId"), "MDC should be cleared even after failure");
         }
