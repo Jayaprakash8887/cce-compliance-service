@@ -11,7 +11,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import org.openphc.cce.compliance.service.ComplianceEngine;
 import org.slf4j.MDC;
-import org.springframework.kafka.support.Acknowledgment;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -25,7 +24,6 @@ import static org.mockito.Mockito.*;
 class InboundEventConsumerTest {
 
     @Mock private ComplianceEngine complianceEngine;
-    @Mock private Acknowledgment acknowledgment;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private InboundEventConsumer consumer;
@@ -40,20 +38,19 @@ class InboundEventConsumerTest {
     class SuccessfulProcessing {
 
         @Test
-        void successfulProcessing_acknowledged() {
+        void successfulProcessing_delegatesToEngine() {
             CloudEventMessage event = buildEvent();
 
-            consumer.consume(event, acknowledgment);
+            consumer.consume(event);
 
             verify(complianceEngine).processInboundEvent(event);
-            verify(acknowledgment).acknowledge();
         }
 
         @Test
         void mdcClearedAfterSuccess() {
             CloudEventMessage event = buildEvent();
 
-            consumer.consume(event, acknowledgment);
+            consumer.consume(event);
 
             assertNull(MDC.get("correlationId"), "MDC should be cleared after processing");
             assertNull(MDC.get("source"));
@@ -71,10 +68,9 @@ class InboundEventConsumerTest {
             doThrow(new RuntimeException("Processing failed"))
                     .when(complianceEngine).processInboundEvent(event);
 
-            assertThrows(RuntimeException.class, () -> consumer.consume(event, acknowledgment));
+            assertThrows(RuntimeException.class, () -> consumer.consume(event));
 
             verify(complianceEngine).processInboundEvent(event);
-            verify(acknowledgment, never()).acknowledge();
         }
 
         @Test
@@ -83,7 +79,7 @@ class InboundEventConsumerTest {
             doThrow(new RuntimeException("Processing failed"))
                     .when(complianceEngine).processInboundEvent(event);
 
-            assertThrows(RuntimeException.class, () -> consumer.consume(event, acknowledgment));
+            assertThrows(RuntimeException.class, () -> consumer.consume(event));
 
             assertNull(MDC.get("correlationId"), "MDC should be cleared even after failure");
         }
@@ -103,7 +99,7 @@ class InboundEventConsumerTest {
                 return null;
             }).when(complianceEngine).processInboundEvent(event);
 
-            consumer.consume(event, acknowledgment);
+            consumer.consume(event);
 
             verify(complianceEngine).processInboundEvent(event);
         }

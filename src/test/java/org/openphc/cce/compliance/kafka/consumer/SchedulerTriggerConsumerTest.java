@@ -10,7 +10,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage;
 import org.openphc.cce.compliance.service.StepInstanceService;
 import org.slf4j.MDC;
-import org.springframework.kafka.support.Acknowledgment;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -23,7 +22,6 @@ import static org.mockito.Mockito.*;
 class SchedulerTriggerConsumerTest {
 
     @Mock private StepInstanceService stepInstanceService;
-    @Mock private Acknowledgment acknowledgment;
 
     private SchedulerTriggerConsumer consumer;
 
@@ -37,20 +35,19 @@ class SchedulerTriggerConsumerTest {
     class SuccessfulProcessing {
 
         @Test
-        void successfulProcessing_acknowledged() {
+        void successfulProcessing_delegatesToService() {
             SchedulerTriggerMessage trigger = buildTrigger();
 
-            consumer.consume(trigger, acknowledgment);
+            consumer.consume(trigger);
 
             verify(stepInstanceService).applySchedulerTransition(trigger);
-            verify(acknowledgment).acknowledge();
         }
 
         @Test
         void mdcClearedAfterSuccess() {
             SchedulerTriggerMessage trigger = buildTrigger();
 
-            consumer.consume(trigger, acknowledgment);
+            consumer.consume(trigger);
 
             assertNull(MDC.get("correlationId"), "MDC should be cleared after processing");
         }
@@ -65,10 +62,9 @@ class SchedulerTriggerConsumerTest {
             doThrow(new RuntimeException("Transition failed"))
                     .when(stepInstanceService).applySchedulerTransition(trigger);
 
-            assertThrows(RuntimeException.class, () -> consumer.consume(trigger, acknowledgment));
+            assertThrows(RuntimeException.class, () -> consumer.consume(trigger));
 
             verify(stepInstanceService).applySchedulerTransition(trigger);
-            verify(acknowledgment, never()).acknowledge();
         }
 
         @Test
@@ -77,7 +73,7 @@ class SchedulerTriggerConsumerTest {
             doThrow(new RuntimeException("Transition failed"))
                     .when(stepInstanceService).applySchedulerTransition(trigger);
 
-            assertThrows(RuntimeException.class, () -> consumer.consume(trigger, acknowledgment));
+            assertThrows(RuntimeException.class, () -> consumer.consume(trigger));
 
             assertNull(MDC.get("correlationId"), "MDC should be cleared even after failure");
         }
@@ -94,7 +90,7 @@ class SchedulerTriggerConsumerTest {
                 return null;
             }).when(stepInstanceService).applySchedulerTransition(trigger);
 
-            consumer.consume(trigger, acknowledgment);
+            consumer.consume(trigger);
 
             verify(stepInstanceService).applySchedulerTransition(trigger);
         }

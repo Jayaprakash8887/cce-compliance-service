@@ -37,7 +37,7 @@ spring:
   kafka:
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
     listener:
-      ack-mode: manual
+      ack-mode: record
       concurrency: 3
     consumer:
       group-id: cce-compliance-service
