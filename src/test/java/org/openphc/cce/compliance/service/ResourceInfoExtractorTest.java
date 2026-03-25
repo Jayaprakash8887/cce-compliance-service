@@ -1,5 +1,7 @@
 package org.openphc.cce.compliance.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -11,23 +13,28 @@ import static org.junit.jupiter.api.Assertions.*;
 class ResourceInfoExtractorTest {
 
     private ResourceInfoExtractor extractor;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         extractor = new ResourceInfoExtractor();
     }
 
+    private JsonNode toJsonNode(Object obj) {
+        return objectMapper.valueToTree(obj);
+    }
+
     // ── extractResourceType ──
 
     @Test
     void extractResourceType_encounter() {
-        Map<String, Object> data = Map.of("resourceType", "Encounter");
+        JsonNode data = toJsonNode(Map.of("resourceType", "Encounter"));
         assertEquals("Encounter", extractor.extractResourceType(data));
     }
 
     @Test
     void extractResourceType_observation() {
-        Map<String, Object> data = Map.of("resourceType", "Observation");
+        JsonNode data = toJsonNode(Map.of("resourceType", "Observation"));
         assertEquals("Observation", extractor.extractResourceType(data));
     }
 
@@ -38,26 +45,26 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractResourceType_missingField_returnsNull() {
-        assertNull(extractor.extractResourceType(Map.of()));
+        assertNull(extractor.extractResourceType(toJsonNode(Map.of())));
     }
 
     @Test
     void extractResourceType_nonStringValue_returnsNull() {
-        assertNull(extractor.extractResourceType(Map.of("resourceType", 123)));
+        assertNull(extractor.extractResourceType(toJsonNode(Map.of("resourceType", 123))));
     }
 
     // ── extractCodes — code.coding ──
 
     @Test
     void extractCodes_fromCodeCoding() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "code", Map.of(
                         "coding", List.of(
                                 Map.of("system", "http://loinc.org", "code", "85354-9")
                         )
                 )
-        );
+        ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
         assertEquals(1, codes.size());
         assertEquals(new CodePathTriple("code", "http://loinc.org", "85354-9"), codes.get(0));
@@ -65,7 +72,7 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractCodes_multipleCodings() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "code", Map.of(
                         "coding", List.of(
@@ -73,7 +80,7 @@ class ResourceInfoExtractorTest {
                                 Map.of("system", "http://snomed.info/sct", "code", "271649006")
                         )
                 )
-        );
+        ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
         assertEquals(2, codes.size());
         assertEquals("code", codes.get(0).path());
@@ -84,14 +91,14 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractCodes_fromTypeCoding() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Encounter",
                 "type", Map.of(
                         "coding", List.of(
                                 Map.of("system", "http://snomed.info/sct", "code", "11429006")
                         )
                 )
-        );
+        ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
         assertEquals(1, codes.size());
         assertEquals(new CodePathTriple("type", "http://snomed.info/sct", "11429006"), codes.get(0));
@@ -101,7 +108,7 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractCodes_fromCategoryArrayCoding() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "category", List.of(
                         Map.of("coding", List.of(
@@ -109,7 +116,7 @@ class ResourceInfoExtractorTest {
                                         "code", "vital-signs")
                         ))
                 )
-        );
+        ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
         assertEquals(1, codes.size());
         assertEquals(new CodePathTriple("category", "http://terminology.hl7.org/CodeSystem/observation-category", "vital-signs"), codes.get(0));
@@ -117,7 +124,7 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractCodes_multipleCategoryEntries() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "category", List.of(
                         Map.of("coding", List.of(
@@ -127,7 +134,7 @@ class ResourceInfoExtractorTest {
                                 Map.of("system", "http://sys2.org", "code", "cat-2")
                         ))
                 )
-        );
+        ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
         assertEquals(2, codes.size());
     }
@@ -136,7 +143,7 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractCodes_encounterWithCodeAndType() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Encounter",
                 "code", Map.of(
                         "coding", List.of(
@@ -148,7 +155,7 @@ class ResourceInfoExtractorTest {
                                 Map.of("system", "http://snomed.info/sct", "code", "11429006")
                         )
                 )
-        );
+        ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
         assertEquals(2, codes.size());
 
@@ -165,28 +172,28 @@ class ResourceInfoExtractorTest {
 
     @Test
     void extractCodes_emptyData_returnsEmptyList() {
-        assertTrue(extractor.extractCodes(Map.of()).isEmpty());
+        assertTrue(extractor.extractCodes(toJsonNode(Map.of())).isEmpty());
     }
 
     @Test
     void extractCodes_missingSystemOrCode_skipped() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "code", Map.of(
                         "coding", List.of(
                                 Map.of("display", "Blood Pressure") // no system or code
                         )
                 )
-        );
+        ));
         assertTrue(extractor.extractCodes(data).isEmpty());
     }
 
     @Test
     void extractCodes_noCodingArray_returnsEmptyList() {
-        Map<String, Object> data = Map.of(
+        JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "code", Map.of("text", "BP")
-        );
+        ));
         assertTrue(extractor.extractCodes(data).isEmpty());
     }
 

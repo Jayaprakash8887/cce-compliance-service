@@ -1,10 +1,10 @@
 package org.openphc.cce.compliance.kafka.model;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.JsonNode;
 import lombok.*;
 
 import java.time.OffsetDateTime;
-import java.util.Map;
 
 /**
  * CloudEvents v1.0 message envelope with CCE extension attributes.
@@ -36,5 +36,5 @@ public class CloudEventMessage {
     private String facilityid;
 
     // ── Payload ──
-    private Map<String, Object> data;
+    private JsonNode data;
 }

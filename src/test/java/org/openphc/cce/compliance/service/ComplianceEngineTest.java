@@ -451,9 +451,9 @@ class ComplianceEngineTest {
                 .time(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationid(UUID.randomUUID().toString())
                 .facilityid("facility-1")
-                .data(Map.of("resourceType", "Observation",
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Observation",
                         "code", Map.of("coding", List.of(
-                                Map.of("system", "http://loinc.org", "code", "85354-9")))))
+                                Map.of("system", "http://loinc.org", "code", "85354-9"))))))
                 .build();
     }
 

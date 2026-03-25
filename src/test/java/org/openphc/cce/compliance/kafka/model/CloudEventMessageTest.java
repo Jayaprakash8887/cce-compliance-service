@@ -38,7 +38,7 @@ class CloudEventMessageTest {
                 .correlationid("corr-abc-123")
                 .sourceeventid("lab-evt-789")
                 .facilityid("0002")
-                .data(Map.of("resourceType", "Observation", "status", "final"))
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Observation", "status", "final")))
                 .build();
 
         String json = objectMapper.writeValueAsString(msg);
@@ -67,7 +67,7 @@ class CloudEventMessageTest {
                 .time(OffsetDateTime.now(ZoneOffset.UTC))
                 .datacontenttype("application/fhir+json")
                 .correlationid("corr-xyz")
-                .data(Map.of("resourceType", "Encounter"))
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Encounter")))
                 .build();
 
         String json = objectMapper.writeValueAsString(msg);
@@ -117,7 +117,7 @@ class CloudEventMessageTest {
         assertNull(msg.getProtocoldefinitionid());
         assertNull(msg.getSourceeventid());
         assertNotNull(msg.getData());
-        assertEquals("Observation", msg.getData().get("resourceType"));
+        assertEquals("Observation", msg.getData().get("resourceType").asText());
     }
 
     @Test

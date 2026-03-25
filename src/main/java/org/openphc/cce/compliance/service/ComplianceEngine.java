@@ -1,5 +1,6 @@
 package org.openphc.cce.compliance.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -95,7 +96,7 @@ public class ComplianceEngine {
         EventLog eventLog = eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH);
 
         // Step 3: Extract resource info from payload
-        Map<String, Object> data = event.getData();
+        JsonNode data = event.getData();
         String resourceType = resourceInfoExtractor.extractResourceType(data);
         List<CodePathTriple> codes = resourceInfoExtractor.extractCodes(data);
 
@@ -159,7 +160,7 @@ public class ComplianceEngine {
     }
 
     private List<MatchedAction> performTwoTierMatching(String resourceType, List<CodePathTriple> codes,
-                                                       Map<String, Object> eventData) {
+                                                       JsonNode eventData) {
         List<MatchedAction> finalMatches = new ArrayList<>();
 
         // Step 5: Tier 1 structural match
@@ -202,10 +203,9 @@ public class ComplianceEngine {
         }
 
         // Evaluate condition-only triggers (Scenario 5: F3 only)
-        Map<String, Object> context = Map.of("event", eventData);
         for (ConditionOnlyTrigger trigger : conditionOnlyTriggers) {
             boolean result = expressionEvaluationService.evaluate(
-                    trigger.conditionLanguage(), trigger.conditionExpression(), context);
+                    trigger.conditionLanguage(), trigger.conditionExpression(), eventData);
             if (result) {
                 finalMatches.add(new MatchedAction(trigger.protocolDefinitionId(), trigger.actionId()));
             }
@@ -215,15 +215,14 @@ public class ComplianceEngine {
     }
 
     private boolean evaluateActionConditions(PlanDefinitionParser.ActionMetadata actionMetadata,
-                                             Map<String, Object> eventData) {
-        Map<String, Object> context = Map.of("event", eventData);
+                                             JsonNode eventData) {
 
         for (PlanDefinitionParser.TriggerInfo trigger : actionMetadata.triggers()) {
             if (trigger.condition() != null) {
                 boolean result = expressionEvaluationService.evaluate(
                         trigger.condition().language(),
                         trigger.condition().expression(),
-                        context);
+                        eventData);
                 if (result) {
                     return true;
                 }

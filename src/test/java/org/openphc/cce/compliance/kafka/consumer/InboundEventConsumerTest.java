@@ -1,5 +1,6 @@
 package org.openphc.cce.compliance.kafka.consumer;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -26,6 +27,7 @@ class InboundEventConsumerTest {
     @Mock private ComplianceEngine complianceEngine;
     @Mock private Acknowledgment acknowledgment;
 
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private InboundEventConsumer consumer;
 
     @BeforeEach
@@ -117,7 +119,7 @@ class InboundEventConsumerTest {
                 .time(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationid(UUID.randomUUID().toString())
                 .facilityid("facility-1")
-                .data(Map.of("resourceType", "Observation"))
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Observation")))
                 .build();
     }
 }

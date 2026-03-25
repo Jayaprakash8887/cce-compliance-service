@@ -3,6 +3,7 @@ package org.openphc.cce.compliance.fhir;
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.fhirpath.IFhirPath;
 import ca.uhn.fhir.parser.IParser;
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.json.Json;
 import jakarta.json.JsonObject;
 import jakarta.json.JsonReader;
@@ -19,7 +20,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.StringReader;
 import java.util.List;
-import java.util.Map;
 
 @Component
 public class ExpressionEvaluationService {
@@ -42,47 +42,41 @@ public class ExpressionEvaluationService {
     }
 
     /**
-     * Evaluate an expression against the provided context.
+     * Evaluate an expression against the provided event data.
      *
      * @param language   the expression language ("text/jsonlogic" or "text/fhirpath")
      * @param expression the expression string
-     * @param context    context variables (event, patient, step, protocol)
+     * @param eventData  the event payload as JsonNode
      * @return true if the expression evaluates to truthy, or if expression is null/empty
      */
-    public boolean evaluate(String language, String expression, Map<String, Object> context) {
+    public boolean evaluate(String language, String expression, JsonNode eventData) {
         if (expression == null || expression.isBlank()) {
             return true;
         }
 
         return switch (language) {
-            case LANGUAGE_JSONLOGIC -> evaluateJsonLogic(expression, context);
-            case LANGUAGE_FHIRPATH -> evaluateFhirPath(expression, context);
+            case LANGUAGE_JSONLOGIC -> evaluateJsonLogic(expression, eventData);
+            case LANGUAGE_FHIRPATH -> evaluateFhirPath(expression, eventData);
             default -> throw new UnsupportedExpressionLanguageException(language);
         };
     }
 
-    private boolean evaluateJsonLogic(String expression, Map<String, Object> context) {
+    private boolean evaluateJsonLogic(String expression, JsonNode eventData) {
         JsonValue rule = parseJsonValue(expression);
-        JsonObject data = toJsonObject(context);
+        JsonObject eventObj = toJsonObject(eventData);
+        // Wrap as {"event": ...} so JSONLogic rules can reference event.xxx paths
+        JsonObject data = Json.createObjectBuilder().add("event", eventObj).build();
         JsonValue result = jsonLogic.apply(rule, data);
         return jsonLogic.isTruthy(result);
     }
 
-    private boolean evaluateFhirPath(String expression, Map<String, Object> context) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> eventData = (Map<String, Object>) context.get("event");
-        if (eventData == null) {
-            log.warn("FHIRPath evaluation requested but no 'event' key in context");
+    private boolean evaluateFhirPath(String expression, JsonNode eventData) {
+        if (eventData == null || eventData.isNull()) {
+            log.warn("FHIRPath evaluation requested but eventData is null");
             return false;
         }
 
-        String resourceJson;
-        try {
-            resourceJson = objectMapper.writeValueAsString(eventData);
-        } catch (JsonProcessingException e) {
-            log.error("Failed to serialize event data for FHIRPath evaluation", e);
-            return false;
-        }
+        String resourceJson = eventData.toString();
 
         IBase resource = fhirJsonParser.parseResource(resourceJson);
         List<IBase> results = fhirPath.evaluate(resource, expression, IBase.class);
@@ -106,12 +100,12 @@ public class ExpressionEvaluationService {
         }
     }
 
-    private JsonObject toJsonObject(Map<String, Object> context) {
+    private JsonObject toJsonObject(JsonNode eventData) {
         String json;
         try {
-            json = objectMapper.writeValueAsString(context);
+            json = objectMapper.writeValueAsString(eventData);
         } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Failed to serialize context to JSON", e);
+            throw new IllegalArgumentException("Failed to serialize event data to JSON", e);
         }
         try (JsonReader reader = Json.createReader(new StringReader(json))) {
             return reader.readObject();

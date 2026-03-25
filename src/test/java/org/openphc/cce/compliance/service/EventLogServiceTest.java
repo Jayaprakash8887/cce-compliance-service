@@ -35,7 +35,7 @@ class EventLogServiceTest {
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        eventLogService = new EventLogService(eventLogRepository, objectMapper);
+        eventLogService = new EventLogService(eventLogRepository);
     }
 
     @Test
@@ -68,7 +68,7 @@ class EventLogServiceTest {
                 .correlationid("corr-abc-123")
                 .sourceeventid("lab-evt-789")
                 .facilityid("0002")
-                .data(Map.of("resourceType", "Observation", "status", "final"))
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Observation", "status", "final")))
                 .build();
 
         when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
@@ -106,7 +106,7 @@ class EventLogServiceTest {
                 .subject("patient-456")
                 .time(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationid("corr-test")
-                .data(Map.of("resourceType", "Encounter"))
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Encounter")))
                 .build();
 
         OffsetDateTime before = OffsetDateTime.now(ZoneOffset.UTC);
@@ -133,7 +133,7 @@ class EventLogServiceTest {
                 .subject("patient-789")
                 .time(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationid("corr-null-test")
-                .data(Map.of("resourceType", "Observation"))
+                .data(objectMapper.valueToTree(Map.of("resourceType", "Observation")))
                 .build();
         // sourceeventid, facilityid are null
 
