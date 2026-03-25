@@ -12,7 +12,7 @@ class KafkaTopicPropertiesTest {
         props.setInboundEvents("cce.events.inbound");
         props.setSchedulerTriggers("cce.scheduler.triggers");
         props.setIntelligenceTriggers("cce.intelligence.triggers");
-        props.setDefaultPartitions(15);
+        props.setDefaultPartitions(25);
 
         assertEquals("cce.events.inbound", props.getInboundEvents());
         assertEquals("cce.scheduler.triggers", props.getSchedulerTriggers());

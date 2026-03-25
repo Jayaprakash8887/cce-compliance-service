@@ -460,7 +460,7 @@ See [API Reference](api-reference.md) for endpoint details.
 
 | Dimension | Strategy |
 |---|---|
-| **Horizontal** | Kafka consumer group enables multi-instance; partition assignment is automatic |
+| **Horizontal** | Kafka consumer group enables multi-instance; partition assignment is automatic (25 partitions per topic) |
 | **Database** | Connection pool per instance (20 max) |
-| **Kafka** | 3 concurrent listener threads per instance |
+| **Kafka** | 3 concurrent listener threads per instance; 25 partitions per topic (configurable via `cce.kafka.topics.default-partitions`) |
 | **API** | Stateless — any instance serves any request |

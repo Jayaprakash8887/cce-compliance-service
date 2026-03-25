@@ -4,17 +4,23 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
+import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
 
 class ObservabilityConfigTest {
 
     private final ObservabilityConfig config = new ObservabilityConfig();
 
     @Test
-    void cceMetrics_shouldRegisterAllCountersAndTimers() {
+    void cceMetrics_shouldRegisterAllCountersTimersAndGauges() {
         MeterRegistry registry = new SimpleMeterRegistry();
-        MeterBinder binder = config.cceMetrics();
+        ProtocolInstanceRepository repo = mock(ProtocolInstanceRepository.class);
+        when(repo.countByStatus(ProtocolInstanceStatus.ACTIVE)).thenReturn(5L);
+
+        MeterBinder binder = config.cceMetrics(repo);
 
         binder.bindTo(registry);
 
@@ -24,5 +30,8 @@ class ObservabilityConfigTest {
         assertNotNull(registry.find("cce.events.duplicate").counter());
         assertNotNull(registry.find("cce.events.intelligence.published").counter());
         assertNotNull(registry.find("cce.step.matching.duration").timer());
+        assertNotNull(registry.find("cce.events.processing.duration").timer());
+        assertNotNull(registry.find("cce.protocol.instances.active").gauge());
+        assertEquals(5.0, registry.find("cce.protocol.instances.active").gauge().value());
     }
 }

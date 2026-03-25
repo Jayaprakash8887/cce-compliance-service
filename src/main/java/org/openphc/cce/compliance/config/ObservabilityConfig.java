@@ -1,8 +1,11 @@
 package org.openphc.cce.compliance.config;
 
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.binder.MeterBinder;
+import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
+import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -10,7 +13,7 @@ import org.springframework.context.annotation.Configuration;
 public class ObservabilityConfig {
 
     @Bean
-    public MeterBinder cceMetrics() {
+    public MeterBinder cceMetrics(ProtocolInstanceRepository protocolInstanceRepository) {
         return registry -> {
             Counter.builder("cce.events.processed")
                     .description("Total inbound events processed")
@@ -36,6 +39,16 @@ public class ObservabilityConfig {
 
             Timer.builder("cce.step.matching.duration")
                     .description("Time taken for trigger matching pipeline")
+                    .register(registry);
+
+            Timer.builder("cce.events.processing.duration")
+                    .description("Total time taken to process an inbound event end-to-end")
+                    .register(registry);
+
+            Gauge.builder("cce.protocol.instances.active",
+                            protocolInstanceRepository,
+                            repo -> repo.countByStatus(ProtocolInstanceStatus.ACTIVE))
+                    .description("Number of currently active protocol instances")
                     .register(registry);
         };
     }

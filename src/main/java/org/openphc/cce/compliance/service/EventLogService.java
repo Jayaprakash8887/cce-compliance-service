@@ -9,6 +9,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 
@@ -50,6 +53,11 @@ public class EventLogService {
                 message.getId(), message.getSource(), message.getSubject(), status);
 
         return eventLog;
+    }
+
+    @Transactional(readOnly = true)
+    public Page<EventLog> findByPatientId(String patientId, Pageable pageable) {
+        return eventLogRepository.findBySubject(patientId, pageable);
     }
 
     public void updateStatus(EventLog eventLog, ProcessingStatus status) {
