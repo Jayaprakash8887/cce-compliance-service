@@ -50,6 +50,7 @@ public class ComplianceEngine {
     private final Counter eventsDuplicateCounter;
     private final Counter eventsZeroMatchCounter;
     private final Timer matchingDurationTimer;
+    private final Timer eventProcessingTimer;
 
     public ComplianceEngine(EventLogService eventLogService,
                             ResourceInfoExtractor resourceInfoExtractor,
@@ -76,12 +77,17 @@ public class ComplianceEngine {
         this.eventsDuplicateCounter = meterRegistry.counter("cce.events.duplicate");
         this.eventsZeroMatchCounter = meterRegistry.counter("cce.events.zero_match");
         this.matchingDurationTimer = meterRegistry.timer("cce.step.matching.duration");
+        this.eventProcessingTimer = meterRegistry.timer("cce.events.processing.duration");
     }
 
     /**
      * Main entry point for all inbound clinical events.
      */
     public void processInboundEvent(CloudEventMessage event) {
+        eventProcessingTimer.record(() -> doProcessInboundEvent(event));
+    }
+
+    private void doProcessInboundEvent(CloudEventMessage event) {
         eventsProcessedCounter.increment();
 
         // Step 1: Idempotency check

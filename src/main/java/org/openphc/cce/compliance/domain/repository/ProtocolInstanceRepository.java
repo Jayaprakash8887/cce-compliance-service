@@ -20,4 +20,6 @@ public interface ProtocolInstanceRepository extends JpaRepository<ProtocolInstan
     List<ProtocolInstance> findByPatientIdAndStatus(String patientId, ProtocolInstanceStatus status);
 
     boolean existsByProtocolDefinitionId(UUID protocolDefinitionId);
+
+    long countByStatus(ProtocolInstanceStatus status);
 }

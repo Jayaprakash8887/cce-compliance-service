@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.web;
 
 import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.web.dto.*;
+import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
 
 import java.util.Collections;
@@ -88,11 +89,35 @@ public class DtoMapper {
         return entities.stream().map(this::toDto).toList();
     }
 
+    public ProtocolInstanceDto toSummaryDto(ProtocolInstance entity) {
+        return ProtocolInstanceDto.builder()
+                .id(entity.getId())
+                .patientId(entity.getPatientId())
+                .protocolCanonical(entity.getProtocolCanonical())
+                .protocolDefinitionId(entity.getProtocolDefinition().getId())
+                .status(entity.getStatus().name())
+                .enrolledAt(entity.getEnrolledAt())
+                .createdAt(entity.getCreatedAt())
+                .updatedAt(entity.getUpdatedAt())
+                .build();
+    }
+
     public List<ProtocolInstanceDto> toDtoProtocolInstanceList(List<ProtocolInstance> entities) {
         if (entities == null) {
             return Collections.emptyList();
         }
         return entities.stream().map(this::toDto).toList();
+    }
+
+    public List<ProtocolInstanceDto> toSummaryDtoList(List<ProtocolInstance> entities) {
+        if (entities == null) {
+            return Collections.emptyList();
+        }
+        return entities.stream().map(this::toSummaryDto).toList();
+    }
+
+    public Page<EventLogDto> toDtoEventLogPage(Page<EventLog> page) {
+        return page.map(this::toDto);
     }
 
     public List<StepInstanceDto> toDtoStepList(List<StepInstance> entities) {

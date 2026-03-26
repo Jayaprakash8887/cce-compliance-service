@@ -52,13 +52,15 @@ graph LR
 
 ## 2. Topic Reference
 
-| Topic | Direction | Consumer Group | Description |
-|---|---|---|---|
-| `cce.events.inbound` | Inbound | `cce-compliance-service` | Clinical events from CCE Collector Service |
-| `cce.scheduler.triggers` | Inbound | `cce-compliance-service` | Timer-based state transitions |
-| `cce.events.inbound.dlq` | DLQ | — | Dead letter queue for failed inbound events |
-| `cce.scheduler.triggers.dlq` | DLQ | — | Dead letter queue for failed scheduler triggers |
-| `cce.intelligence.triggers` | Outbound | — | Deviation alerts for analytics (**future phase** — not published in 1.0.0) |
+| Topic | Direction | Partitions | Consumer Group | Description |
+|---|---|---|---|---|
+| `cce.events.inbound` | Inbound | 25 | `cce-compliance-service` | Clinical events from CCE Collector Service |
+| `cce.scheduler.triggers` | Inbound | 25 | `cce-compliance-service` | Timer-based state transitions |
+| `cce.events.inbound.dlq` | DLQ | 25 | — | Dead letter queue for failed inbound events |
+| `cce.scheduler.triggers.dlq` | DLQ | 25 | — | Dead letter queue for failed scheduler triggers |
+| `cce.intelligence.triggers` | Outbound | 25 | — | Deviation alerts for analytics (**future phase** — not published in 1.0.0) |
+
+All topics are declared as `NewTopic` beans in `KafkaConfig` and auto-created by Spring’s `KafkaAdmin` on startup. Partition count is configurable via `cce.kafka.topics.default-partitions` (default: 25).
 
 ## 3. Consumer Configuration
 
@@ -124,6 +126,23 @@ Spring Kafka's `DefaultErrorHandler` is configured on the container factory with
 | `max-attempts` | `3` | Number of retry attempts before DLQ |
 | `backoff-interval-ms` | `1000` | Fixed delay between retries (milliseconds) |
 | DLQ topic naming | `<topic>.dlq` | Convention: `cce.events.inbound.dlq`, `cce.scheduler.triggers.dlq` |
+
+### 3.4 Topic Provisioning
+
+```yaml
+cce.kafka:
+  topics:
+    inbound-events: cce.events.inbound
+    scheduler-triggers: cce.scheduler.triggers
+    intelligence-triggers: cce.intelligence.triggers
+    default-partitions: 25    # Partition count for all managed topics
+```
+
+All 5 topics (3 primary + 2 DLQ) are declared as `NewTopic` beans in `KafkaConfig` using `TopicBuilder`. Spring’s `KafkaAdmin` creates them on startup if they don’t already exist. Existing topics are not modified.
+
+| Property | Default | Description |
+|---|---|---|
+| `cce.kafka.topics.default-partitions` | `25` | Partition count applied to all `NewTopic` beans |
 
 ## 4. Producer Configuration
 
