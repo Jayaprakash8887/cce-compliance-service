@@ -87,7 +87,7 @@ public class ProtocolInstanceService {
             return;
         }
 
-        List<StepInstance> steps = instance.getSteps();
+        Set<StepInstance> steps = instance.getSteps();
         if (steps.isEmpty()) {
             return;
         }
@@ -132,6 +132,12 @@ public class ProtocolInstanceService {
     @Transactional(readOnly = true)
     public ProtocolInstance findById(UUID id) {
         return findByIdOrThrow(id);
+    }
+
+    @Transactional(readOnly = true)
+    public ProtocolInstance findByIdWithDetails(UUID id) {
+        return protocolInstanceRepository.findByIdWithStepsAndDeviations(id)
+                .orElseThrow(() -> new EntityNotFoundException("Protocol instance not found: " + id));
     }
 
     @Transactional(readOnly = true)

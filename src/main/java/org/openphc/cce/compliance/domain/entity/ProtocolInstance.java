@@ -6,7 +6,9 @@ import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -47,11 +49,11 @@ public class ProtocolInstance {
 
     @OneToMany(mappedBy = "protocolInstance", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
-    private List<StepInstance> steps = new ArrayList<>();
+    private Set<StepInstance> steps = new HashSet<>();
 
     @OneToMany(mappedBy = "protocolInstance", cascade = CascadeType.ALL, orphanRemoval = true)
     @Builder.Default
-    private List<Deviation> deviations = new ArrayList<>();
+    private Set<Deviation> deviations = new HashSet<>();
 
     @PrePersist
     protected void onCreate() {

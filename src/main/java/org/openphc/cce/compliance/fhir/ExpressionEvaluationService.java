@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.StringReader;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Component
 public class ExpressionEvaluationService {
@@ -33,6 +34,7 @@ public class ExpressionEvaluationService {
     private final IFhirPath fhirPath;
     private final IParser fhirJsonParser;
     private final ObjectMapper objectMapper;
+    private final ConcurrentHashMap<String, JsonValue> jsonLogicRuleCache = new ConcurrentHashMap<>();
 
     public ExpressionEvaluationService(FhirContext fhirContext, ObjectMapper objectMapper) {
         this.fhirPath = fhirContext.newFhirPath();
@@ -62,12 +64,18 @@ public class ExpressionEvaluationService {
     }
 
     private boolean evaluateJsonLogic(String expression, JsonNode eventData) {
-        JsonValue rule = parseJsonValue(expression);
-        JsonObject eventObj = toJsonObject(eventData);
-        // Wrap as {"event": ...} so JSONLogic rules can reference event.xxx paths
-        JsonObject data = Json.createObjectBuilder().add("event", eventObj).build();
-        JsonValue result = jsonLogic.apply(rule, data);
-        return jsonLogic.isTruthy(result);
+        try {
+            JsonValue rule = jsonLogicRuleCache.computeIfAbsent(expression, this::parseJsonValue);
+            JsonObject eventObj = toJsonObject(eventData);
+            // Wrap as {"event": ...} so JSONLogic rules can reference event.xxx paths
+            JsonObject data = Json.createObjectBuilder().add("event", eventObj).build();
+            JsonValue result = jsonLogic.apply(rule, data);
+            return jsonLogic.isTruthy(result);
+        } catch (Exception e) {
+            log.debug("JSONLogic evaluation returned false due to error: expression={}, reason={}",
+                    expression, e.getMessage());
+            return false;
+        }
     }
 
     private boolean evaluateFhirPath(String expression, JsonNode eventData) {
@@ -76,22 +84,28 @@ public class ExpressionEvaluationService {
             return false;
         }
 
-        String resourceJson = eventData.toString();
+        try {
+            String resourceJson = eventData.toString();
 
-        IBase resource = fhirJsonParser.parseResource(resourceJson);
-        List<IBase> results = fhirPath.evaluate(resource, expression, IBase.class);
+            IBase resource = fhirJsonParser.parseResource(resourceJson);
+            List<IBase> results = fhirPath.evaluate(resource, expression, IBase.class);
 
-        if (results.isEmpty()) {
+            if (results.isEmpty()) {
+                return false;
+            }
+
+            IBase first = results.get(0);
+            if (first instanceof BooleanType booleanType) {
+                return booleanType.booleanValue();
+            }
+
+            // Non-empty result list with non-boolean first element → truthy
+            return true;
+        } catch (Exception e) {
+            log.debug("FHIRPath evaluation returned false due to error: expression={}, reason={}",
+                    expression, e.getMessage());
             return false;
         }
-
-        IBase first = results.get(0);
-        if (first instanceof BooleanType booleanType) {
-            return booleanType.booleanValue();
-        }
-
-        // Non-empty result list with non-boolean first element → truthy
-        return true;
     }
 
     private JsonValue parseJsonValue(String json) {

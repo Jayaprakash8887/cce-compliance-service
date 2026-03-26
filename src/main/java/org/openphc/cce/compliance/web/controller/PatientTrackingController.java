@@ -61,7 +61,11 @@ public class PatientTrackingController {
     @GetMapping("/{patientId}/protocol-instances/{protocolInstanceId}")
     public ResponseEntity<ProtocolInstanceDto> getProtocolDetail(
             @PathVariable String patientId, @PathVariable UUID protocolInstanceId) {
-        ProtocolInstance instance = getInstanceForPatient(patientId, protocolInstanceId);
+        ProtocolInstance instance = protocolInstanceService.findByIdWithDetails(protocolInstanceId);
+        if (!instance.getPatientId().equals(patientId)) {
+            throw new EntityNotFoundException(
+                    "Protocol instance " + protocolInstanceId + " not found for patient " + patientId);
+        }
         return ResponseEntity.ok(dtoMapper.toDto(instance));
     }
 

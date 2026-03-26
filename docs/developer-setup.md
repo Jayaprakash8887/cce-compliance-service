@@ -28,50 +28,16 @@ cd cce-compliance-service
 ./gradlew build
 ```
 
-### 2.2 Start Infrastructure with Docker
+### 2.2 Start Infrastructure
 
-Create a `docker-compose.yml` in the project root:
-
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_DB: cce_compliance
-      POSTGRES_USER: cce_compliance
-      POSTGRES_PASSWORD: changeme
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
-  kafka:
-    image: confluentinc/cp-kafka:7.5.0
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
-
-volumes:
-  pgdata:
-```
+PostgreSQL, Kafka, and the shared database (`cce_collector`) are deployed by the **CCE Collector Service**. All CCE services share the same database.
 
 ```bash
-# Start all infrastructure
+# Start shared infrastructure (PostgreSQL on port 5433 + Kafka on port 9092)
+cd /path/to/cce-collector-service
 docker compose up -d
 
-# Verify services are running
+# Verify shared services are running
 docker compose ps
 ```
 
@@ -82,10 +48,10 @@ docker compose ps
 ./gradlew bootRun
 
 # Or using the JAR
-java -jar build/libs/compliance-service-0.1.0-SNAPSHOT.jar
+java -jar build/libs/cce-compliance-service-1.0.0.jar
 
 # With custom configuration
-DB_HOST=localhost DB_PORT=5432 java -jar build/libs/compliance-service-0.1.0-SNAPSHOT.jar
+DB_HOST=localhost DB_PORT=5433 java -jar build/libs/cce-compliance-service-1.0.0.jar
 ```
 
 ### 2.4 Verify Health
@@ -109,10 +75,10 @@ All configuration can be overridden via environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `DB_HOST` | `localhost` | PostgreSQL hostname |
-| `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_NAME` | `cce_compliance` | Database name |
-| `DB_USERNAME` | `cce_compliance` | Database username |
-| `DB_PASSWORD` | `changeme` | Database password |
+| `DB_PORT` | `5433` | PostgreSQL port (shared with collector service) |
+| `DB_NAME` | `cce_collector` | Shared database name (all CCE services) |
+| `DB_USERNAME` | `cce_user` | Database username (shared with collector service) |
+| `DB_PASSWORD` | `cce_pass` | Database password (shared with collector service) |
 | `DB_POOL_SIZE` | `20` | HikariCP max pool size |
 
 #### Kafka
@@ -201,18 +167,11 @@ cce-compliance-service/
 
 ## 5. Database Setup
 
-### 5.1 Create Database (Manual)
+All CCE services share the same database (`cce_collector`) on the PostgreSQL instance deployed by the CCE Collector Service (port `5433`, user `cce_user`). Each service owns its own tables — Flyway migrations are namespaced to avoid conflicts.
 
-```sql
--- Connect to PostgreSQL as superuser
-CREATE DATABASE cce_compliance;
-CREATE USER cce_compliance WITH PASSWORD 'changeme';
-GRANT ALL PRIVILEGES ON DATABASE cce_compliance TO cce_compliance;
+### 5.1 No Separate Database Creation Needed
 
--- Connect to cce_compliance database
-\c cce_compliance
-GRANT ALL ON SCHEMA public TO cce_compliance;
-```
+The database is created by the collector service's Docker Compose. The compliance service only runs its Flyway migrations on startup.
 
 ### 5.2 Flyway Migrations
 
@@ -220,9 +179,9 @@ Migrations are applied automatically on application startup. To run manually:
 
 ```bash
 # Using Gradle Flyway plugin (if configured)
-./gradlew flywayMigrate -Dflyway.url=jdbc:postgresql://localhost:5432/cce_compliance \
-                        -Dflyway.user=cce_compliance \
-                        -Dflyway.password=changeme
+./gradlew flywayMigrate -Dflyway.url=jdbc:postgresql://localhost:5433/cce_collector \
+                        -Dflyway.user=cce_user \
+                        -Dflyway.password=cce_pass
 
 # Check migration status
 ./gradlew flywayInfo
@@ -247,10 +206,10 @@ docker run -d \
   --name compliance-service \
   -p 8080:8080 \
   -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5432 \
-  -e DB_NAME=cce_compliance \
-  -e DB_USERNAME=cce_compliance \
-  -e DB_PASSWORD=changeme \
+  -e DB_PORT=5433 \
+  -e DB_NAME=cce_collector \
+  -e DB_USERNAME=cce_user \
+  -e DB_PASSWORD=cce_pass \
   -e KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092 \
   cce-compliance-service:latest
 ```
@@ -275,10 +234,11 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 | Command | Purpose |
 |---|---|
 | `./gradlew build -x test` | Build without tests |
-| `./gradlew build` | Build + run all tests |
+| `./gradlew build` | Build + run unit tests |
 | `./gradlew test` | Run unit tests only |
+| `./gradlew integrationTest` | Run integration tests (EmbeddedKafka + H2) |
+| `./gradlew test jacocoTestReport` | Unit tests + coverage report |
 | `./gradlew dependencies` | Show dependency tree |
-| `./gradlew dependencyUpdates` | Check for dependency updates |
 | `./gradlew bootRun` | Run application via Gradle |
 
 ## 8. Testing
@@ -295,17 +255,23 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 | Category | Location | Infrastructure |
 |---|---|---|
 | Unit tests | `src/test/java` | Mocked dependencies |
-| Integration tests | `src/test/java` | Mocked dependencies (MockMvc, mocked repos/services) |
+| Integration tests | `src/integrationTest/java` | EmbeddedKafka + H2 in-memory (PostgreSQL mode) |
 | API tests | `src/test/java` | MockMvc |
 
 ### 8.3 Running Tests
 
 ```bash
-# All tests
+# Unit tests (254 tests)
 ./gradlew test
+
+# Integration tests (24 tests — EmbeddedKafka + H2)
+./gradlew integrationTest
 
 # Specific test class
 ./gradlew test --tests ComplianceEngineTest
+
+# Full build + unit tests
+./gradlew build
 
 # With test coverage
 ./gradlew test jacocoTestReport
@@ -364,7 +330,7 @@ LOGGING_LEVEL_ORG_OPENPHC_CCE_COMPLIANCE=DEBUG java -jar target/*.jar
 
 | Issue | Cause | Solution |
 |---|---|---|
-| `Connection refused: localhost:5432` | PostgreSQL not running | Start PostgreSQL or Docker container |
+| `Connection refused: localhost:5433` | PostgreSQL not running | Start collector service infrastructure: `cd cce-collector-service && docker compose up -d` |
 | `Connection refused: localhost:9092` | Kafka not running | Start Kafka or Docker container |
 | `401 Unauthorized` on API calls | Authentication handled by gateway | Ensure requests come through the API gateway |
 | `Flyway migration failed` | Schema conflicts | Check migration scripts, reset with `flyway:clean` (dev only) |
@@ -387,7 +353,7 @@ curl -s http://localhost:8080/actuator/metrics/cce.events.processed | jq .
 curl http://localhost:8080/actuator/prometheus
 
 # Check database connectivity
-psql -h localhost -U cce_compliance -d cce_compliance -c "SELECT 1"
+psql -h localhost -p 5433 -U cce_user -d cce_collector -c "SELECT 1"
 
 # Check Kafka topics
 kafka-topics.sh --bootstrap-server localhost:9092 --list

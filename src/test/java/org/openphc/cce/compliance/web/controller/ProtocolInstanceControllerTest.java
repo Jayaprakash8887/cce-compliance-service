@@ -18,7 +18,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.UUID;
 
 import static org.mockito.Mockito.*;
@@ -58,8 +58,8 @@ class ProtocolInstanceControllerTest {
         instance.setEnrolledAt(OffsetDateTime.of(2026, 3, 15, 10, 30, 0, 0, ZoneOffset.UTC));
         instance.setCreatedAt(OffsetDateTime.of(2026, 3, 15, 10, 30, 0, 0, ZoneOffset.UTC));
         instance.setUpdatedAt(OffsetDateTime.of(2026, 3, 15, 10, 30, 0, 0, ZoneOffset.UTC));
-        instance.setSteps(new ArrayList<>());
-        instance.setDeviations(new ArrayList<>());
+        instance.setSteps(new HashSet<>());
+        instance.setDeviations(new HashSet<>());
         return instance;
     }
 
