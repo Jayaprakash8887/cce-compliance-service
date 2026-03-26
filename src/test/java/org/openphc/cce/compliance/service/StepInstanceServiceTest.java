@@ -21,7 +21,6 @@ import org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage;
 import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;

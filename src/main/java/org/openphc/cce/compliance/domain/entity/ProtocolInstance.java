@@ -5,9 +5,7 @@ import lombok.*;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
 
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
