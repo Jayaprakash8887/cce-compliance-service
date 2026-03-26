@@ -41,7 +41,7 @@ jobs:
 
 
     - name: Build container image
-      run: ./gradlew bootBuildImage "--imageName=${{ env.ECR_URI }}:latest"
+      run: ./gradlew bootBuildImage --imageName=${{ env.ECR_URI }}:latest
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
