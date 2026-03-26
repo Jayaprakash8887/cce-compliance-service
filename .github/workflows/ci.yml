@@ -14,6 +14,7 @@ env:
   AWS_REGION: ${{ vars.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
   ECR_REPO: ${{ vars.AWS_ECR_REPO }}
+  ECR_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.AWS_ECR_REPO }}
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -40,9 +41,7 @@ jobs:
 
 
     - name: Build container image
-      run: |
-        ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
-        ./gradlew bootBuildImage "--imageName=${ECR_URI}:latest"
+      run: ./gradlew bootBuildImage "--imageName=${{ env.ECR_URI }}:latest"
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
@@ -55,8 +54,7 @@ jobs:
 
     - name: Tag & Push Image
       run: |
-        ECR_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
-        docker tag ${ECR_URI}:latest ${ECR_URI}:${IMAGE_TAG}
-        docker push ${ECR_URI}:${IMAGE_TAG}
-        docker push ${ECR_URI}:latest
+        docker tag ${{ env.ECR_URI }}:latest ${{ env.ECR_URI }}:${{ env.IMAGE_TAG }}
+        docker push ${{ env.ECR_URI }}:${{ env.IMAGE_TAG }}
+        docker push ${{ env.ECR_URI }}:latest
   
