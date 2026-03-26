@@ -10,10 +10,11 @@ spring:
     name: cce-compliance-service
 
   # --- DataSource ---
+  # Connects to shared PostgreSQL + database deployed by cce-collector-service (port 5433)
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:cce_compliance}
-    username: ${DB_USERNAME:cce_compliance}
-    password: ${DB_PASSWORD:changeme}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:cce_collector}
+    username: ${DB_USERNAME:cce_user}
+    password: ${DB_PASSWORD:cce_pass}
     hikari:
       maximum-pool-size: ${DB_POOL_SIZE:20}
       minimum-idle: ${DB_POOL_MIN_IDLE:5}

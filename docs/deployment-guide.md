@@ -56,11 +56,11 @@ All configuration is externalized via environment variables. Defaults are provid
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `DB_HOST` | `localhost` | Yes | PostgreSQL host |
-| `DB_PORT` | `5432` | No | PostgreSQL port |
-| `DB_NAME` | `cce_compliance` | No | Database name |
-| `DB_USERNAME` | `cce_compliance` | Yes | Database username |
-| `DB_PASSWORD` | `changeme` | Yes | Database password |
+| `DB_HOST` | `localhost` | Yes | PostgreSQL host (shared with collector service) |
+| `DB_PORT` | `5433` | No | PostgreSQL port (collector service default) |
+| `DB_NAME` | `cce_collector` | No | Shared database name (all CCE services) |
+| `DB_USERNAME` | `cce_user` | Yes | Database username (shared with collector service) |
+| `DB_PASSWORD` | `cce_pass` | Yes | Database password (shared with collector service) |
 | `DB_POOL_SIZE` | `20` (dev) / `30` (prod) | No | HikariCP maximum pool size |
 | `DB_POOL_MIN_IDLE` | `5` (dev) / `10` (prod) | No | HikariCP minimum idle connections |
 | `DB_CONNECTION_TIMEOUT` | `30000` | No | Connection timeout (ms) |
@@ -101,25 +101,33 @@ docker run -d \
   -p 8080:8080 \
   -e SPRING_PROFILES_ACTIVE=prod \
   -e DB_HOST=postgres-host \
-  -e DB_USERNAME=cce_compliance \
-  -e DB_PASSWORD=secure-password \
+  -e DB_PORT=5433 \
+  -e DB_NAME=cce_collector \
+  -e DB_USERNAME=cce_user \
+  -e DB_PASSWORD=cce_pass \
   -e KAFKA_BOOTSTRAP_SERVERS=kafka-host:9092 \
   cce-compliance-service:1.0.0
 ```
 
 ### Docker Compose (Local Development)
 
+PostgreSQL, Kafka, and the shared database are deployed by the **CCE Collector Service**. Start the collector infrastructure, then run the compliance service:
+
 ```bash
-# Start infrastructure (PostgreSQL + Kafka)
+# 1. Start shared infrastructure (PostgreSQL on port 5433 + Kafka on port 9092)
+cd /path/to/cce-collector-service
 docker compose up -d
 
-# Run the application
+# 2. Run the compliance service (Flyway applies schema migrations automatically)
+cd /path/to/cce-compliance-service
 ./gradlew bootRun
 ```
 
-The provided `docker-compose.yml` includes:
-- **PostgreSQL 16 Alpine** on port 5432 with health checks
-- **Apache Kafka 3.7.0 KRaft** on port 9092 (no Zookeeper)
+The shared infrastructure (from [cce-collector-service deployment guide](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md)) provides:
+- **PostgreSQL 16** on port `5433` (user: `cce_user`, password: `cce_pass`, database: `cce_collector`)
+- **Apache Kafka 3.7.0 KRaft** on port `9092` (single broker, no Zookeeper)
+
+> **Note:** All CCE services share the same `cce_collector` database. Each service owns its own tables — Flyway migrations are namespaced to avoid conflicts.
 
 ---
 
@@ -196,13 +204,22 @@ spec:
 
 ## 5. Database Setup
 
-### Create Database and User
+All CCE services share the same PostgreSQL database (`cce_collector`) deployed by the [CCE Collector Service](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md). Each service owns its own tables within the shared database — Flyway migrations are namespaced to avoid conflicts.
 
-```sql
-CREATE USER cce_compliance WITH PASSWORD 'secure-password';
-CREATE DATABASE cce_compliance OWNER cce_compliance;
-GRANT ALL PRIVILEGES ON DATABASE cce_compliance TO cce_compliance;
-```
+### Shared Infrastructure
+
+| Property | Value |
+|---|---|
+| **PostgreSQL Host** | Same as collector service |
+| **PostgreSQL Port** | `5433` (local dev) / as configured (production) |
+| **Shared User** | `cce_user` |
+| **Shared Database** | `cce_collector` |
+
+### No Separate Database Creation Needed
+
+The database and user are created by the collector service's Docker Compose. The compliance service only needs to run its Flyway migrations, which happen automatically on startup.
+
+> **Compliance service tables:** `protocol_definition`, `protocol_instance`, `step_instance`, `deviation`, `trigger_index`, `event_log`, `audit_log`
 
 ### Schema Migrations
 
@@ -227,6 +244,8 @@ With default production settings (concurrency=5): `30` connections is appropriat
 ---
 
 ## 6. Kafka Setup
+
+The CCE Compliance Service shares the Kafka cluster deployed by the [CCE Collector Service](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md). The collector publishes to `cce.events.inbound`, which this service consumes.
 
 ### Topics
 
@@ -348,10 +367,10 @@ scrape_configs:
 
 ```bash
 # Full backup
-pg_dump -U cce_compliance -h postgres-host cce_compliance > backup_$(date +%Y%m%d).sql
+pg_dump -U cce_user -h postgres-host -p 5433 cce_collector > backup_$(date +%Y%m%d).sql
 
 # Restore
-psql -U cce_compliance -h postgres-host cce_compliance < backup_20250101.sql
+psql -U cce_user -h postgres-host -p 5433 cce_collector < backup_20250101.sql
 ```
 
 ### Recovery Considerations

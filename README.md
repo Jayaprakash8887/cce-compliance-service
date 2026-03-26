@@ -13,13 +13,14 @@ A core microservice within the Clinical Compliance Engine (CCE) platform. It tra
 ## Quick Start
 
 ```bash
-# Start infrastructure
-docker compose up -d
+# Start shared infrastructure (from collector service)
+cd /path/to/cce-collector-service && docker compose up -d
 
 # Build
+cd /path/to/cce-compliance-service
 ./gradlew build
 
-# Run
+# Run (Flyway applies migrations to shared cce_collector database)
 ./gradlew bootRun
 
 # Health check
