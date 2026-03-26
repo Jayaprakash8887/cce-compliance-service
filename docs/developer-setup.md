@@ -353,7 +353,7 @@ curl -s http://localhost:8080/actuator/metrics/cce.events.processed | jq .
 curl http://localhost:8080/actuator/prometheus
 
 # Check database connectivity
-psql -h localhost -U cce_compliance -d cce_compliance -c "SELECT 1"
+psql -h localhost -p 5433 -U cce_user -d cce_collector -c "SELECT 1"
 
 # Check Kafka topics
 kafka-topics.sh --bootstrap-server localhost:9092 --list
