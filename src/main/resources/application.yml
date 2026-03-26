@@ -16,6 +16,10 @@ spring:
     password: ${DB_PASSWORD:changeme}
     hikari:
       maximum-pool-size: ${DB_POOL_SIZE:20}
+      minimum-idle: ${DB_POOL_MIN_IDLE:5}
+      connection-timeout: ${DB_CONNECTION_TIMEOUT:30000}
+      idle-timeout: ${DB_IDLE_TIMEOUT:600000}
+      max-lifetime: ${DB_MAX_LIFETIME:1800000}
 
   # --- JPA / Hibernate ---
   jpa:

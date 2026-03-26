@@ -275,10 +275,11 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 | Command | Purpose |
 |---|---|
 | `./gradlew build -x test` | Build without tests |
-| `./gradlew build` | Build + run all tests |
+| `./gradlew build` | Build + run unit tests |
 | `./gradlew test` | Run unit tests only |
+| `./gradlew integrationTest` | Run integration tests (EmbeddedKafka + H2) |
+| `./gradlew test jacocoTestReport` | Unit tests + coverage report |
 | `./gradlew dependencies` | Show dependency tree |
-| `./gradlew dependencyUpdates` | Check for dependency updates |
 | `./gradlew bootRun` | Run application via Gradle |
 
 ## 8. Testing
@@ -295,17 +296,23 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 | Category | Location | Infrastructure |
 |---|---|---|
 | Unit tests | `src/test/java` | Mocked dependencies |
-| Integration tests | `src/test/java` | Mocked dependencies (MockMvc, mocked repos/services) |
+| Integration tests | `src/integrationTest/java` | EmbeddedKafka + H2 in-memory (PostgreSQL mode) |
 | API tests | `src/test/java` | MockMvc |
 
 ### 8.3 Running Tests
 
 ```bash
-# All tests
+# Unit tests (254 tests)
 ./gradlew test
+
+# Integration tests (24 tests — EmbeddedKafka + H2)
+./gradlew integrationTest
 
 # Specific test class
 ./gradlew test --tests ComplianceEngineTest
+
+# Full build + unit tests
+./gradlew build
 
 # With test coverage
 ./gradlew test jacocoTestReport

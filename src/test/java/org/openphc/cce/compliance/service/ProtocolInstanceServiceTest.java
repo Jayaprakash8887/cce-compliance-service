@@ -18,6 +18,7 @@ import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -251,8 +252,8 @@ class ProtocolInstanceServiceTest {
                 .patientId("patient-1")
                 .protocolCanonical("http://openphc.org/PlanDefinition/anc-high-risk|1.0.0")
                 .status(status)
-                .steps(new ArrayList<>())
-                .deviations(new ArrayList<>())
+                .steps(new HashSet<>())
+                .deviations(new HashSet<>())
                 .build();
     }
 

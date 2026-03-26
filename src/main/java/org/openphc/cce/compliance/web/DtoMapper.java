@@ -5,6 +5,7 @@ import org.openphc.cce.compliance.web.dto.*;
 import org.springframework.data.domain.Page;
 import org.springframework.stereotype.Component;
 
+import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
@@ -120,14 +121,14 @@ public class DtoMapper {
         return page.map(this::toDto);
     }
 
-    public List<StepInstanceDto> toDtoStepList(List<StepInstance> entities) {
+    public List<StepInstanceDto> toDtoStepList(Collection<StepInstance> entities) {
         if (entities == null) {
             return Collections.emptyList();
         }
         return entities.stream().map(this::toDto).toList();
     }
 
-    public List<DeviationDto> toDtoDeviationList(List<Deviation> entities) {
+    public List<DeviationDto> toDtoDeviationList(Collection<Deviation> entities) {
         if (entities == null) {
             return Collections.emptyList();
         }

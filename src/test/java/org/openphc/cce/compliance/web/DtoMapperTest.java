@@ -13,6 +13,7 @@ import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -68,8 +69,8 @@ class DtoMapperTest {
                 .enrolledAt(OffsetDateTime.of(2026, 2, 1, 8, 0, 0, 0, ZoneOffset.UTC))
                 .createdAt(OffsetDateTime.of(2026, 2, 1, 8, 0, 0, 0, ZoneOffset.UTC))
                 .updatedAt(OffsetDateTime.of(2026, 2, 1, 9, 0, 0, 0, ZoneOffset.UTC))
-                .steps(Collections.emptyList())
-                .deviations(Collections.emptyList())
+                .steps(Collections.emptySet())
+                .deviations(Collections.emptySet())
                 .build();
 
         ProtocolInstanceDto dto = mapper.toDto(entity);
@@ -122,8 +123,8 @@ class DtoMapperTest {
                 .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
 
-        instance.setSteps(List.of(step));
-        instance.setDeviations(List.of(deviation));
+        instance.setSteps(Set.of(step));
+        instance.setDeviations(Set.of(deviation));
 
         ProtocolInstanceDto dto = mapper.toDto(instance);
 

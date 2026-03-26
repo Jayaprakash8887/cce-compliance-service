@@ -26,6 +26,7 @@ import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -276,6 +277,7 @@ class ComplianceEngineTest {
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
             when(protocolInstanceService.findById(protocolInstanceId)).thenReturn(protocolInstance);
             when(stepInstanceService.findActionableStep(protocolInstanceId, "new-action")).thenReturn(null);
+            when(protocolDefinitionService.findById(protocolDef.getId())).thenReturn(protocolDef);
             mockParserReturnsActionForInitialStep(protocolDef, "new-action", 3, "must");
             when(stepInstanceService.createStep(eq(protocolInstance), eq("new-action"),
                     eq(0), any(), any(), any(), eq("must"))).thenReturn(newStep);
@@ -493,8 +495,8 @@ class ComplianceEngineTest {
                 .protocolCanonical(protocolDef.getUrl() + "|" + protocolDef.getVersion())
                 .status(ProtocolInstanceStatus.ACTIVE)
                 .enrolledAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .steps(new ArrayList<>())
-                .deviations(new ArrayList<>())
+                .steps(new HashSet<>())
+                .deviations(new HashSet<>())
                 .build();
     }
 

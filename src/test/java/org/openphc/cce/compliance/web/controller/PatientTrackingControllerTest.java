@@ -23,7 +23,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 
@@ -81,8 +81,8 @@ class PatientTrackingControllerTest {
         instance.setEnrolledAt(OffsetDateTime.of(2026, 3, 15, 10, 30, 0, 0, ZoneOffset.UTC));
         instance.setCreatedAt(OffsetDateTime.of(2026, 3, 15, 10, 30, 0, 0, ZoneOffset.UTC));
         instance.setUpdatedAt(OffsetDateTime.of(2026, 3, 15, 10, 30, 0, 0, ZoneOffset.UTC));
-        instance.setSteps(new ArrayList<>());
-        instance.setDeviations(new ArrayList<>());
+        instance.setSteps(new HashSet<>());
+        instance.setDeviations(new HashSet<>());
         return instance;
     }
 
@@ -150,7 +150,7 @@ class PatientTrackingControllerTest {
     @Test
     void getProtocolDetail_found_returns200() throws Exception {
         ProtocolInstance instance = buildProtocolInstance();
-        when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
+        when(protocolInstanceService.findByIdWithDetails(INSTANCE_ID)).thenReturn(instance);
 
         mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}",
                         PATIENT_ID, INSTANCE_ID))
@@ -162,7 +162,7 @@ class PatientTrackingControllerTest {
 
     @Test
     void getProtocolDetail_notFound_returns404() throws Exception {
-        when(protocolInstanceService.findById(INSTANCE_ID))
+        when(protocolInstanceService.findByIdWithDetails(INSTANCE_ID))
                 .thenThrow(new EntityNotFoundException("Protocol instance not found: " + INSTANCE_ID));
 
         mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}",
@@ -173,7 +173,7 @@ class PatientTrackingControllerTest {
     @Test
     void getProtocolDetail_wrongPatient_returns404() throws Exception {
         ProtocolInstance instance = buildProtocolInstance();
-        when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
+        when(protocolInstanceService.findByIdWithDetails(INSTANCE_ID)).thenReturn(instance);
 
         mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}",
                         "wrong-patient", INSTANCE_ID))
