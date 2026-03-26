@@ -11,10 +11,6 @@ permissions:
   packages: write
 
 env:
-  AWS_REGION: ${{ vars.AWS_REGION }}
-  AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
-  ECR_REPO: ${{ vars.AWS_ECR_REPO }}
-  ECR_URI: ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com/${{ vars.AWS_ECR_REPO }}
   IMAGE_TAG: ${{ github.sha }}
 
 jobs:
@@ -24,21 +20,36 @@ jobs:
     steps:
     - uses: actions/checkout@v5
 
+    - name: Set ECR environment variables
+      env:
+        RAW_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        RAW_REGION: ${{ vars.AWS_REGION }}
+        RAW_REPO: ${{ vars.AWS_ECR_REPO }}
+        RAW_ROLE: ${{ vars.AWS_ROLE }}
+      run: |
+        ACCOUNT_ID=$(printf '%s' "$RAW_ACCOUNT_ID" | tr -d '[:space:]')
+        REGION=$(printf '%s' "$RAW_REGION" | tr -d '[:space:]')
+        REPO=$(printf '%s' "$RAW_REPO" | tr -d '[:space:]')
+        ROLE=$(printf '%s' "$RAW_ROLE" | tr -d '[:space:]')
+        ECR_URI="${ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com/${REPO}"
+        echo "AWS_ACCOUNT_ID=${ACCOUNT_ID}" >> "$GITHUB_ENV"
+        echo "AWS_REGION=${REGION}" >> "$GITHUB_ENV"
+        echo "ECR_REPO=${REPO}" >> "$GITHUB_ENV"
+        echo "AWS_ROLE=${ROLE}" >> "$GITHUB_ENV"
+        echo "ECR_URI=${ECR_URI}" >> "$GITHUB_ENV"
+        echo "Resolved ECR_URI: ${ECR_URI}"
+
     - name: Set up JDK 21
       uses: actions/setup-java@v5
       with:
         java-version: '21'
         distribution: 'temurin'
 
-    # Configure Gradle for optimal use in GitHub Actions, including caching of downloaded dependencies.
-    # See: https://github.com/gradle/actions/blob/main/setup-gradle/README.md
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4
 
     - name: Build with Gradle
- 
       run: ./gradlew build
-
 
     - name: Build container image
       run: ./gradlew bootBuildImage --imageName=${{ env.ECR_URI }}:latest
@@ -46,7 +57,7 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/${{ vars.AWS_ROLE }}
+        role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT_ID }}:role/${{ env.AWS_ROLE }}
         aws-region: ${{ env.AWS_REGION }}
 
     - name: Login to Amazon ECR
@@ -54,7 +65,6 @@ jobs:
 
     - name: Tag & Push Image
       run: |
-        docker tag ${{ env.ECR_URI }}:latest ${{ env.ECR_URI }}:${{ env.IMAGE_TAG }}
-        docker push ${{ env.ECR_URI }}:${{ env.IMAGE_TAG }}
-        docker push ${{ env.ECR_URI }}:latest
-  
+        docker tag "${{ env.ECR_URI }}:latest" "${{ env.ECR_URI }}:${{ env.IMAGE_TAG }}"
+        docker push "${{ env.ECR_URI }}:${{ env.IMAGE_TAG }}"
+        docker push "${{ env.ECR_URI }}:latest"
