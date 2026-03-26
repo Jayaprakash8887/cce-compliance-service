@@ -41,8 +41,8 @@ jobs:
 
     - name: Build container image
       run: |
-        ECR_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}
-        ./gradlew bootBuildImage --imageName=${ECR_URI}:latest
+        ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}"
+        ./gradlew bootBuildImage "--imageName=${ECR_URI}:latest"
     
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v4
