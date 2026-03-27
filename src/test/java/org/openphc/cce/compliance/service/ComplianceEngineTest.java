@@ -100,7 +100,7 @@ class ComplianceEngineTest {
             engine.processInboundEvent(event);
 
             verify(eventLogService, never()).updateStatus(any(), eq(ProcessingStatus.MATCHED));
-            assertEquals(1.0, meterRegistry.counter("cce.events.zero_match").count());
+            assertEquals(1.0, meterRegistry.counter("cce.events.matched", "status", "zero_match").count());
         }
     }
 
@@ -135,7 +135,7 @@ class ComplianceEngineTest {
             verify(protocolInstanceService).enrollPatient(eq("patient-1"), eq(protocolDef), any());
             verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()));
             verify(eventLogService).updateStatus(eventLog, ProcessingStatus.MATCHED);
-            assertEquals(1.0, meterRegistry.counter("cce.events.matched").count());
+            assertEquals(1.0, meterRegistry.counter("cce.events.matched", "status", "matched").count());
         }
     }
 
@@ -352,7 +352,7 @@ class ComplianceEngineTest {
 
             verify(stepInstanceService, never()).completeStep(any(), any(), any());
             verify(eventLogService, never()).updateStatus(any(), eq(ProcessingStatus.MATCHED));
-            assertEquals(1.0, meterRegistry.counter("cce.events.zero_match").count());
+            assertEquals(1.0, meterRegistry.counter("cce.events.matched", "status", "zero_match").count());
         }
     }
 

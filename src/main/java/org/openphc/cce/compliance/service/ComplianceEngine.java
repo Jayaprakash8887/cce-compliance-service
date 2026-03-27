@@ -74,9 +74,11 @@ public class ComplianceEngine {
         this.auditService = auditService;
 
         this.eventsProcessedCounter = meterRegistry.counter("cce.events.processed");
-        this.eventsMatchedCounter = meterRegistry.counter("cce.events.matched");
+        this.eventsMatchedCounter = Counter.builder("cce.events.matched")
+                .tag("status", "matched").register(meterRegistry);
         this.eventsDuplicateCounter = meterRegistry.counter("cce.events.duplicate");
-        this.eventsZeroMatchCounter = meterRegistry.counter("cce.events.zero_match");
+        this.eventsZeroMatchCounter = Counter.builder("cce.events.matched")
+                .tag("status", "zero_match").register(meterRegistry);
         this.matchingDurationTimer = meterRegistry.timer("cce.step.matching.duration");
         this.eventProcessingTimer = meterRegistry.timer("cce.events.processing.duration");
     }
