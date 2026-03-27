@@ -17,7 +17,6 @@ import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
