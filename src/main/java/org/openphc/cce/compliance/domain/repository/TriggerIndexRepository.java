@@ -25,7 +25,7 @@ public interface TriggerIndexRepository extends JpaRepository<TriggerIndex, Trig
                 FROM TriggerIndex t2
                 WHERE t2.id.protocolDefinitionId = t.id.protocolDefinitionId
                   AND t2.id.actionId = t.id.actionId
-                  AND t2.id.resourceType = t.id.resourceType
+                  AND t2.id.resourceType = :resourceType
             )
             """)
     List<Object[]> findStructuralMatches(
