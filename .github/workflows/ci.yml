@@ -2,7 +2,7 @@ name: Java CI and ECR Push
 
 on:
   push:
-    branches: [ "release-0.1.0" ]
+    branches: [ "release-1.0.0" ]
   workflow_dispatch:
 
 permissions:
@@ -59,7 +59,7 @@ jobs:
   trigger-deploy:
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && success()
+    if: github.event_name == 'push' && success()
     env:
       GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
     steps:
