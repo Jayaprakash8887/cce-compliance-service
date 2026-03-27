@@ -70,7 +70,7 @@ class ProtocolInstanceControllerTest {
         ProtocolInstance instance = buildProtocolInstance(ProtocolInstanceStatus.ACTIVE);
         when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
 
-        mockMvc.perform(get("/v1/protocol-instances/{id}", INSTANCE_ID))
+        mockMvc.perform(get("/v1/compliance/protocol-instances/{id}", INSTANCE_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(INSTANCE_ID.toString()))
                 .andExpect(jsonPath("$.patientId").value("patient-001"))
@@ -84,7 +84,7 @@ class ProtocolInstanceControllerTest {
         when(protocolInstanceService.findById(INSTANCE_ID))
                 .thenThrow(new EntityNotFoundException("Protocol instance not found: " + INSTANCE_ID));
 
-        mockMvc.perform(get("/v1/protocol-instances/{id}", INSTANCE_ID))
+        mockMvc.perform(get("/v1/compliance/protocol-instances/{id}", INSTANCE_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Protocol instance not found: " + INSTANCE_ID));
     }
@@ -96,7 +96,7 @@ class ProtocolInstanceControllerTest {
         ProtocolInstance instance = buildProtocolInstance(ProtocolInstanceStatus.WITHDRAWN);
         when(protocolInstanceService.withdrawProtocol(INSTANCE_ID)).thenReturn(instance);
 
-        mockMvc.perform(post("/v1/protocol-instances/{id}/withdraw", INSTANCE_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-instances/{id}/withdraw", INSTANCE_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("WITHDRAWN"));
     }
@@ -107,7 +107,7 @@ class ProtocolInstanceControllerTest {
                 .thenThrow(new IllegalStateException(
                         "Cannot withdraw protocol instance in state COMPLETED: " + INSTANCE_ID));
 
-        mockMvc.perform(post("/v1/protocol-instances/{id}/withdraw", INSTANCE_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-instances/{id}/withdraw", INSTANCE_ID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
                         "Cannot withdraw protocol instance in state COMPLETED: " + INSTANCE_ID));
@@ -118,7 +118,7 @@ class ProtocolInstanceControllerTest {
         when(protocolInstanceService.withdrawProtocol(INSTANCE_ID))
                 .thenThrow(new EntityNotFoundException("Protocol instance not found: " + INSTANCE_ID));
 
-        mockMvc.perform(post("/v1/protocol-instances/{id}/withdraw", INSTANCE_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-instances/{id}/withdraw", INSTANCE_ID))
                 .andExpect(status().isNotFound());
     }
 }

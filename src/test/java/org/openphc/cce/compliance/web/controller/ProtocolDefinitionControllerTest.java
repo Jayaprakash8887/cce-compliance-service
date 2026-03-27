@@ -62,7 +62,7 @@ class ProtocolDefinitionControllerTest {
         String requestBody = objectMapper.writeValueAsString(
                 java.util.Map.of("planDefinitionJson", "{\"resourceType\":\"PlanDefinition\"}"));
 
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -79,7 +79,7 @@ class ProtocolDefinitionControllerTest {
         String requestBody = objectMapper.writeValueAsString(
                 java.util.Map.of("planDefinitionJson", ""));
 
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isBadRequest());
@@ -96,7 +96,7 @@ class ProtocolDefinitionControllerTest {
         String requestBody = objectMapper.writeValueAsString(
                 java.util.Map.of("planDefinitionJson", "{\"resourceType\":\"PlanDefinition\"}"));
 
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isBadRequest())
@@ -111,7 +111,7 @@ class ProtocolDefinitionControllerTest {
         ProtocolDefinition protocolDef = buildProtocolDefinition();
         when(protocolDefinitionService.findAll()).thenReturn(List.of(protocolDef));
 
-        mockMvc.perform(get("/v1/protocol-definitions"))
+        mockMvc.perform(get("/v1/compliance/protocol-definitions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(PROTOCOL_ID.toString()))
                 .andExpect(jsonPath("$[0].url").value("http://example.org/PlanDefinition/hiv-treatment"));
@@ -121,7 +121,7 @@ class ProtocolDefinitionControllerTest {
     void listAll_empty_returnsEmptyList() throws Exception {
         when(protocolDefinitionService.findAll()).thenReturn(List.of());
 
-        mockMvc.perform(get("/v1/protocol-definitions"))
+        mockMvc.perform(get("/v1/compliance/protocol-definitions"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$").isEmpty());
@@ -134,7 +134,7 @@ class ProtocolDefinitionControllerTest {
         ProtocolDefinition protocolDef = buildProtocolDefinition();
         when(protocolDefinitionService.findById(PROTOCOL_ID)).thenReturn(protocolDef);
 
-        mockMvc.perform(get("/v1/protocol-definitions/{id}", PROTOCOL_ID))
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/{id}", PROTOCOL_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(PROTOCOL_ID.toString()))
                 .andExpect(jsonPath("$.canonical").value(
@@ -146,7 +146,7 @@ class ProtocolDefinitionControllerTest {
         when(protocolDefinitionService.findById(PROTOCOL_ID))
                 .thenThrow(new EntityNotFoundException("Protocol definition not found: " + PROTOCOL_ID));
 
-        mockMvc.perform(get("/v1/protocol-definitions/{id}", PROTOCOL_ID))
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/{id}", PROTOCOL_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value("Protocol definition not found: " + PROTOCOL_ID));
     }
@@ -159,7 +159,7 @@ class ProtocolDefinitionControllerTest {
         when(protocolDefinitionService.findByUrl("http://example.org/PlanDefinition/hiv-treatment"))
                 .thenReturn(List.of(protocolDef));
 
-        mockMvc.perform(get("/v1/protocol-definitions/by-url")
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/by-url")
                         .param("url", "http://example.org/PlanDefinition/hiv-treatment"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].version").value("1.0"));
@@ -174,7 +174,7 @@ class ProtocolDefinitionControllerTest {
                 "http://example.org/PlanDefinition/hiv-treatment", "1.0"))
                 .thenReturn(Optional.of(protocolDef));
 
-        mockMvc.perform(get("/v1/protocol-definitions/by-url-version")
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/by-url-version")
                         .param("url", "http://example.org/PlanDefinition/hiv-treatment")
                         .param("version", "1.0"))
                 .andExpect(status().isOk())
@@ -186,7 +186,7 @@ class ProtocolDefinitionControllerTest {
         when(protocolDefinitionService.findByUrlAndVersion("http://example.org/unknown", "1.0"))
                 .thenReturn(Optional.empty());
 
-        mockMvc.perform(get("/v1/protocol-definitions/by-url-version")
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/by-url-version")
                         .param("url", "http://example.org/unknown")
                         .param("version", "1.0"))
                 .andExpect(status().isNotFound());
@@ -200,7 +200,7 @@ class ProtocolDefinitionControllerTest {
         protocolDef.setStatus(ProtocolDefinitionStatus.RETIRED);
         when(protocolDefinitionService.retireProtocol(PROTOCOL_ID)).thenReturn(protocolDef);
 
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/retire", PROTOCOL_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/retire", PROTOCOL_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RETIRED"));
     }
@@ -210,7 +210,7 @@ class ProtocolDefinitionControllerTest {
         when(protocolDefinitionService.retireProtocol(PROTOCOL_ID))
                 .thenThrow(new IllegalStateException("Protocol definition is already retired: " + PROTOCOL_ID));
 
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/retire", PROTOCOL_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/retire", PROTOCOL_ID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
                         "Protocol definition is already retired: " + PROTOCOL_ID));
@@ -222,7 +222,7 @@ class ProtocolDefinitionControllerTest {
     void rebuildIndex_returns200() throws Exception {
         doNothing().when(protocolDefinitionService).rebuildIndex(PROTOCOL_ID);
 
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/rebuild-index", PROTOCOL_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/rebuild-index", PROTOCOL_ID))
                 .andExpect(status().isOk());
 
         verify(protocolDefinitionService).rebuildIndex(PROTOCOL_ID);
@@ -233,7 +233,7 @@ class ProtocolDefinitionControllerTest {
         doThrow(new EntityNotFoundException("Protocol definition not found: " + PROTOCOL_ID))
                 .when(protocolDefinitionService).rebuildIndex(PROTOCOL_ID);
 
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/rebuild-index", PROTOCOL_ID))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/rebuild-index", PROTOCOL_ID))
                 .andExpect(status().isNotFound());
     }
 
@@ -243,7 +243,7 @@ class ProtocolDefinitionControllerTest {
     void delete_noInstances_returns204() throws Exception {
         doNothing().when(protocolDefinitionService).deleteProtocol(PROTOCOL_ID);
 
-        mockMvc.perform(delete("/v1/protocol-definitions/{id}", PROTOCOL_ID))
+        mockMvc.perform(delete("/v1/compliance/protocol-definitions/{id}", PROTOCOL_ID))
                 .andExpect(status().isNoContent());
 
         verify(protocolDefinitionService).deleteProtocol(PROTOCOL_ID);
@@ -255,7 +255,7 @@ class ProtocolDefinitionControllerTest {
                 "Cannot delete protocol definition with existing instances: " + PROTOCOL_ID))
                 .when(protocolDefinitionService).deleteProtocol(PROTOCOL_ID);
 
-        mockMvc.perform(delete("/v1/protocol-definitions/{id}", PROTOCOL_ID))
+        mockMvc.perform(delete("/v1/compliance/protocol-definitions/{id}", PROTOCOL_ID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
                         "Cannot delete protocol definition with existing instances: " + PROTOCOL_ID));
@@ -266,7 +266,7 @@ class ProtocolDefinitionControllerTest {
         doThrow(new EntityNotFoundException("Protocol definition not found: " + PROTOCOL_ID))
                 .when(protocolDefinitionService).deleteProtocol(PROTOCOL_ID);
 
-        mockMvc.perform(delete("/v1/protocol-definitions/{id}", PROTOCOL_ID))
+        mockMvc.perform(delete("/v1/compliance/protocol-definitions/{id}", PROTOCOL_ID))
                 .andExpect(status().isNotFound());
     }
 }

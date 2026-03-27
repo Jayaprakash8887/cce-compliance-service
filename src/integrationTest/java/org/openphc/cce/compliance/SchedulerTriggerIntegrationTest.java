@@ -77,7 +77,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated());

@@ -114,7 +114,7 @@ class PatientTrackingControllerTest {
         ProtocolInstance instance = buildProtocolInstance();
         when(protocolInstanceService.findByPatientId(PATIENT_ID)).thenReturn(List.of(instance));
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances", PATIENT_ID))
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances", PATIENT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(INSTANCE_ID.toString()))
                 .andExpect(jsonPath("$[0].patientId").value(PATIENT_ID))
@@ -126,7 +126,7 @@ class PatientTrackingControllerTest {
     void listProtocols_emptyList_returns200() throws Exception {
         when(protocolInstanceService.findByPatientId(PATIENT_ID)).thenReturn(List.of());
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances", PATIENT_ID))
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances", PATIENT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$").isArray())
                 .andExpect(jsonPath("$").isEmpty());
@@ -139,7 +139,7 @@ class PatientTrackingControllerTest {
         ProtocolInstance instance = buildProtocolInstance();
         when(protocolInstanceService.findActiveByPatientId(PATIENT_ID)).thenReturn(List.of(instance));
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/active", PATIENT_ID))
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/active", PATIENT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].status").value("ACTIVE"));
     }
@@ -151,7 +151,7 @@ class PatientTrackingControllerTest {
         ProtocolInstance instance = buildProtocolInstance();
         when(protocolInstanceService.findByIdWithDetails(INSTANCE_ID)).thenReturn(instance);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}",
                         PATIENT_ID, INSTANCE_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(INSTANCE_ID.toString()))
@@ -164,7 +164,7 @@ class PatientTrackingControllerTest {
         when(protocolInstanceService.findByIdWithDetails(INSTANCE_ID))
                 .thenThrow(new EntityNotFoundException("Protocol instance not found: " + INSTANCE_ID));
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}",
                         PATIENT_ID, INSTANCE_ID))
                 .andExpect(status().isNotFound());
     }
@@ -174,7 +174,7 @@ class PatientTrackingControllerTest {
         ProtocolInstance instance = buildProtocolInstance();
         when(protocolInstanceService.findByIdWithDetails(INSTANCE_ID)).thenReturn(instance);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}",
                         "wrong-patient", INSTANCE_ID))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.message").value(
@@ -190,7 +190,7 @@ class PatientTrackingControllerTest {
         when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
         when(stepInstanceService.findByProtocolInstanceId(INSTANCE_ID)).thenReturn(List.of(step));
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/steps",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}/steps",
                         PATIENT_ID, INSTANCE_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(STEP_ID.toString()))
@@ -203,7 +203,7 @@ class PatientTrackingControllerTest {
         ProtocolInstance instance = buildProtocolInstance();
         when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/steps",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}/steps",
                         "wrong-patient", INSTANCE_ID))
                 .andExpect(status().isNotFound());
     }
@@ -217,7 +217,7 @@ class PatientTrackingControllerTest {
         when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
         when(deviationService.findByProtocolInstanceId(INSTANCE_ID)).thenReturn(List.of(deviation));
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/deviations",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}/deviations",
                         PATIENT_ID, INSTANCE_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(DEVIATION_ID.toString()))
@@ -229,7 +229,7 @@ class PatientTrackingControllerTest {
         ProtocolInstance instance = buildProtocolInstance();
         when(protocolInstanceService.findById(INSTANCE_ID)).thenReturn(instance);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{protocolInstanceId}/deviations",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{protocolInstanceId}/deviations",
                         "wrong-patient", INSTANCE_ID))
                 .andExpect(status().isNotFound());
     }
@@ -254,7 +254,7 @@ class PatientTrackingControllerTest {
         Page<EventLog> page = new PageImpl<>(List.of(event), PageRequest.of(0, 20), 1);
         when(eventLogService.findByPatientId(eq(PATIENT_ID), any(PageRequest.class))).thenReturn(page);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/events", PATIENT_ID)
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/events", PATIENT_ID)
                         .param("page", "0")
                         .param("size", "20"))
                 .andExpect(status().isOk())
@@ -268,7 +268,7 @@ class PatientTrackingControllerTest {
         Page<EventLog> page = new PageImpl<>(List.of(), PageRequest.of(0, 20), 0);
         when(eventLogService.findByPatientId(eq(PATIENT_ID), any(PageRequest.class))).thenReturn(page);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/events", PATIENT_ID))
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/events", PATIENT_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.content").isArray())
                 .andExpect(jsonPath("$.content").isEmpty())
