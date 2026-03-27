@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/v1/protocol-instances")
+@RequestMapping("/v1/compliance/protocol-instances")
 public class ProtocolInstanceController {
 
     private final ProtocolInstanceService protocolInstanceService;
