@@ -58,7 +58,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String response = mockMvc.perform(post("/v1/protocol-definitions")
+        String response = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -84,7 +84,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated());
@@ -136,7 +136,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String response = mockMvc.perform(post("/v1/protocol-definitions")
+        String response = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -145,7 +145,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
         UUID protocolId = UUID.fromString(objectMapper.readTree(response).get("id").asText());
 
         // Retire
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/retire", protocolId))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/retire", protocolId))
                 .andExpect(status().isOk());
 
         // Verify audit entry for retire

@@ -69,7 +69,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
                 Map.of("planDefinitionJson", modifiedJson));
 
         try {
-            String response = mockMvc.perform(post("/v1/protocol-definitions")
+            String response = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                             .contentType(MediaType.APPLICATION_JSON)
                             .content(requestBody))
                     .andReturn().getResponse().getContentAsString();

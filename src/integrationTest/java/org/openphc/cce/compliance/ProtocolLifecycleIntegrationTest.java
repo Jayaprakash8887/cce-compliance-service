@@ -46,7 +46,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", planDefJson));
 
-        String responseJson = mockMvc.perform(post("/v1/protocol-definitions")
+        String responseJson = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -75,13 +75,13 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
                 Map.of("planDefinitionJson", modifiedJson));
 
         // First load succeeds
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated());
 
         // Second load fails — duplicate
-        mockMvc.perform(post("/v1/protocol-definitions")
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isBadRequest());
@@ -95,7 +95,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String responseJson = mockMvc.perform(post("/v1/protocol-definitions")
+        String responseJson = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -105,7 +105,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         assertThat(triggerIndexRepository.findByIdProtocolDefinitionId(protocolId)).isNotEmpty();
 
         // Retire
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/retire", protocolId))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/retire", protocolId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("RETIRED"));
 
@@ -121,7 +121,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String responseJson = mockMvc.perform(post("/v1/protocol-definitions")
+        String responseJson = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -131,7 +131,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         int originalCount = triggerIndexRepository.findByIdProtocolDefinitionId(protocolId).size();
 
         // Rebuild
-        mockMvc.perform(post("/v1/protocol-definitions/{id}/rebuild-index", protocolId))
+        mockMvc.perform(post("/v1/compliance/protocol-definitions/{id}/rebuild-index", protocolId))
                 .andExpect(status().isOk());
 
         // Verify: same count after rebuild
@@ -146,7 +146,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String responseJson = mockMvc.perform(post("/v1/protocol-definitions")
+        String responseJson = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -155,7 +155,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         UUID protocolId = UUID.fromString(objectMapper.readTree(responseJson).get("id").asText());
 
         // Delete
-        mockMvc.perform(delete("/v1/protocol-definitions/{id}", protocolId))
+        mockMvc.perform(delete("/v1/compliance/protocol-definitions/{id}", protocolId))
                 .andExpect(status().isNoContent());
 
         // Verify: gone
@@ -170,7 +170,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String responseJson = mockMvc.perform(post("/v1/protocol-definitions")
+        String responseJson = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -178,7 +178,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
 
         UUID protocolId = UUID.fromString(objectMapper.readTree(responseJson).get("id").asText());
 
-        mockMvc.perform(get("/v1/protocol-definitions/{id}", protocolId))
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/{id}", protocolId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(protocolId.toString()))
                 .andExpect(jsonPath("$.canonical").value(
@@ -187,7 +187,7 @@ class ProtocolLifecycleIntegrationTest extends IntegrationTestBase {
 
     @Test
     void getById_notFound_returns404() throws Exception {
-        mockMvc.perform(get("/v1/protocol-definitions/{id}", UUID.randomUUID()))
+        mockMvc.perform(get("/v1/compliance/protocol-definitions/{id}", UUID.randomUUID()))
                 .andExpect(status().isNotFound());
     }
 }

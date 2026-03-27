@@ -62,7 +62,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String requestBody = objectMapper.writeValueAsString(
                 Map.of("planDefinitionJson", modifiedJson));
 
-        String response = mockMvc.perform(post("/v1/protocol-definitions")
+        String response = mockMvc.perform(post("/v1/compliance/protocol-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestBody))
                 .andExpect(status().isCreated())
@@ -102,7 +102,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-track-list-" + UUID.randomUUID();
         enrollPatient(patientId);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances", patientId))
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances", patientId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(greaterThanOrEqualTo(1))))
                 .andExpect(jsonPath("$[0].patientId").value(patientId));
@@ -114,7 +114,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-track-active-" + UUID.randomUUID();
         enrollPatient(patientId);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/active", patientId))
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/active", patientId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(greaterThanOrEqualTo(1))))
                 .andExpect(jsonPath("$[0].status").value("ACTIVE"));
@@ -129,7 +129,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         var instances = protocolInstanceRepository.findByPatientId(patientId);
         UUID instanceId = instances.get(0).getId();
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{instanceId}",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{instanceId}",
                         patientId, instanceId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(instanceId.toString()))
@@ -146,7 +146,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         var instances = protocolInstanceRepository.findByPatientId(patientId);
         UUID instanceId = instances.get(0).getId();
 
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{instanceId}/steps",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{instanceId}/steps",
                         patientId, instanceId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(greaterThanOrEqualTo(1))));
@@ -158,7 +158,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-track-events-" + UUID.randomUUID();
         enrollPatient(patientId);
 
-        mockMvc.perform(get("/v1/patients/{patientId}/events", patientId)
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/events", patientId)
                         .param("page", "0")
                         .param("size", "10"))
                 .andExpect(status().isOk())
@@ -176,7 +176,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         UUID instanceId = instances.get(0).getId();
 
         // Query with a different patient ID → should not find the instance
-        mockMvc.perform(get("/v1/patients/{patientId}/protocol-instances/{instanceId}",
+        mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{instanceId}",
                         "wrong-patient-id", instanceId))
                 .andExpect(status().isNotFound());
     }
