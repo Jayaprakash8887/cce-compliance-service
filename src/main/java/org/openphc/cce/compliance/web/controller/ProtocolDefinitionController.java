@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/v1/protocol-definitions")
+@RequestMapping("/v1/compliance/protocol-definitions")
 public class ProtocolDefinitionController {
 
     private final ProtocolDefinitionService protocolDefinitionService;

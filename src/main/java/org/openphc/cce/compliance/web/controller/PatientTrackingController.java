@@ -23,7 +23,7 @@ import java.util.List;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/v1/patients")
+@RequestMapping("/v1/compliance/patients")
 public class PatientTrackingController {
 
     private final ProtocolInstanceService protocolInstanceService;
