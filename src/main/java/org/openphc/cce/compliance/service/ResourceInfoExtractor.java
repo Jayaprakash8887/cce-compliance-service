@@ -28,9 +28,8 @@ public class ResourceInfoExtractor {
     }
 
     /**
-     * Extract coded values from standard FHIR paths: code.coding[*], type.coding[*],
-     * category[*].coding[*]. Each code is returned with its FHIR path for matching
-     * against trigger_index entries.
+     * Extract coded values from FHIR resource payloads for Tier 1 structural matching.
+     * Handles CodeableConcept fields (object or array), and plain string fields like "status".
      *
      * @param data the event payload (JsonNode representation of FHIR resource)
      * @return list of CodePathTriple with path, system, and code
@@ -41,55 +40,77 @@ public class ResourceInfoExtractor {
             return result;
         }
 
-        // Extract from data.code.coding[*]
+        // CodeableConcept fields (single object): code, class, clinicalStatus, verificationStatus
         extractCodingsFromPath(data, "code", result);
+        extractCodingsFromPath(data, "class", result);
+        extractCodingsFromPath(data, "clinicalStatus", result);
+        extractCodingsFromPath(data, "verificationStatus", result);
 
-        // Extract from data.type.coding[*]
-        extractCodingsFromPath(data, "type", result);
-
-        // Extract from data.category[*].coding[*]
+        // CodeableConcept fields (array): type[], category[]
+        extractCodingsFromArrayPath(data, "type", result);
         extractCodingsFromArrayPath(data, "category", result);
+
+        // Plain string field: status (e.g. "in-progress", "active", "finished", "completed")
+        extractStringField(data, "status", result);
 
         return result;
     }
 
+    /**
+     * Extract codings from a CodeableConcept field (single object with coding array).
+     */
     private void extractCodingsFromPath(JsonNode data, String path, List<CodePathTriple> result) {
-        JsonNode codeableConcept = data.get(path);
-        if (codeableConcept != null && codeableConcept.isObject()) {
-            JsonNode codingList = codeableConcept.get("coding");
-            if (codingList != null && codingList.isArray()) {
-                for (JsonNode coding : codingList) {
-                    if (coding.isObject()) {
-                        addCodePathTriple(path, coding, result);
-                    }
+        JsonNode node = data.get(path);
+        if (node == null) return;
+        if (node.isObject()) {
+            extractCodingsFromCodeableConcept(path, node, result);
+        }
+    }
+
+    /**
+     * Extract codings from an array of CodeableConcepts (e.g., type[], category[]).
+     * Also falls back to single-object handling for resources where the field is 0..1.
+     */
+    private void extractCodingsFromArrayPath(JsonNode data, String path, List<CodePathTriple> result) {
+        JsonNode node = data.get(path);
+        if (node == null) return;
+        if (node.isArray()) {
+            for (JsonNode item : node) {
+                if (item.isObject()) {
+                    extractCodingsFromCodeableConcept(path, item, result);
+                }
+            }
+        } else if (node.isObject()) {
+            // Fallback: some resources define this field as 0..1 CodeableConcept
+            extractCodingsFromCodeableConcept(path, node, result);
+        }
+    }
+
+    private void extractCodingsFromCodeableConcept(String path, JsonNode codeableConcept,
+                                                    List<CodePathTriple> result) {
+        JsonNode codingList = codeableConcept.get("coding");
+        if (codingList != null && codingList.isArray()) {
+            for (JsonNode coding : codingList) {
+                if (coding.isObject()) {
+                    addCodePathTriple(path, coding, result);
                 }
             }
         }
     }
 
-    private void extractCodingsFromArrayPath(JsonNode data, String path, List<CodePathTriple> result) {
-        JsonNode array = data.get(path);
-        if (array != null && array.isArray()) {
-            for (JsonNode item : array) {
-                if (item.isObject()) {
-                    JsonNode codingList = item.get("coding");
-                    if (codingList != null && codingList.isArray()) {
-                        for (JsonNode coding : codingList) {
-                            if (coding.isObject()) {
-                                addCodePathTriple(path, coding, result);
-                            }
-                        }
-                    }
-                }
-            }
+    private void extractStringField(JsonNode data, String path, List<CodePathTriple> result) {
+        JsonNode node = data.get(path);
+        if (node != null && node.isTextual()) {
+            result.add(new CodePathTriple(path, "", node.asText()));
         }
     }
 
     private void addCodePathTriple(String path, JsonNode coding, List<CodePathTriple> result) {
-        JsonNode system = coding.get("system");
         JsonNode code = coding.get("code");
-        if (system != null && system.isTextual() && code != null && code.isTextual()) {
-            result.add(new CodePathTriple(path, system.asText(), code.asText()));
+        if (code != null && code.isTextual()) {
+            JsonNode system = coding.get("system");
+            String systemStr = (system != null && system.isTextual()) ? system.asText() : "";
+            result.add(new CodePathTriple(path, systemStr, code.asText()));
         }
     }
 }

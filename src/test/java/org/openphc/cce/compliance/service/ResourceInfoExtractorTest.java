@@ -87,10 +87,27 @@ class ResourceInfoExtractorTest {
         assertEquals("code", codes.get(1).path());
     }
 
-    // ── extractCodes — type.coding ──
+    // ── extractCodes — type (array of CodeableConcepts in FHIR Encounter) ──
 
     @Test
-    void extractCodes_fromTypeCoding() {
+    void extractCodes_fromTypeArray() {
+        JsonNode data = toJsonNode(Map.of(
+                "resourceType", "Encounter",
+                "type", List.of(
+                        Map.of("coding", List.of(
+                                Map.of("system", "http://openphc.org/encounter-types",
+                                        "code", "VISIT_ENCOUNTER")
+                        ))
+                )
+        ));
+        List<CodePathTriple> codes = extractor.extractCodes(data);
+        assertTrue(codes.stream().anyMatch(c ->
+                c.equals(new CodePathTriple("type", "http://openphc.org/encounter-types", "VISIT_ENCOUNTER"))));
+    }
+
+    @Test
+    void extractCodes_fromTypeSingleObject() {
+        // Fallback: type as single CodeableConcept (some resource types)
         JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Encounter",
                 "type", Map.of(
@@ -100,8 +117,8 @@ class ResourceInfoExtractorTest {
                 )
         ));
         List<CodePathTriple> codes = extractor.extractCodes(data);
-        assertEquals(1, codes.size());
-        assertEquals(new CodePathTriple("type", "http://snomed.info/sct", "11429006"), codes.get(0));
+        assertTrue(codes.stream().anyMatch(c ->
+                c.equals(new CodePathTriple("type", "http://snomed.info/sct", "11429006"))));
     }
 
     // ── extractCodes — category[*].coding ──
@@ -194,7 +211,56 @@ class ResourceInfoExtractorTest {
                 "resourceType", "Observation",
                 "code", Map.of("text", "BP")
         ));
-        assertTrue(extractor.extractCodes(data).isEmpty());
+        assertTrue(extractor.extractCodes(data).stream().noneMatch(c -> c.path().equals("code")));
+    }
+
+    // ── extractCodes — clinicalStatus (Condition resource) ──
+
+    @Test
+    void extractCodes_fromClinicalStatus() {
+        JsonNode data = toJsonNode(Map.of(
+                "resourceType", "Condition",
+                "clinicalStatus", Map.of(
+                        "coding", List.of(
+                                Map.of("system", "http://terminology.hl7.org/CodeSystem/condition-clinical",
+                                        "code", "active")
+                        )
+                )
+        ));
+        List<CodePathTriple> codes = extractor.extractCodes(data);
+        assertTrue(codes.stream().anyMatch(c ->
+                c.equals(new CodePathTriple("clinicalStatus",
+                        "http://terminology.hl7.org/CodeSystem/condition-clinical", "active"))));
+    }
+
+    // ── extractCodes — plain string status ──
+
+    @Test
+    void extractCodes_fromStringStatus() {
+        JsonNode data = toJsonNode(Map.of(
+                "resourceType", "Encounter",
+                "status", "in-progress"
+        ));
+        List<CodePathTriple> codes = extractor.extractCodes(data);
+        assertTrue(codes.stream().anyMatch(c ->
+                c.equals(new CodePathTriple("status", "", "in-progress"))));
+    }
+
+    // ── extractCodes — coding without system ──
+
+    @Test
+    void extractCodes_codingWithoutSystem() {
+        JsonNode data = toJsonNode(Map.of(
+                "resourceType", "Procedure",
+                "code", Map.of(
+                        "coding", List.of(
+                                Map.of("code", "some-code")
+                        )
+                )
+        ));
+        List<CodePathTriple> codes = extractor.extractCodes(data);
+        assertTrue(codes.stream().anyMatch(c ->
+                c.equals(new CodePathTriple("code", "", "some-code"))));
     }
 
     // ── CodePathTriple.toConcatenated ──
