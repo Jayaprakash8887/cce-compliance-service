@@ -52,7 +52,7 @@ test-output/
 hs_err_pid*
 replay_pid*
 
-
+.github/
 artifacts/
 bin/
 target/
