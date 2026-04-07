@@ -276,32 +276,28 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 ### State Machine
 
 ```
-                   ┌──────────┐
-         ┌─────────│ PENDING  │─────────┐
-         │         └────┬─────┘         │
-         │   scheduler  │               │ event match
-         │   (due_date  │               │ (completes)
-         │    reached)  ▼               ▼
-         │         ┌──────────┐    ┌───────────┐
-         │         │   DUE    │───▶│ COMPLETED │
-         │         └────┬─────┘    └───────────┘
-         │   tolerance  │               ▲
-         │   window     │               │ event match
-         │   expired    ▼               │
-         │         ┌──────────┐         │
-         │         │ OVERDUE  │─────────┘
-         │         └────┬─────┘
-         │   missed     │
-         │   cutoff     ▼
-         │         ┌──────────┐
-         │         │  MISSED  │    (must)
-         │         └──────────┘
-         │   missed     │
-         │   cutoff     │ (could)
-         │   (could)    ▼
-         │         ┌──────────┐
-         │         │ SKIPPED  │
-         │         └──────────┘
+              ┌──────────┐
+    ┌─────────│ PENDING  │─────────┐
+    │         └────┬─────┘         │
+    │  scheduler   │               │ event match
+    │  (due_date   │               │ (completes)
+    │   reached)   ▼               ▼
+    │         ┌──────────┐    ┌───────────┐
+    │         │   DUE    │───▶│ COMPLETED │
+    │         └────┬─────┘    └───────────┘
+    │  tolerance   │               ▲
+    │  window      │               │ event match
+    │  expired     ▼               │
+    │         ┌──────────┐         │
+    └────────▶│ OVERDUE  │─────────┘
+              └────┬─────┴─────────┐
+       missed     │                │  missed cutoff
+       cutoff     ▼                │  (could)
+              ┌──────────┐         ▼
+              │  MISSED  │    ┌──────────┐
+              └──────────┘    │ SKIPPED  │
+                (must)        └──────────┘
+                                (could)
 ```
 
 ---
