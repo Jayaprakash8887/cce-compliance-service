@@ -336,11 +336,12 @@ Published when an intelligence rule fires — triggered by deviation detection (
 
 #### Intelligence Event Types
 
-| Type | Trigger | Severity |
-|---|---|---|
-| `cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE | Warning |
-| `cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED | Critical |
-| `cce.compliance.step.completed.late` | Step completed with `completionStatus=LATE` | Medium |
+| Type | Trigger |
+|---|---|
+| `cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE |
+| `cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED |
+| `cce.compliance.step.completed.late` | Step completed with `completionStatus=LATE` |
+
 
 > **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceRuleEvaluator` extracts intelligence rules from the step's PlanDefinition sub-actions, evaluates each rule's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching rule. An `ActionRun` record tracks each execution. See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-rule-evaluation) for the full pipeline.
 
