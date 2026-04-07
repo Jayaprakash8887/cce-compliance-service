@@ -54,5 +54,5 @@ replay_pid*
 
 
 artifacts/
-
+bin/
 target/

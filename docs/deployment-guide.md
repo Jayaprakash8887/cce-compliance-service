@@ -226,7 +226,8 @@ The database and user are created by the collector service's Docker Compose. The
 Flyway manages all schema migrations automatically on application startup.
 
 - Migrations are located at `classpath:db/migration`
-- `V1__initial_schema.sql` creates all 7 tables with indexes and constraints
+- `V1__initial_schema.sql` creates the initial 7 tables with indexes and constraints
+- `V2__intelligence_tables.sql` adds `action_definition` and `action_run` tables (9 total)
 - `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
 - **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
 

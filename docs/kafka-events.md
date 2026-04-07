@@ -15,7 +15,7 @@ graph LR
         C1["InboundEventConsumer"]
         C2["SchedulerTriggerConsumer"]
         EH["DefaultErrorHandler<br/>retry + DLQ"]
-        P1["IntelligenceTriggerProducer<br/>(future phase)"]
+        P1["IntelligenceTriggerProducer"]
     end
 
     subgraph DLQ Topics
@@ -58,7 +58,7 @@ graph LR
 | `cce.scheduler.triggers` | Inbound | 25 | `cce-compliance-service` | Timer-based state transitions |
 | `cce.events.inbound.dlq` | DLQ | 25 | — | Dead letter queue for failed inbound events |
 | `cce.scheduler.triggers.dlq` | DLQ | 25 | — | Dead letter queue for failed scheduler triggers |
-| `cce.intelligence.triggers` | Outbound | 25 | — | Deviation alerts for analytics (**future phase** — not published in 1.0.0) |
+| `cce.intelligence.triggers` | Outbound | 25 | — | Intelligence trigger events published on deviation detection and step completion |
 
 All topics are declared as `NewTopic` beans in `KafkaConfig` and auto-created by Spring’s `KafkaAdmin` on startup. Partition count is configurable via `cce.kafka.topics.default-partitions` (default: 25).
 
@@ -293,9 +293,7 @@ graph LR
 
 ### 5.3 IntelligenceTriggerEvent (Outbound — `cce.intelligence.triggers`)
 
-> **Future Phase:** Intelligence trigger publishing upon deviation detection is **not active in release 1.0.0**. The `IntelligenceTriggerEvent` model exists in the codebase for schema documentation. The producer will be implemented in a future phase when intelligence event publishing is configurable per-PlanDefinition. The schema below documents the planned message format.
-
-Published when a compliance deviation is detected (future phase).
+Published when an intelligence rule fires — triggered by deviation detection (OVERDUE/MISSED) or step completion when the step's PlanDefinition action has nested sub-actions with matching conditions.
 
 ```json
 {
@@ -342,6 +340,9 @@ Published when a compliance deviation is detected (future phase).
 |---|---|---|
 | `cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE | Warning |
 | `cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED | Critical |
+| `cce.compliance.step.completed.late` | Step completed with `completionStatus=LATE` | Medium |
+
+> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceRuleEvaluator` extracts intelligence rules from the step's PlanDefinition sub-actions, evaluates each rule's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching rule. An `ActionRun` record tracks each execution. See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-rule-evaluation) for the full pipeline.
 
 ---
 
@@ -395,9 +396,41 @@ public void consume(SchedulerTriggerMessage trigger) {
 
 ## 7. Producer Implementations
 
-### 7.1 IntelligenceTriggerProducer (Future Phase)
+### 7.1 IntelligenceTriggerProducer
 
-> **Not implemented in release 1.0.0.** The producer will be created in a future phase when intelligence trigger publishing is configurable per-PlanDefinition. The planned key strategy is `protocolInstanceId` for partition locality.
+Publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` when intelligence rules fire.
+
+```java
+@Component
+public class IntelligenceTriggerProducer {
+
+    private final KafkaTemplate<String, Object> kafkaTemplate;
+    private final String topic; // ${cce.kafka.topics.intelligence-triggers}
+    private final Counter publishedCounter; // cce.events.intelligence.published
+
+    public CompletableFuture<SendResult<String, Object>> publish(IntelligenceTriggerEvent event) {
+        // Key: protocolInstanceId (partition locality)
+        String key = event.getProtocolInstanceId().toString();
+        return kafkaTemplate.send(topic, key, event)
+            .whenComplete((result, ex) -> {
+                if (ex == null) {
+                    publishedCounter.increment();
+                    log.info("Published intelligence trigger: id={}, type={}",
+                        event.getId(), event.getType());
+                } else {
+                    log.error("Failed to publish intelligence trigger: id={}",
+                        event.getId(), ex);
+                }
+            });
+    }
+}
+```
+
+**Behavior:**
+- **Fire-and-forget:** Publish failures are logged but do not fail the main compliance transaction
+- **Kafka key:** `protocolInstanceId` ensures all intelligence events for a patient journey go to the same partition
+- **Idempotency:** Producer-level idempotency (`enable.idempotence=true`) prevents duplicate publishes within a partition
+- **Metrics:** `cce.events.intelligence.published` counter incremented on successful publish
 
 ## 8. Ordering & Delivery Guarantees
 

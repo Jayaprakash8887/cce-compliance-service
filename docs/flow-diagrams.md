@@ -260,7 +260,7 @@ flowchart TD
 
 ## 5. Deviation Detection & Recording
 
-> **Note:** Intelligence trigger publishing upon deviation is reserved for a future phase (will be driven by PlanDefinition-level configuration).
+> **Intelligence rule evaluation** is triggered after each deviation is recorded. See §6 for the full intelligence pipeline flow.
 
 ```mermaid
 flowchart TD
@@ -280,6 +280,118 @@ flowchart TD
     D4 --> D5["Link to ProtocolInstance + StepInstance"]
     D5 --> D6["Persist to DB"]
     D6 --> D7["Audit: DEVIATION_DETECTED"]
+    D7 --> D8["Evaluate intelligence rules<br/>(IntelligenceRuleEvaluator)"]
+```
+
+## 6. Intelligence Rule Evaluation & Trigger Publishing
+
+This flow is triggered after a deviation is detected (OVERDUE/MISSED) or after a step is completed. The `IntelligenceRuleEvaluator` evaluates PlanDefinition sub-action conditions and publishes intelligence events.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Trigger as Deviation Detection /<br/>Step Completion
+    participant Evaluator as IntelligenceRuleEvaluator
+    participant Parser as PlanDefinitionParser
+    participant ExprEval as ExpressionEvaluationService
+    participant ActionDefSvc as ActionDefinitionService
+    participant Producer as IntelligenceTriggerProducer
+    participant Kafka as Apache Kafka
+    participant DB as PostgreSQL
+
+    Trigger->>Evaluator: evaluateOnDeviation(step, deviation)<br/>or evaluateOnCompletion(step)
+
+    rect rgb(240, 248, 255)
+        Note over Evaluator,Parser: Step 1 — Extract intelligence rules
+        Evaluator->>DB: Load PlanDefinition from step's protocol
+        DB-->>Evaluator: ProtocolDefinition
+        Evaluator->>Parser: extractActions(planDefinition)
+        Evaluator->>Parser: extractIntelligenceRules(action)
+        Parser-->>Evaluator: List<IntelligenceRuleInfo>
+    end
+
+    rect rgb(245, 255, 245)
+        Note over Evaluator,ExprEval: Step 2 — Build context & evaluate conditions
+        Evaluator->>Evaluator: Build runtime context<br/>(stepState, deviationType, daysOverdue,<br/>completionStatus, actionId, repeatIndex)
+
+        loop For each intelligence rule
+            Evaluator->>ExprEval: evaluate(rule.language,<br/>rule.expression, context)
+            ExprEval-->>Evaluator: boolean
+
+            alt Condition is true
+                rect rgb(255, 248, 240)
+                    Note over Evaluator,Kafka: Step 3 — Resolve, record, publish
+                    Evaluator->>ActionDefSvc: resolveByCanonical(rule.definitionCanonical)
+                    ActionDefSvc->>DB: SELECT FROM action_definition
+                    DB-->>ActionDefSvc: ActionDefinition
+
+                    alt ActionDefinition not found
+                        ActionDefSvc-->>Evaluator: null
+                        Evaluator->>Evaluator: Log warning, skip rule
+                    else ActionDefinition found
+                        ActionDefSvc-->>Evaluator: ActionDefinition
+                        Evaluator->>DB: INSERT ActionRun (status=TRIGGERED)
+                        DB-->>Evaluator: ActionRun
+
+                        Evaluator->>Evaluator: Build IntelligenceTriggerEvent
+                        Evaluator->>Producer: publish(event)
+                        Producer->>Kafka: Send to cce.intelligence.triggers<br/>(key: protocolInstanceId)
+                        Kafka-->>Producer: Ack
+
+                        Evaluator->>DB: UPDATE ActionRun<br/>(status=PUBLISHED,<br/>intelligenceEventId=UUID)
+                        Evaluator->>DB: UPDATE deviation<br/>(intelligenceEventId=UUID)
+                    end
+                end
+            else Condition is false
+                Note over Evaluator: Skip rule
+            end
+        end
+    end
+
+    Evaluator-->>Trigger: List<ActionRun>
+```
+
+### Intelligence Event Content Assembly
+
+```mermaid
+flowchart TD
+    subgraph "Input Sources"
+        STEP["StepInstance<br/>(state, actionId, dueDate, completedAt)"]
+        DEV["Deviation<br/>(deviationType, detectedAt, metadata)"]
+        PI["ProtocolInstance<br/>(patientId, protocolCanonical, facilityId)"]
+        RULE["IntelligenceRuleInfo<br/>(ruleId, definitionCanonical, severity, target)"]
+        ACTDEF["ActionDefinition<br/>(actionType, title)"]
+    end
+
+    subgraph "IntelligenceTriggerEvent"
+        E_ID["id: UUID (new)"]
+        E_TYPE["type: cce.compliance.deviation.overdue"]
+        E_SUBJECT["subject: patientId"]
+        E_PI["protocolInstanceId"]
+        E_SI["stepInstanceId"]
+        E_DI["deviationId"]
+        E_DT["deviationType: overdue"]
+        E_SS["stepState: overdue"]
+        E_AID["actionId: anc-visit-2"]
+        E_PC["protocolCanonical: url|version"]
+        E_FID["facilityId: 0002"]
+        E_DAT["detectedAt: timestamp"]
+        E_META["metadata: {...}"]
+    end
+
+    STEP --> E_SS
+    STEP --> E_AID
+    STEP --> E_SI
+    DEV --> E_DI
+    DEV --> E_DT
+    DEV --> E_DAT
+    DEV --> E_META
+    PI --> E_SUBJECT
+    PI --> E_PI
+    PI --> E_PC
+    PI --> E_FID
+    RULE --> E_TYPE
+    ACTDEF --> E_META
 ```
 
 ## 7. REST API Request Flow

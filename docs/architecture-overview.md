@@ -2,7 +2,7 @@
 
 ## 1. System Context
 
-The **CCE Compliance Service** is a core microservice within the **Clinical Compliance Engine (CCE)** platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps, and detecting deviations. Intelligence trigger publishing to downstream analytics is reserved for a future phase (will be driven by PlanDefinition-level configuration).
+The **CCE Compliance Service** is a core microservice within the **Clinical Compliance Engine (CCE)** platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps, detecting deviations, evaluating intelligence rules, and publishing intelligence trigger events to downstream services.
 
 ```mermaid
 graph TB
@@ -113,6 +113,59 @@ Each condition maps to a specific `transitionType`:
 
 > **Key invariant:** The Scheduler Service is a **read-only observer** of `step_instance`. It detects when a time threshold is crossed and notifies the Compliance Service via Kafka. The Compliance Service is the sole authority for state transitions — this ensures all business rules (requiredBehavior, deviation recording, auto-skip) are enforced in one place.
 
+### 1.2 Intelligence Service Contract
+
+The **CCE Intelligence Service** is the downstream consumer of intelligence trigger events published by the Compliance Service. It receives structured trigger events via Kafka, resolves delivery targets, and routes notifications, tasks, and escalations to the appropriate **Receiver Adaptors**. Communication is **exclusively via Kafka** — there are no direct service-to-service HTTP calls.
+
+```mermaid
+sequenceDiagram
+    participant Engine as ComplianceEngine<br/>(Compliance Service)
+    participant Evaluator as IntelligenceRuleEvaluator
+    participant Producer as IntelligenceTriggerProducer
+    participant Kafka as Apache Kafka
+    participant Intel as CCE Intelligence Service
+    participant Adaptor as Receiver Adaptors
+
+    Engine->>Evaluator: Deviation detected / Step completed
+    Evaluator->>Evaluator: Evaluate PlanDefinition sub-action conditions
+    Evaluator->>Producer: Publish IntelligenceTriggerEvent
+    Producer->>Kafka: cce.intelligence.triggers
+    Kafka->>Intel: Deliver trigger event
+    Intel->>Intel: Resolve ActionDefinition, target, routing
+    Intel->>Adaptor: Route notification / task / escalation
+    Adaptor->>Adaptor: Translate to target system record
+```
+
+#### Message Contract
+
+The Compliance Service publishes `IntelligenceTriggerEvent` messages to `cce.intelligence.triggers`. Each message contains all the context the Intelligence Service needs to route and deliver the action:
+
+| Field | Purpose | Source |
+|---|---|---|
+| `id` | Unique event identifier | Generated UUID |
+| `type` | Event category (e.g., `cce.compliance.deviation.overdue`) | Derived from deviation type or step completion status |
+| `subject` | Patient identifier | Protocol instance subject |
+| `actionId` | PlanDefinition step that triggered the rule | Step instance's action ID |
+| `protocolCanonical` | Protocol `url\|version` | Protocol definition canonical |
+| `facilityId` | Facility where the event occurred | CloudEvent extension attribute |
+| `metadata` | Additional context (due dates, timing, severity) | Step and deviation runtime state |
+
+The Intelligence Service uses `type` + `metadata` to determine the kind of action (notification, task, escalation, reminder) and `facilityId` + `subject` to resolve the delivery target. See [Kafka Events §5.3](kafka-events.md#53-intelligencetriggerevent-outbound--cceintelligencetriggers) for the full message schema.
+
+#### Ownership & Boundaries
+
+| Aspect | Owner | Details |
+|---|---|---|
+| **Intelligence rule evaluation** | Compliance Service | Evaluates PlanDefinition sub-action conditions, resolves `definitionCanonical` to `ActionDefinition` |
+| **Trigger event publishing** | Compliance Service | Publishes `IntelligenceTriggerEvent` to Kafka; creates `ActionRun` record (TRIGGERED → PUBLISHED) |
+| **`action_definition` table** | Compliance Service | Schema, writes, Flyway migrations — stores `ActivityDefinition` resources referenced by intelligence rules |
+| **`action_run` table** | Compliance Service | Tracks each intelligence rule execution (status, output, linked event ID) |
+| **Event consumption & routing** | Intelligence Service | Consumes from `cce.intelligence.triggers`, resolves delivery targets, routes to Receiver Adaptors |
+| **Notification/task delivery** | Intelligence Service + Receiver Adaptors | Translates intelligence events into system-specific records (SMS, in-app alerts, EMR tasks, escalation workflows) |
+| **Kafka topic** | Shared | `cce.intelligence.triggers` — Compliance produces, Intelligence consumes |
+
+> **Key invariant:** The Compliance Service is the **sole publisher** to `cce.intelligence.triggers`. It evaluates conditions and publishes structured trigger events but has no knowledge of how they are delivered. The Intelligence Service is the sole consumer — it owns the routing logic, adaptor selection, and delivery confirmation. This separation ensures the Compliance Service remains **delivery-agnostic** and the Intelligence Service can evolve its routing independently.
+
 ## 2. Technology Stack
 
 | Category | Technology | Version | Purpose |
@@ -137,16 +190,16 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 7 JPA entities
-│   ├── enums/                                 # 6 value-based enums
-│   └── repository/                            # 7 Spring Data JPA repositories
+│   ├── entity/                                # 9 JPA entities (+ ActionDefinition, ActionRun)
+│   ├── enums/                                 # 12 value-based enums
+│   └── repository/                            # 9 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
 │   ├── config/                                # Consumer/Producer factories, topic bindings
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
-│   └── producer/                              # (reserved for future phase)
-├── service/                                   # 9 business logic services + 3 supporting records
+│   └── producer/                              # IntelligenceTriggerProducer
+├── service/                                   # 11 business logic services + supporting records
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
 
@@ -173,7 +226,7 @@ flowchart TD
     S5["Step 5: Two-Tier Matching<br/>(see §5.4 for detailed flow)"] --> S6
 
     S6{"Result Classification"}
-    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation"]
+    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Evaluate intelligence rules"]
     S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
 ```
 
@@ -399,6 +452,8 @@ stateDiagram-v2
 
 **Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE).
 
+**Intelligence rule evaluation:** On step completion and on deviation detection (OVERDUE, MISSED), the intelligence rule evaluator is invoked. See §6.3 for details.
+
 **Required behavior:** Steps with `requiredBehavior=could` (from `PlanDefinition.action.requiredBehavior`) are optional. When the scheduler fires `OVERDUE_TO_MISSED` on a `could` step, it transitions to `SKIPPED` (no deviation) instead of `MISSED`. Additionally, when any step completes, preceding `could` steps still in actionable states are auto-skipped.
 
 ### 6.2 Protocol Instance
@@ -406,6 +461,107 @@ stateDiagram-v2
 `ACTIVE → COMPLETED | WITHDRAWN | EXPIRED`. Terminal states: `COMPLETED`, `WITHDRAWN`, `EXPIRED`.
 
 Protocol completion is **automatic** — when all steps reach terminal states (`COMPLETED`, `MISSED`, `SKIPPED`), the protocol transitions to `COMPLETED`. There is no manual complete endpoint; `WITHDRAWN` covers manual termination.
+
+### 6.3 Intelligence Rule Evaluation
+
+Intelligence rules are modeled as **nested sub-actions** within a PlanDefinition step action (`action.action[]`). Each rule defines a condition (JSONLogic/FHIRPath) evaluated against step runtime state, and a `definitionCanonical` pointing to an `ActivityDefinition` (stored in the `action_definition` table) that defines the action to take.
+
+Rule evaluation is triggered at two points:
+1. **On deviation detection** — when a step transitions to `OVERDUE` or `MISSED` (scheduler-driven)
+2. **On step completion** — when a step is completed by an inbound event (for rules like "notify on late completion")
+
+```mermaid
+flowchart TD
+    TRIGGER["Step Completion or Deviation Detected"] --> LOAD["Load PlanDefinition for step's protocol"]
+    LOAD --> EXTRACT["Extract intelligence rules<br/>(nested sub-actions for this actionId)"]
+    EXTRACT --> LOOP{"For each rule"}
+
+    LOOP --> BUILD["Build runtime context:<br/>stepState, deviationType, daysOverdue,<br/>completionStatus, actionId, repeatIndex"]
+    BUILD --> EVAL["Evaluate condition<br/>(JSONLogic/FHIRPath)"]
+
+    EVAL -->|"false"| SKIP["Skip rule"]
+    EVAL -->|"true"| RESOLVE["Resolve definitionCanonical<br/>→ ActionDefinition"]
+
+    RESOLVE -->|"Not found"| LOG_SKIP["Log warning, skip"]
+    RESOLVE -->|"Found"| RUN["Create ActionRun<br/>(status=TRIGGERED)"]
+    RUN --> PUB["Build & publish<br/>IntelligenceTriggerEvent<br/>to cce.intelligence.triggers"]
+    PUB --> UPDATE["Update ActionRun<br/>(status=PUBLISHED)"]
+    UPDATE --> LINK["Link deviation.intelligenceEventId"]
+
+    SKIP --> LOOP
+    LOG_SKIP --> LOOP
+    LINK --> LOOP
+```
+
+#### Runtime Context Variables
+
+| Variable | Type | Source | Available On |
+|---|---|---|---|
+| `stepState` | String | Current step state (e.g., `overdue`, `missed`, `completed`) | Both |
+| `deviationType` | String | `overdue` or `missed` | Deviation only |
+| `daysOverdue` | Long | Days past `dueDate` at detection time | Deviation only |
+| `daysPastMissedDate` | Long | Days past `missedDate` at detection time | MISSED only |
+| `actionId` | String | Step definition action ID | Both |
+| `repeatIndex` | Integer | 0-based repeat counter | Both |
+| `completionStatus` | String | `early`, `on_time`, `late` | Completion only |
+| `dueDate` | OffsetDateTime | Step's scheduled due date | Both |
+| `completedAt` | OffsetDateTime | Step's completion timestamp | Completion only |
+
+#### PlanDefinition Intelligence Rule Structure
+
+```json
+{
+  "id": "anc-visit-2",
+  "title": "ANC Visit 2",
+  "trigger": [{ "..." : "..." }],
+  "action": [
+    {
+      "id": "anc-visit-2-overdue-escalation",
+      "condition": [{
+        "kind": "applicability",
+        "expression": {
+          "language": "text/jsonlogic",
+          "expression": "{\"and\": [{\"==\": [{\"var\": \"stepState\"}, \"overdue\"]}, {\">\": [{\"var\": \"daysOverdue\"}, 3]}]}"
+        }
+      }],
+      "definitionCanonical": "ActivityDefinition/anc-escalation-notification|1.0",
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
+          "valueCode": "high"
+        },
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+          "valueCode": "supervisor"
+        }
+      ]
+    }
+  ]
+}
+```
+
+#### Action Definitions
+
+`ActionDefinition` entities store FHIR `ActivityDefinition` resources. They define what CCE does when a rule fires:
+
+| Field | Description |
+|---|---|
+| `canonicalUrl` + `version` | Unique identifier, referenced by `definitionCanonical` in PlanDefinition sub-actions |
+| `actionType` | `NOTIFICATION`, `TASK`, `ESCALATION`, `REMINDER` |
+| `severity` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (from PlanDefinition extension) |
+| `target` | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` (from PlanDefinition extension) |
+| `definition` | Full ActivityDefinition JSON (message template, routing config) |
+
+#### Action Runs
+
+`ActionRun` records track each intelligence rule execution for auditability:
+
+| Field | Description |
+|---|---|
+| `status` | `TRIGGERED` → `PUBLISHED` (success) or `FAILED` (publish error) |
+| `triggerReason` | `DEVIATION_OVERDUE`, `DEVIATION_MISSED`, `STEP_COMPLETED` |
+| `ruleId` | The PlanDefinition sub-action ID that fired |
+| `intelligenceEventId` | UUID of the published Kafka message |
 
 ## 7. Security
 
@@ -424,7 +580,11 @@ See [API Reference](api-reference.md) for endpoint details.
 | `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
 | `cce.events.zero_match` | Counter | Events with zero trigger matches |
-| `cce.events.intelligence.published` | Counter | Intelligence trigger events published (future phase) |
+| `cce.events.intelligence.published` | Counter | Intelligence trigger events published to Kafka |
+| `cce.intelligence.rules.evaluated` | Counter | Total intelligence rule conditions evaluated |
+| `cce.intelligence.rules.fired` | Counter | Intelligence rules that matched and triggered |
+| `cce.intelligence.publish.duration` | Timer | Time to publish intelligence event to Kafka |
+| `cce.action.definitions.active` | Gauge | Active action definitions |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
 | `cce.consumer.inbound.errors` | Counter | Inbound event consumer processing errors |
 | `cce.consumer.scheduler.errors` | Counter | Scheduler trigger consumer processing errors |
