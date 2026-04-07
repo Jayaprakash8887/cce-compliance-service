@@ -475,7 +475,7 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | `name` | `VARCHAR` | Yes | — | Computer-friendly name. |
 | `title` | `VARCHAR` | Yes | — | Human-readable title. |
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. See [ActionDefinitionStatus](#actiondefinitionstatus). |
-| `action_type` | `VARCHAR` | **NOT NULL** | — | Intelligence action type. See [ActionType](#actiontype). |
+| `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionType](#actiontype). |
 | `severity` | `VARCHAR` | Yes | — | Default severity level. See [IntelligenceSeverity](#intelligenceseverity). Can be overridden by PlanDefinition extension. |
 | `target` | `VARCHAR` | Yes | — | Default intelligence target. See [IntelligenceTarget](#intelligencetarget). Can be overridden by PlanDefinition extension. |
 | `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 ActivityDefinition resource JSON. Contains message template, routing config, and action-specific properties. See [JSONB: action_definition](#action_definition--definition). |
@@ -489,7 +489,7 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | Primary Key | `action_definition_pkey` | `id` |
 | Unique | `action_definition_url_version_key` | `(canonical_url, version)` — Prevents duplicate versions. |
 | Check | — | `status IN ('ACTIVE', 'RETIRED')` |
-| Check | — | `action_type IN ('NOTIFICATION', 'TASK', 'ESCALATION', 'REMINDER')` |
+| Check | — | `action_type IN ('CommunicationRequest', 'Task', 'ServiceRequest')` |
 | Check | — | `severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')` or NULL |
 | Check | — | `target IN ('PATIENT', 'ASSIGNED_WORKER', 'SUPERVISOR', 'FACILITY')` or NULL |
 | Partial B-tree | `idx_action_definition_status` | `status WHERE status = 'ACTIVE'` — Active definitions for resolution. |
@@ -611,12 +611,15 @@ Records each execution of an **intelligence rule**. Created when an intelligence
 
 ### ActionType
 
-| Value | Description |
-|-------|-------------|
-| `NOTIFICATION` | Send a notification (alert, reminder) to a target. |
-| `TASK` | Create a task in a target system (via Receiver Adaptor). |
-| `ESCALATION` | Escalate to a supervisor or higher authority. |
-| `REMINDER` | Proactive reminder before an event becomes overdue. |
+Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](http://hl7.org/fhir/R4/valueset-request-resource-types.html)). Stored as-is from the ActivityDefinition resource at load time.
+
+| Value | FHIR Resource | CCE Usage |
+|-------|---------------|----------|
+| `CommunicationRequest` | [CommunicationRequest](http://hl7.org/fhir/R4/communicationrequest.html) | Notifications, alerts, reminders, escalations |
+| `Task` | [Task](http://hl7.org/fhir/R4/task.html) | Work items routed to target systems via Receiver Adaptors |
+| `ServiceRequest` | [ServiceRequest](http://hl7.org/fhir/R4/servicerequest.html) | Referrals, lab orders, coordination requests |
+
+> **Future enhancement:** The supported `kind` values are currently limited to the three above. As new intelligence action patterns emerge (e.g., `MedicationRequest` for prescription alerts), additional values can be added by extending the DB check constraint and the `ActionType` enum. The behavioral distinction (e.g., notification vs. escalation vs. reminder) is derived from `severity` + `target` at routing time in the Intelligence Service.
 
 ### IntelligenceSeverity
 
@@ -783,10 +786,6 @@ The `definition` column stores the complete FHIR R4 ActivityDefinition resource.
   "description": "Escalation alert when ANC visit is overdue by more than 3 days",
   "extension": [
     {
-      "url": "http://openphc.org/fhir/StructureDefinition/cce-action-type",
-      "valueCode": "ESCALATION"
-    },
-    {
       "url": "http://openphc.org/fhir/StructureDefinition/cce-message-template",
       "valueString": "Patient {{patientId}} has missed ANC visit {{actionId}} ({{daysOverdue}} days overdue). Protocol: {{protocolCanonical}}"
     }
@@ -806,7 +805,7 @@ Contains context information resolved at rule execution time. Used for downstrea
 | `facilityId` | String | When available | Healthcare facility FOSA ID |
 | `severity` | String | Always | Resolved severity (`low`, `medium`, `high`, `critical`) |
 | `target` | String | Always | Resolved target (`patient`, `assigned_worker`, `supervisor`, `facility`) |
-| `actionType` | String | Always | Action type (`notification`, `task`, `escalation`, `reminder`) |
+| `actionType` | String | Always | FHIR `kind` value from ActionDefinition (`CommunicationRequest`, `Task`, `ServiceRequest`) |
 | `stepState` | String | Always | Current step state at time of rule evaluation |
 | `deviationType` | String | When deviation | `overdue` or `missed` |
 | `daysOverdue` | Long | When overdue | Days past due date |
@@ -821,7 +820,7 @@ Contains context information resolved at rule execution time. Used for downstrea
   "facilityId": "0002",
   "severity": "high",
   "target": "supervisor",
-  "actionType": "escalation",
+  "actionType": "CommunicationRequest",
   "stepState": "overdue",
   "deviationType": "overdue",
   "daysOverdue": 5
