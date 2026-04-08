@@ -389,6 +389,8 @@ All errors follow a consistent structure:
 
 ## 6. DTO Schemas
 
+> **Enum values:** All status, state, and type fields use enum values described in [Data Dictionary §12 — Enumerated Value Reference](data-dictionary.md#12-enumerated-value-reference).
+
 ### ProtocolDefinitionDto
 
 | Field | Type | Nullable | Description |
@@ -468,3 +470,234 @@ All errors follow a consistent structure:
 | `protocolInstanceId` | UUID | Yes | Matched protocol instance |
 | `protocolDefinitionId` | UUID | Yes | Matched protocol definition |
 | `matchedStepInstanceId` | UUID | Yes | Matched step instance |
+
+---
+
+## 7. Action Definitions
+
+Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions.
+
+### 7.1 Create Action Definition
+
+**`POST /v1/compliance/action-definitions`** — Register a new action definition.
+
+**Request Body:**
+
+```json
+{
+  "definitionJson": "{\"resourceType\":\"ActivityDefinition\",\"url\":\"ActivityDefinition/anc-escalation-notification\",\"version\":\"1.0\",\"name\":\"anc-escalation-notification\",\"title\":\"ANC Escalation Notification\",\"status\":\"active\",\"kind\":\"CommunicationRequest\"}"
+}
+```
+
+**Response:** `201 Created`
+
+```json
+{
+  "id": "aa0e8400-e29b-41d4-a716-446655440010",
+  "canonicalUrl": "ActivityDefinition/anc-escalation-notification",
+  "version": "1.0",
+  "canonical": "ActivityDefinition/anc-escalation-notification|1.0",
+  "name": "anc-escalation-notification",
+  "title": "ANC Escalation Notification",
+  "status": "ACTIVE",
+  "actionType": "ESCALATION",
+  "severity": "HIGH",
+  "target": "SUPERVISOR",
+  "definition": { ... },
+  "createdAt": "2026-04-07T10:30:00Z",
+  "updatedAt": "2026-04-07T10:30:00Z"
+}
+```
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `400 Bad Request` | JSON is empty, malformed, or url+version already exists |
+| `422 Unprocessable Entity` | FHIR validation errors |
+
+---
+
+### 7.2 List Action Definitions
+
+**`GET /v1/compliance/action-definitions`** — List all action definitions.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `status` | String | No | — | Filter by status (`ACTIVE`, `RETIRED`) |
+
+**Response:** `200 OK` — `List<ActionDefinitionDto>`
+
+---
+
+### 7.3 Get Action Definition by ID
+
+**`GET /v1/compliance/action-definitions/{id}`**
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Action definition ID |
+
+**Response:** `200 OK` — `ActionDefinitionDto`
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+
+---
+
+### 7.4 Update Action Definition
+
+**`PUT /v1/compliance/action-definitions/{id}`** — Update an existing action definition.
+
+**Request Body:**
+
+```json
+{
+  "definitionJson": "{\"resourceType\":\"ActivityDefinition\", ...}"
+}
+```
+
+**Response:** `200 OK` — Updated `ActionDefinitionDto`
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+| `400 Bad Request` | JSON is empty or malformed |
+| `422 Unprocessable Entity` | FHIR validation errors |
+
+---
+
+### 7.5 Retire Action Definition
+
+**`POST /v1/compliance/action-definitions/{id}/retire`** — Retire an action definition.
+
+**Response:** `200 OK` — Updated `ActionDefinitionDto` with `status: "RETIRED"`
+
+---
+
+### 7.6 Delete Action Definition
+
+**`DELETE /v1/compliance/action-definitions/{id}`** — Permanently delete an action definition.
+
+**Response:** `204 No Content`
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+| `409 Conflict` | Action runs reference this action definition |
+
+---
+
+## 8. Action Runs
+
+View intelligence rule execution records.
+
+### 8.1 List Action Runs
+
+**`GET /v1/compliance/action-runs`** — List action runs with optional filters.
+
+**Query Parameters:**
+
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `protocolInstanceId` | UUID | No | — | Filter by protocol instance |
+| `actionDefinitionId` | UUID | No | — | Filter by action definition |
+| `stepInstanceId` | UUID | No | — | Filter by step instance |
+| `status` | String | No | — | Filter by status (`TRIGGERED`, `PUBLISHED`, `FAILED`, `CANCELLED`) |
+| `page` | int | No | 0 | Page number (0-based) |
+| `size` | int | No | 20 | Page size |
+
+**Response:** `200 OK` — `Page<ActionRunDto>`
+
+---
+
+### 8.2 Get Action Run by ID
+
+**`GET /v1/compliance/action-runs/{id}`**
+
+**Path Parameters:**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `id` | UUID | Action run ID |
+
+**Response:** `200 OK`
+
+```json
+{
+  "id": "bb0e8400-e29b-41d4-a716-446655440020",
+  "actionDefinitionId": "aa0e8400-e29b-41d4-a716-446655440010",
+  "protocolInstanceId": "660e8400-e29b-41d4-a716-446655440001",
+  "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
+  "deviationId": "880e8400-e29b-41d4-a716-446655440005",
+  "status": "PUBLISHED",
+  "intelligenceEventId": "itrig-550e8400-e29b-41d4-a716-446655440099",
+  "triggerReason": "DEVIATION_OVERDUE",
+  "ruleId": "anc-visit-2-overdue-escalation",
+  "outputMetadata": {
+    "patientId": "260225-0002-5501",
+    "actionId": "anc-visit-2",
+    "severity": "high",
+    "target": "supervisor",
+    "daysOverdue": 5
+  },
+  "createdAt": "2026-04-07T10:30:05Z",
+  "updatedAt": "2026-04-07T10:30:05Z"
+}
+```
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+
+---
+
+## 9. DTO Schemas — Intelligence
+
+### ActionDefinitionDto
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | UUID | No | Unique identifier |
+| `canonicalUrl` | String | No | FHIR canonical URL |
+| `version` | String | No | Semantic version |
+| `canonical` | String | No | `canonicalUrl\|version` |
+| `name` | String | Yes | Computer-friendly name |
+| `title` | String | Yes | Human-readable title |
+| `status` | String | No | `ACTIVE` or `RETIRED` |
+| `actionType` | String | No | `NOTIFICATION`, `TASK`, `ESCALATION`, `REMINDER` |
+| `severity` | String | Yes | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
+| `target` | String | Yes | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` |
+| `definition` | Map | No | Full ActivityDefinition as JSONB |
+| `createdAt` | OffsetDateTime | No | Record creation |
+| `updatedAt` | OffsetDateTime | No | Last update |
+
+### ActionRunDto
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | UUID | No | Unique identifier |
+| `actionDefinitionId` | UUID | No | FK to ActionDefinition |
+| `protocolInstanceId` | UUID | No | FK to ProtocolInstance |
+| `stepInstanceId` | UUID | Yes | FK to StepInstance |
+| `deviationId` | UUID | Yes | FK to Deviation |
+| `status` | String | No | `TRIGGERED`, `PUBLISHED`, `FAILED`, `CANCELLED` |
+| `intelligenceEventId` | UUID | Yes | UUID of published Kafka message |
+| `triggerReason` | String | No | `DEVIATION_OVERDUE`, `DEVIATION_MISSED`, `STEP_COMPLETED` |
+| `ruleId` | String | Yes | PlanDefinition sub-action ID |
+| `outputMetadata` | Map | Yes | Resolved action context: message template variables, severity, target, routing hints (JSONB) |
+| `createdAt` | OffsetDateTime | No | Record creation |
+| `updatedAt` | OffsetDateTime | No | Last update |
