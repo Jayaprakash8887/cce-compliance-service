@@ -463,7 +463,7 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 
 ## 10. action_definition
 
-Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when an intelligence rule fires. Referenced by PlanDefinition sub-actions via `definitionCanonical`. Each action definition specifies the type of action (notification, task, escalation, reminder), severity, target, and the full ActivityDefinition JSON (including message templates and routing configuration).
+Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when an intelligence rule fires. Referenced by PlanDefinition sub-actions via `definitionCanonical`. Each action definition specifies the type of action (FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest`), severity, target, and the full ActivityDefinition JSON (including message templates and routing configuration).
 
 ### Columns
 

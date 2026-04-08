@@ -500,7 +500,7 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
   "name": "anc-escalation-notification",
   "title": "ANC Escalation Notification",
   "status": "ACTIVE",
-  "actionType": "ESCALATION",
+  "actionType": "CommunicationRequest",
   "severity": "HIGH",
   "target": "SUPERVISOR",
   "definition": { ... },
@@ -678,7 +678,7 @@ View intelligence rule execution records.
 | `name` | String | Yes | Computer-friendly name |
 | `title` | String | Yes | Human-readable title |
 | `status` | String | No | `ACTIVE` or `RETIRED` |
-| `actionType` | String | No | `NOTIFICATION`, `TASK`, `ESCALATION`, `REMINDER` |
+| `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | String | Yes | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | `target` | String | Yes | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` |
 | `definition` | Map | No | Full ActivityDefinition as JSONB |
