@@ -6,7 +6,7 @@ The **CCE Compliance Service** is a core microservice within the **Clinical Comp
 
 ```mermaid
 graph TB
-    subgraph External Systems
+    subgraph Dependent Services
         INTEL["CCE Intelligence Service"]
         EHR["CCE Collector Service"]
         SCHEDULER["CCE Scheduler Service"]
@@ -126,7 +126,7 @@ sequenceDiagram
     participant Intel as CCE Intelligence Service
     participant Adaptor as Receiver Adaptors
 
-    Engine->>Evaluator: Deviation detected / Step completed
+    Engine->>Evaluator: Step State Change
     Evaluator->>Evaluator: Evaluate PlanDefinition sub-action conditions
     Evaluator->>Producer: Publish IntelligenceTriggerEvent
     Producer->>Kafka: cce.intelligence.triggers
@@ -150,7 +150,7 @@ The Compliance Service publishes `IntelligenceTriggerEvent` messages to `cce.int
 | `facilityId` | Facility where the event occurred | CloudEvent extension attribute |
 | `metadata` | Additional context (due dates, timing, severity) | Step and deviation runtime state |
 
-The Intelligence Service uses `type` + `metadata` to determine the kind of action (notification, task, escalation, reminder) and `facilityId` + `subject` to resolve the delivery target. See [Kafka Events §5.3](kafka-events.md#53-intelligencetriggerevent-outbound--cceintelligencetriggers) for the full message schema.
+See [Kafka Events §5.3](kafka-events.md#53-intelligencetriggerevent-outbound--cceintelligencetriggers) for the full message schema.
 
 #### Ownership & Boundaries
 
@@ -466,7 +466,7 @@ Protocol completion is **automatic** — when all steps reach terminal states (`
 
 Intelligence rules are modeled as **nested sub-actions** within a PlanDefinition step action (`action.action[]`). Each rule defines a condition (JSONLogic/FHIRPath) evaluated against step runtime state, and a `definitionCanonical` pointing to an `ActivityDefinition` (stored in the `action_definition` table) that defines the action to take.
 
-Rule evaluation is triggered at two points:
+Rule evaluation is triggered on any Step State change. Example:
 1. **On deviation detection** — when a step transitions to `OVERDUE` or `MISSED` (scheduler-driven)
 2. **On step completion** — when a step is completed by an inbound event (for rules like "notify on late completion")
 
@@ -547,7 +547,7 @@ flowchart TD
 | Field | Description |
 |---|---|
 | `canonicalUrl` + `version` | Unique identifier, referenced by `definitionCanonical` in PlanDefinition sub-actions |
-| `actionType` | `NOTIFICATION`, `TASK`, `ESCALATION`, `REMINDER` |
+| `actionType` | FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (from PlanDefinition extension) |
 | `target` | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` (from PlanDefinition extension) |
 | `definition` | Full ActivityDefinition JSON (message template, routing config) |
