@@ -17,4 +17,6 @@ public interface ActionRunRepository extends JpaRepository<ActionRun, UUID> {
     List<ActionRun> findByStepInstanceId(UUID stepInstanceId);
 
     List<ActionRun> findByDeviationId(UUID deviationId);
+
+    boolean existsByActionDefinitionId(UUID actionDefinitionId);
 }
