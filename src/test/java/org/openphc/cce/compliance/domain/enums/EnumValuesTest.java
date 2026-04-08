@@ -63,4 +63,46 @@ class EnumValuesTest {
         assertNotNull(FailureStage.valueOf("PROCESSING"));
         assertNotNull(FailureStage.valueOf("VALIDATION"));
     }
+
+    @Test
+    void actionDefinitionStatus_hasCorrectValues() {
+        assertEquals(2, ActionDefinitionStatus.values().length);
+        assertNotNull(ActionDefinitionStatus.valueOf("ACTIVE"));
+        assertNotNull(ActionDefinitionStatus.valueOf("RETIRED"));
+    }
+
+    @Test
+    void actionType_hasCorrectValues() {
+        assertEquals(3, ActionType.values().length);
+        assertNotNull(ActionType.valueOf("CommunicationRequest"));
+        assertNotNull(ActionType.valueOf("Task"));
+        assertNotNull(ActionType.valueOf("ServiceRequest"));
+    }
+
+    @Test
+    void intelligenceSeverity_hasCorrectValues() {
+        assertEquals(4, IntelligenceSeverity.values().length);
+        assertNotNull(IntelligenceSeverity.valueOf("LOW"));
+        assertNotNull(IntelligenceSeverity.valueOf("MEDIUM"));
+        assertNotNull(IntelligenceSeverity.valueOf("HIGH"));
+        assertNotNull(IntelligenceSeverity.valueOf("CRITICAL"));
+    }
+
+    @Test
+    void intelligenceTarget_hasCorrectValues() {
+        assertEquals(4, IntelligenceTarget.values().length);
+        assertNotNull(IntelligenceTarget.valueOf("PATIENT"));
+        assertNotNull(IntelligenceTarget.valueOf("ASSIGNED_WORKER"));
+        assertNotNull(IntelligenceTarget.valueOf("SUPERVISOR"));
+        assertNotNull(IntelligenceTarget.valueOf("FACILITY"));
+    }
+
+    @Test
+    void actionRunStatus_hasCorrectValues() {
+        assertEquals(4, ActionRunStatus.values().length);
+        assertNotNull(ActionRunStatus.valueOf("TRIGGERED"));
+        assertNotNull(ActionRunStatus.valueOf("PUBLISHED"));
+        assertNotNull(ActionRunStatus.valueOf("FAILED"));
+        assertNotNull(ActionRunStatus.valueOf("CANCELLED"));
+    }
 }

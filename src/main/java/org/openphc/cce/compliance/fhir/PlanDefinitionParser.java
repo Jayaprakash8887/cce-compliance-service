@@ -182,6 +182,9 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
+        // Extract intelligence rules from sub-actions
+        List<IntelligenceRuleInfo> intelligenceRules = extractIntelligenceRules(action);
+
         return new ActionMetadata(
                 action.getId(),
                 action.getTitle(),
@@ -189,14 +192,71 @@ public class PlanDefinitionParser {
                 relatedActions,
                 timingInfo,
                 toleranceDays,
-                requiredBehavior
+                requiredBehavior,
+                intelligenceRules
         );
+    }
+
+    private List<IntelligenceRuleInfo> extractIntelligenceRules(PlanDefinition.PlanDefinitionActionComponent action) {
+        List<IntelligenceRuleInfo> rules = new ArrayList<>();
+
+        for (PlanDefinition.PlanDefinitionActionComponent subAction : action.getAction()) {
+            // Extract condition (kind=applicability)
+            String condLanguage = null;
+            String condExpression = null;
+            for (PlanDefinition.PlanDefinitionActionConditionComponent cond : subAction.getCondition()) {
+                if (cond.getKind() == PlanDefinition.ActionConditionKind.APPLICABILITY
+                        && cond.hasExpression()
+                        && cond.getExpression().hasExpression()) {
+                    condLanguage = cond.getExpression().getLanguage();
+                    condExpression = cond.getExpression().getExpression();
+                    break;
+                }
+            }
+
+            // Skip rules without a condition
+            if (condLanguage == null || condExpression == null) continue;
+
+            // Extract definitionCanonical
+            String definitionCanonical = null;
+            if (subAction.hasDefinition() && subAction.getDefinition() instanceof CanonicalType canonical) {
+                definitionCanonical = canonical.getValue();
+            }
+
+            // Skip rules without a definitionCanonical
+            if (definitionCanonical == null) continue;
+
+            // Extract severity and target extensions
+            String severity = extractCodeExtension(subAction,
+                    "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
+            String target = extractCodeExtension(subAction,
+                    "http://openphc.org/fhir/StructureDefinition/intelligence-target");
+
+            rules.add(new IntelligenceRuleInfo(
+                    subAction.getId(),
+                    condLanguage,
+                    condExpression,
+                    definitionCanonical,
+                    severity,
+                    target
+            ));
+        }
+
+        return rules;
     }
 
     private Integer extractToleranceDays(PlanDefinition.PlanDefinitionActionComponent action) {
         Extension ext = action.getExtensionByUrl("http://openphc.org/fhir/StructureDefinition/tolerance-days");
         if (ext != null && ext.getValue() instanceof IntegerType intVal) {
             return intVal.getValue();
+        }
+        return null;
+    }
+
+    private String extractCodeExtension(PlanDefinition.PlanDefinitionActionComponent action, String url) {
+        Extension ext = action.getExtensionByUrl(url);
+        if (ext != null && ext.getValue() instanceof CodeType codeVal) {
+            return codeVal.getCode();
         }
         return null;
     }
@@ -238,7 +298,8 @@ public class PlanDefinitionParser {
             List<RelatedActionInfo> relatedActions,
             TimingInfo timing,
             Integer toleranceDays,
-            String requiredBehavior
+            String requiredBehavior,
+            List<IntelligenceRuleInfo> intelligenceRules
     ) {}
 
     public record TriggerInfo(
@@ -284,5 +345,14 @@ public class PlanDefinitionParser {
             String actionId,
             String conditionLanguage,
             String conditionExpression
+    ) {}
+
+    public record IntelligenceRuleInfo(
+            String ruleId,
+            String conditionLanguage,
+            String conditionExpression,
+            String definitionCanonical,
+            String severity,
+            String target
     ) {}
 }

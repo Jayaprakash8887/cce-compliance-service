@@ -1,0 +1,151 @@
+{
+  "resourceType": "PlanDefinition",
+  "id": "anc-intelligence-rules",
+  "url": "http://openphc.org/PlanDefinition/anc-intelligence-rules",
+  "version": "1.0.0",
+  "name": "ANCIntelligenceRulesProtocol",
+  "title": "ANC Protocol with Intelligence Rules",
+  "status": "active",
+  "action": [
+    {
+      "id": "blood-pressure-check",
+      "title": "Blood Pressure Check",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "bp-trigger",
+          "data": [
+            {
+              "type": "Observation",
+              "codeFilter": [
+                {
+                  "path": "code",
+                  "code": [
+                    {
+                      "system": "http://loinc.org",
+                      "code": "85354-9"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "action": [
+        {
+          "id": "bp-high-alert",
+          "title": "High BP Alert Rule",
+          "condition": [
+            {
+              "kind": "applicability",
+              "expression": {
+                "language": "text/jsonlogic",
+                "expression": "{\">\": [{\"var\": \"systolic\"}, 140]}"
+              }
+            }
+          ],
+          "definitionCanonical": "http://openphc.org/ActivityDefinition/high-bp-alert|1.0.0",
+          "extension": [
+            {
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
+              "valueCode": "HIGH"
+            },
+            {
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "valueCode": "ASSIGNED_WORKER"
+            }
+          ]
+        },
+        {
+          "id": "bp-critical-escalation",
+          "title": "Critical BP Escalation Rule",
+          "condition": [
+            {
+              "kind": "applicability",
+              "expression": {
+                "language": "text/fhirpath",
+                "expression": "Observation.component.where(code.coding.code='8480-6').value.value > 180"
+              }
+            }
+          ],
+          "definitionCanonical": "http://openphc.org/ActivityDefinition/bp-critical-escalation|1.0.0",
+          "extension": [
+            {
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
+              "valueCode": "CRITICAL"
+            },
+            {
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "valueCode": "SUPERVISOR"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "no-sub-actions",
+      "title": "Action Without Sub-Actions",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "simple-trigger",
+          "data": [
+            {
+              "type": "Encounter"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "partial-rules",
+      "title": "Action With Incomplete Sub-Actions",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "partial-trigger",
+          "data": [
+            {
+              "type": "Observation"
+            }
+          ]
+        }
+      ],
+      "action": [
+        {
+          "id": "missing-condition",
+          "title": "Rule Without Condition",
+          "definitionCanonical": "http://openphc.org/ActivityDefinition/some-action|1.0.0"
+        },
+        {
+          "id": "missing-definition",
+          "title": "Rule Without DefinitionCanonical",
+          "condition": [
+            {
+              "kind": "applicability",
+              "expression": {
+                "language": "text/jsonlogic",
+                "expression": "{\"==\": [1, 1]}"
+              }
+            }
+          ]
+        },
+        {
+          "id": "no-extensions-rule",
+          "title": "Valid Rule Without Extensions",
+          "condition": [
+            {
+              "kind": "applicability",
+              "expression": {
+                "language": "text/jsonlogic",
+                "expression": "{\">\": [{\"var\": \"value\"}, 100]}"
+              }
+            }
+          ],
+          "definitionCanonical": "http://openphc.org/ActivityDefinition/no-ext-action|1.0.0"
+        }
+      ]
+    }
+  ]
+}
