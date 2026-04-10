@@ -12,6 +12,7 @@ import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
 import org.openphc.cce.compliance.kafka.producer.IntelligenceTriggerProducer;
+import org.hl7.fhir.r4.model.PlanDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -57,23 +58,25 @@ public class IntelligenceActionEvaluator {
      * Evaluate intelligence actions when a deviation is detected (OVERDUE or MISSED).
      *
      * PlanDefinition
-     * └─ action (step)              → match by step.actionId
-     *    └─ action[] (sub-actions)   → for each: check condition → resolve definition → record & publish
+     * └─ action (protocol step)        → match by step.actionId
+     *    └─ action[] (intelligence actions)  → for each: check condition → resolve definition → record & publish
      */
     public List<ActionRun> evaluateOnDeviation(StepInstance step, Deviation deviation) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
-        var planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
+        PlanDefinition planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
 
         JsonNode context = objectMapper.valueToTree(buildDeviationContext(step, deviation));
         String triggerReason = deviation.getDeviationType().name().toLowerCase();
 
         List<ActionRun> actionRuns = new ArrayList<>();
 
-        for (PlanDefinitionParser.ActionMetadata action : planDefinitionParser.extractActions(planDefinition)) {
-            if (!step.getActionId().equals(action.id())) continue;
+        // Iterate over protocol steps (PlanDefinition.action) to find the matching step
+        for (PlanDefinitionParser.ActionMetadata protocolStep : planDefinitionParser.extractActions(planDefinition)) {
+            if (!step.getActionId().equals(protocolStep.id())) continue;
 
-            for (PlanDefinitionParser.IntelligenceActionInfo subAction : action.intelligenceActions()) {
-                ActionRun actionRun = evaluateAction(subAction, step, deviation, context, triggerReason);
+            // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
+            for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
+                ActionRun actionRun = evaluateAction(intelligenceAction, step, deviation, context, triggerReason);
                 if (actionRun != null) {
                     actionRuns.add(actionRun);
                 }
@@ -92,22 +95,24 @@ public class IntelligenceActionEvaluator {
      * Evaluate intelligence actions when a step is completed.
      *
      * PlanDefinition
-     * └─ action (step)              → match by step.actionId
-     *    └─ action[] (sub-actions)   → for each: check condition → resolve definition → record & publish
+     * └─ action (protocol step)        → match by step.actionId
+     *    └─ action[] (intelligence actions)  → for each: check condition → resolve definition → record & publish
      */
     public List<ActionRun> evaluateOnCompletion(StepInstance step) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
-        var planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
+        PlanDefinition planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
 
         JsonNode context = objectMapper.valueToTree(buildCompletionContext(step));
 
         List<ActionRun> actionRuns = new ArrayList<>();
 
-        for (PlanDefinitionParser.ActionMetadata action : planDefinitionParser.extractActions(planDefinition)) {
-            if (!step.getActionId().equals(action.id())) continue;
+        // Iterate over protocol steps (PlanDefinition.action) to find the matching step
+        for (PlanDefinitionParser.ActionMetadata protocolStep : planDefinitionParser.extractActions(planDefinition)) {
+            if (!step.getActionId().equals(protocolStep.id())) continue;
 
-            for (PlanDefinitionParser.IntelligenceActionInfo subAction : action.intelligenceActions()) {
-                ActionRun actionRun = evaluateAction(subAction, step, null, context, "completion");
+            // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
+            for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
+                ActionRun actionRun = evaluateAction(intelligenceAction, step, null, context, "completion");
                 if (actionRun != null) {
                     actionRuns.add(actionRun);
                 }
