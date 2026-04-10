@@ -19,9 +19,10 @@
 9. [audit_log](#9-audit_log)
 10. [action_definition](#10-action_definition)
 11. [action_run](#11-action_run)
-12. [Enumerated Value Reference](#12-enumerated-value-reference)
-13. [Relationships & Foreign Keys](#13-relationships--foreign-keys)
-14. [JSONB Column Schemas](#14-jsonb-column-schemas)
+12. [action_run_context](#12-action_run_context)
+13. [Enumerated Value Reference](#13-enumerated-value-reference)
+14. [Relationships & Foreign Keys](#14-relationships--foreign-keys)
+15. [JSONB Column Schemas](#15-jsonb-column-schemas)
 
 ---
 
@@ -36,7 +37,6 @@ erDiagram
     PROTOCOL_INSTANCE ||--o{ ACTION_RUN : "tracks"
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
     STEP_INSTANCE ||--o{ ACTION_RUN : "triggers"
-    DEVIATION ||--o{ ACTION_RUN : "produces"
     ACTION_DEFINITION ||--o{ ACTION_RUN : "defines"
 
     PROTOCOL_DEFINITION {
@@ -147,16 +147,26 @@ erDiagram
         uuid action_definition_id FK
         uuid protocol_instance_id FK
         uuid step_instance_id FK
-        uuid deviation_id FK
         varchar status
         uuid intelligence_event_id
-        varchar trigger_reason
-        varchar rule_id
-        text rule_expression
         jsonb output_metadata
         timestamptz created_at
         timestamptz updated_at
     }
+
+    ACTION_RUN_CONTEXT {
+        uuid id PK
+        uuid action_run_id FK
+        uuid deviation_id FK
+        varchar trigger_reason
+        varchar step_action_id
+        text evaluation_expression
+        jsonb evaluation_context
+        timestamptz created_at
+    }
+
+    ACTION_RUN ||--|| ACTION_RUN_CONTEXT : "has context"
+    DEVIATION ||--o{ ACTION_RUN_CONTEXT : "produces"
 ```
 
 > **Note:** The `scheduler_lease` table is owned and managed by the CCE Scheduler Service and is not shown in this ERD. See [Architecture Overview §1.1](architecture-overview.md#11-scheduler-service-contract) for the Scheduler Service interaction model.
@@ -173,8 +183,10 @@ erDiagram
 | 4 | `deviation` | Compliance deviations (overdue, missed) | Medium |
 | 5 | `trigger_index` | Inverted index for fast Tier 1 structural event matching | Low (rebuilt on protocol load) |
 | 6 | `event_log` | Immutable log of all inbound CloudEvents and their processing outcomes | High (every event) |
-| 7 | `audit_log` | System and user audit trail | Medium–High || 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence rule actions | Low (tens) |
-| 9 | `action_run` | Intelligence rule execution records | Medium–High |
+| 7 | `audit_log` | System and user audit trail | Medium–High |
+| 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence actions | Low (tens) |
+| 9 | `action_run` | Intelligence action execution records | Medium–High |
+| 10 | `action_run_context` | Evaluation context for intelligence action runs (why the action fired) | Medium–High (1:1 with action_run) |
 ---
 
 ## 3. protocol_definition
@@ -304,7 +316,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 
 ## 6. deviation
 
-Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. When intelligence rules are configured on the step's PlanDefinition action, the `IntelligenceRuleEvaluator` is invoked and the `intelligence_event_id` is populated with the published event's UUID.
+Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. When intelligence actions are configured on the step's PlanDefinition action, the `IntelligenceActionEvaluator` is invoked and the `intelligence_event_id` is populated with the published event's UUID.
 
 ### Columns
 
@@ -503,7 +515,7 @@ The **canonical reference** is `canonical_url|version` (e.g., `ActivityDefinitio
 
 ## 11. action_run
 
-Records each execution of an **intelligence rule**. Created when an intelligence rule's condition evaluates to `true` on deviation detection or step completion. Tracks the full lifecycle from trigger to Kafka publication.
+Records each execution of an **intelligence action** (PlanDefinition sub-action). Created when a sub-action's condition evaluates to `true` on deviation detection or step completion. Tracks the execution lifecycle from trigger to Kafka publication. Evaluation context (why the action fired) is stored separately in `action_run_context`.
 
 ### Columns
 
@@ -512,13 +524,9 @@ Records each execution of an **intelligence rule**. Created when an intelligence
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
 | `action_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `action_definition.id`. The action definition that was executed. |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. The patient's protocol journey. |
-| `step_instance_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. The step that triggered the rule. `NULL` for protocol-level rules. |
-| `deviation_id` | `UUID` | Yes | — | Foreign key → `deviation.id`. The deviation that triggered the rule. `NULL` for completion-triggered rules. |
+| `step_instance_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. The step that triggered the action. `NULL` for protocol-level actions. |
 | `status` | `VARCHAR` | **NOT NULL** | — | Execution status. See [ActionRunStatus](#actionrunstatus). |
 | `intelligence_event_id` | `UUID` | Yes | — | UUID of the published `IntelligenceTriggerEvent` on Kafka. Populated on successful publish. |
-| `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this rule was evaluated: `DEVIATION_OVERDUE`, `DEVIATION_MISSED`, `STEP_COMPLETED`. |
-| `rule_id` | `VARCHAR` | Yes | — | The PlanDefinition sub-action ID that fired (e.g., `anc-visit-2-overdue-escalation`). |
-| `rule_expression` | `TEXT` | Yes | — | The condition expression that was evaluated (for debugging/audit). |
 | `output_metadata` | `JSONB` | Yes | — | Action-specific output context. See [JSONB: action_run output_metadata](#action_run--output_metadata). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
@@ -526,22 +534,48 @@ Records each execution of an **intelligence rule**. Created when an intelligence
 ### Constraints & Indexes
 
 | Type | Name | Details |
-|------|------|---------|
+|------|------|---------|  
 | Primary Key | `action_run_pkey` | `id` |
 | Foreign Key | `action_run_action_definition_id_fkey` | `action_definition_id` → `action_definition(id)` |
 | Foreign Key | `action_run_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Foreign Key | `action_run_step_instance_id_fkey` | `step_instance_id` → `step_instance(id)` |
-| Foreign Key | `action_run_deviation_id_fkey` | `deviation_id` → `deviation(id)` |
 | Check | — | `status IN ('TRIGGERED', 'PUBLISHED', 'FAILED', 'CANCELLED')` |
 | B-tree Index | `idx_action_run_protocol_instance` | `protocol_instance_id` — All runs for a protocol instance. |
 | B-tree Index | `idx_action_run_action_definition` | `action_definition_id` — All runs for an action definition. |
 | B-tree Index | `idx_action_run_status` | `status` — Filter by execution status. |
 | Partial B-tree | `idx_action_run_step_instance` | `step_instance_id WHERE step_instance_id IS NOT NULL` |
-| Partial B-tree | `idx_action_run_deviation` | `deviation_id WHERE deviation_id IS NOT NULL` |
 
 ---
 
-## 12. Enumerated Value Reference
+## 12. action_run_context
+
+Stores the **evaluation context** for each intelligence action run — why the action was triggered, which PlanDefinition sub-action's condition matched, and the runtime variables that were evaluated. Separated from `action_run` because the action execution itself has no dependency on the evaluation context; this data exists for diagnostic insights and auditability.
+
+### Columns
+
+| Column | Data Type | Nullable | Default | Description |
+|--------|-----------|----------|---------|-------------|
+| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
+| `action_run_id` | `UUID` | **NOT NULL** | — | Foreign key → `action_run.id`. One-to-one relationship. |
+| `deviation_id` | `UUID` | Yes | — | Foreign key → `deviation.id`. The deviation that triggered the action. `NULL` for completion-triggered actions. |
+| `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this action was evaluated: `overdue`, `missed`, `completion`. |
+| `step_action_id` | `VARCHAR` | Yes | — | The PlanDefinition sub-action ID that fired (e.g., `bp-high-alert`). |
+| `evaluation_expression` | `TEXT` | Yes | — | The condition expression that was evaluated (for debugging/audit). |
+| `evaluation_context` | `JSONB` | Yes | — | Runtime variables passed to the expression evaluator. See [JSONB: action_run_context evaluation_context](#action_run_context--evaluation_context). |
+| `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
+
+### Constraints & Indexes
+
+| Type | Name | Details |
+|------|------|---------|  
+| Primary Key | `action_run_context_pkey` | `id` |
+| Foreign Key | `action_run_context_action_run_id_fkey` | `action_run_id` → `action_run(id)` |
+| Foreign Key | `action_run_context_deviation_id_fkey` | `deviation_id` → `deviation(id)` |
+| Unique | `action_run_context_action_run_id_unique` | `action_run_id` — Enforces 1:1 relationship. |
+| B-tree Index | `idx_action_run_context_action_run` | `action_run_id` |
+| Partial B-tree | `idx_action_run_context_deviation` | `deviation_id WHERE deviation_id IS NOT NULL` |
+
+## 13. Enumerated Value Reference
 
 ### ProtocolDefinitionStatus
 
@@ -650,7 +684,7 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 
 ---
 
-## 13. Relationships & Foreign Keys
+## 14. Relationships & Foreign Keys
 
 | Parent Table | Child Table | FK Column | Cascade | Description |
 |-------------|-------------|-----------|---------|-------------|
@@ -662,13 +696,14 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 | `action_definition` | `action_run` | `action_definition_id` | No cascade | Deletion prevented if action runs exist. |
 | `protocol_instance` | `action_run` | `protocol_instance_id` | No cascade (DB level) | Reference only. |
 | `step_instance` | `action_run` | `step_instance_id` | No cascade (DB level) | Nullable reference. |
-| `deviation` | `action_run` | `deviation_id` | No cascade (DB level) | Nullable reference. |
+| `action_run` | `action_run_context` | `action_run_id` | No cascade | 1:1 evaluation context. Unique constraint enforces single context per run. |
+| `deviation` | `action_run_context` | `deviation_id` | No cascade (DB level) | Nullable reference. Context-only; the deviation that triggered evaluation. |
 
 
 
 ---
 
-## 14. JSONB Column Schemas
+## 15. JSONB Column Schemas
 
 ### protocol_definition — `definition`
 
@@ -825,3 +860,38 @@ Contains context information resolved at rule execution time. Used for downstrea
   "deviationType": "overdue",
   "daysOverdue": 5
 }
+```
+
+### action_run_context — `evaluation_context`
+
+Captures the full runtime variable map that was passed to the condition expression evaluator. Contents vary by trigger reason.
+
+**Deviation context fields:**
+
+| Field | Type | Presence | Description |
+|-------|------|----------|-------------|
+| `stepState` | String | Always | Step state at evaluation time (e.g., `overdue`, `missed`) |
+| `deviationType` | String | Always | `overdue` or `missed` |
+| `actionId` | String | Always | Step definition action ID |
+| `repeatIndex` | Integer | Always | 0-based repeat index for recurring steps |
+| `dueDate` | String | When set | ISO-8601 `OffsetDateTime` of step due date |
+| `daysOverdue` | Long | When `dueDate` set | Days past due date (≥ 0) |
+| `daysPastMissedDate` | Long | When `missedDate` set | Days past missed cutoff (≥ 0) |
+
+**Completion context fields:**
+
+| Field | Type | Presence | Description |
+|-------|------|----------|-------------|
+| `stepState` | String | Always | Always `completed` |
+| `actionId` | String | Always | Step definition action ID |
+| `repeatIndex` | Integer | Always | 0-based repeat index |
+| `completedAt` | String | When set | ISO-8601 `OffsetDateTime` of completion |
+| `dueDate` | String | When set | ISO-8601 `OffsetDateTime` of step due date |
+| `completionStatus` | String | When set | `early`, `on_time`, or `late` |
+
+**Examples:**
+
+| Trigger Reason | Example |
+|----------------|---------|
+| Deviation (overdue) | `{"stepState": "overdue", "deviationType": "overdue", "actionId": "anc-visit-2", "repeatIndex": 0, "dueDate": "2026-03-01T00:00:00Z", "daysOverdue": 5}` |
+| Completion | `{"stepState": "completed", "actionId": "anc-visit-2", "repeatIndex": 0, "completedAt": "2026-03-09T14:30:00Z", "dueDate": "2026-03-07T00:00:00Z", "completionStatus": "late"}` |

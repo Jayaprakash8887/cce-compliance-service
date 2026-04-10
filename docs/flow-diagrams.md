@@ -280,18 +280,18 @@ flowchart TD
     D4 --> D5["Link to ProtocolInstance + StepInstance"]
     D5 --> D6["Persist to DB"]
     D6 --> D7["Audit: DEVIATION_DETECTED"]
-    D7 --> D8["Evaluate intelligence rules<br/>(IntelligenceRuleEvaluator)"]
+    D7 --> D8["Evaluate intelligence actions<br/>(IntelligenceActionEvaluator)"]
 ```
 
 ## 6. Intelligence Rule Evaluation & Trigger Publishing
 
-This flow is triggered after a deviation is detected (OVERDUE/MISSED) or after a step is completed. The `IntelligenceRuleEvaluator` evaluates PlanDefinition sub-action conditions and publishes intelligence events.
+This flow is triggered after a deviation is detected (OVERDUE/MISSED) or after a step is completed. The `IntelligenceActionEvaluator` evaluates PlanDefinition sub-action conditions and publishes intelligence events.
 
 ```mermaid
 sequenceDiagram
     autonumber
     participant Trigger as Deviation Detection /<br/>Step Completion
-    participant Evaluator as IntelligenceRuleEvaluator
+    participant Evaluator as IntelligenceActionEvaluator
     participant Parser as PlanDefinitionParser
     participant ExprEval as ExpressionEvaluationService
     participant ActionDefSvc as ActionDefinitionService
@@ -302,36 +302,38 @@ sequenceDiagram
     Trigger->>Evaluator: evaluateOnDeviation(step, deviation)<br/>or evaluateOnCompletion(step)
 
     rect rgb(240, 248, 255)
-        Note over Evaluator,Parser: Step 1 — Extract intelligence rules
+        Note over Evaluator,Parser: Step 1 — Extract intelligence actions
         Evaluator->>DB: Load PlanDefinition from step's protocol
         DB-->>Evaluator: ProtocolDefinition
         Evaluator->>Parser: extractActions(planDefinition)
-        Evaluator->>Parser: extractIntelligenceRules(action)
-        Parser-->>Evaluator: List<IntelligenceRuleInfo>
+        Evaluator->>Parser: action.intelligenceActions()
+        Parser-->>Evaluator: List<IntelligenceActionInfo>
     end
 
     rect rgb(245, 255, 245)
         Note over Evaluator,ExprEval: Step 2 — Build context & evaluate conditions
         Evaluator->>Evaluator: Build runtime context<br/>(stepState, deviationType, daysOverdue,<br/>completionStatus, actionId, repeatIndex)
 
-        loop For each intelligence rule
-            Evaluator->>ExprEval: evaluate(rule.language,<br/>rule.expression, context)
+        loop For each intelligence action
+            Evaluator->>ExprEval: evaluate(action.language,<br/>action.expression, context)
             ExprEval-->>Evaluator: boolean
 
             alt Condition is true
                 rect rgb(255, 248, 240)
                     Note over Evaluator,Kafka: Step 3 — Resolve, record, publish
-                    Evaluator->>ActionDefSvc: resolveByCanonical(rule.definitionCanonical)
+                    Evaluator->>ActionDefSvc: resolveByCanonical(action.definitionCanonical)
                     ActionDefSvc->>DB: SELECT FROM action_definition
                     DB-->>ActionDefSvc: ActionDefinition
 
                     alt ActionDefinition not found
                         ActionDefSvc-->>Evaluator: null
-                        Evaluator->>Evaluator: Log warning, skip rule
+                        Evaluator->>Evaluator: Log warning, skip action
                     else ActionDefinition found
                         ActionDefSvc-->>Evaluator: ActionDefinition
                         Evaluator->>DB: INSERT ActionRun (status=TRIGGERED)
                         DB-->>Evaluator: ActionRun
+
+                        Evaluator->>DB: INSERT ActionRunContext<br/>(deviation, triggerReason,<br/>stepActionId, evaluationExpression,<br/>evaluationContext)
 
                         Evaluator->>Evaluator: Build IntelligenceTriggerEvent
                         Evaluator->>Producer: publish(event)
@@ -343,7 +345,7 @@ sequenceDiagram
                     end
                 end
             else Condition is false
-                Note over Evaluator: Skip rule
+                Note over Evaluator: Skip action
             end
         end
     end
@@ -359,7 +361,7 @@ flowchart TD
         STEP["StepInstance<br/>(state, actionId, dueDate, completedAt)"]
         DEV["Deviation<br/>(deviationType, detectedAt, metadata)"]
         PI["ProtocolInstance<br/>(patientId, protocolCanonical, facilityId)"]
-        RULE["IntelligenceRuleInfo<br/>(ruleId, definitionCanonical, severity, target)"]
+        RULE["IntelligenceActionInfo<br/>(actionId, definitionCanonical, severity, target)"]
         ACTDEF["ActionDefinition<br/>(actionType, title)"]
     end
 

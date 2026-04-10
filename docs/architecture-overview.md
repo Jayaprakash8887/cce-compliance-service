@@ -120,7 +120,7 @@ The **CCE Intelligence Service** is the downstream consumer of intelligence trig
 ```mermaid
 sequenceDiagram
     participant Engine as ComplianceEngine<br/>(Compliance Service)
-    participant Evaluator as IntelligenceRuleEvaluator
+    participant Evaluator as IntelligenceActionEvaluator
     participant Producer as IntelligenceTriggerProducer
     participant Kafka as Apache Kafka
     participant Intel as CCE Intelligence Service
@@ -559,9 +559,9 @@ flowchart TD
 | Field | Description |
 |---|---|
 | `status` | `TRIGGERED` → `PUBLISHED` (success) or `FAILED` (publish error) |
-| `triggerReason` | `DEVIATION_OVERDUE`, `DEVIATION_MISSED`, `STEP_COMPLETED` |
-| `ruleId` | The PlanDefinition sub-action ID that fired |
 | `intelligenceEventId` | UUID of the published Kafka message |
+
+Evaluation context (trigger reason, step action ID, expression, deviation reference) is stored in the associated `action_run_context` record. See [Data Dictionary §12](data-dictionary.md#12-action_run_context).
 
 ## 7. Security
 

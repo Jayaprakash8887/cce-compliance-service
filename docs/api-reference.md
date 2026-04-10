@@ -640,11 +640,8 @@ View intelligence rule execution records.
   "actionDefinitionId": "aa0e8400-e29b-41d4-a716-446655440010",
   "protocolInstanceId": "660e8400-e29b-41d4-a716-446655440001",
   "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
-  "deviationId": "880e8400-e29b-41d4-a716-446655440005",
   "status": "PUBLISHED",
   "intelligenceEventId": "itrig-550e8400-e29b-41d4-a716-446655440099",
-  "triggerReason": "DEVIATION_OVERDUE",
-  "ruleId": "anc-visit-2-overdue-escalation",
   "outputMetadata": {
     "patientId": "260225-0002-5501",
     "actionId": "anc-visit-2",
@@ -693,11 +690,21 @@ View intelligence rule execution records.
 | `actionDefinitionId` | UUID | No | FK to ActionDefinition |
 | `protocolInstanceId` | UUID | No | FK to ProtocolInstance |
 | `stepInstanceId` | UUID | Yes | FK to StepInstance |
-| `deviationId` | UUID | Yes | FK to Deviation |
 | `status` | String | No | `TRIGGERED`, `PUBLISHED`, `FAILED`, `CANCELLED` |
 | `intelligenceEventId` | UUID | Yes | UUID of published Kafka message |
-| `triggerReason` | String | No | `DEVIATION_OVERDUE`, `DEVIATION_MISSED`, `STEP_COMPLETED` |
-| `ruleId` | String | Yes | PlanDefinition sub-action ID |
 | `outputMetadata` | Map | Yes | Resolved action context: message template variables, severity, target, routing hints (JSONB) |
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |
+
+### ActionRunContextDto
+
+| Field | Type | Nullable | Description |
+|---|---|---|---|
+| `id` | UUID | No | Unique identifier |
+| `actionRunId` | UUID | No | FK to ActionRun (1:1) |
+| `deviationId` | UUID | Yes | FK to Deviation. `NULL` for completion-triggered actions |
+| `triggerReason` | String | No | `overdue`, `missed`, `completion` |
+| `stepActionId` | String | Yes | PlanDefinition sub-action ID that fired |
+| `evaluationExpression` | String | Yes | Condition expression evaluated (audit/debug) |
+| `evaluationContext` | Map | Yes | Runtime variables passed to evaluator (JSONB) |
+| `createdAt` | OffsetDateTime | No | Record creation |

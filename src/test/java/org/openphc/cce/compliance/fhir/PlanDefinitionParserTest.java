@@ -296,45 +296,45 @@ class PlanDefinitionParserTest {
         assertNull(labWork.timing());
     }
 
-    // ── Intelligence Rules Tests ──
+    // ── Intelligence Actions Tests ──
 
     @Test
-    void extractActions_extractsIntelligenceRulesFromSubActions() throws IOException {
+    void extractActions_extractsIntelligenceActionsFromSubActions() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // blood-pressure-check has 2 intelligence rules
+        // blood-pressure-check has 2 intelligence actions (sub-actions)
         PlanDefinitionParser.ActionMetadata bpAction = actions.get(0);
         assertEquals("blood-pressure-check", bpAction.id());
-        assertEquals(2, bpAction.intelligenceRules().size());
+        assertEquals(2, bpAction.intelligenceActions().size());
 
-        PlanDefinitionParser.IntelligenceRuleInfo rule1 = bpAction.intelligenceRules().get(0);
-        assertEquals("bp-high-alert", rule1.ruleId());
-        assertEquals("text/jsonlogic", rule1.conditionLanguage());
-        assertEquals("{\">\": [{\"var\": \"systolic\"}, 140]}", rule1.conditionExpression());
-        assertEquals("http://openphc.org/ActivityDefinition/high-bp-alert|1.0.0", rule1.definitionCanonical());
-        assertEquals("HIGH", rule1.severity());
-        assertEquals("ASSIGNED_WORKER", rule1.target());
+        PlanDefinitionParser.IntelligenceActionInfo action1 = bpAction.intelligenceActions().get(0);
+        assertEquals("bp-high-alert", action1.actionId());
+        assertEquals("text/jsonlogic", action1.conditionLanguage());
+        assertEquals("{\">\": [{\"var\": \"systolic\"}, 140]}", action1.conditionExpression());
+        assertEquals("http://openphc.org/ActivityDefinition/high-bp-alert|1.0.0", action1.definitionCanonical());
+        assertEquals("HIGH", action1.severity());
+        assertEquals("ASSIGNED_WORKER", action1.target());
 
-        PlanDefinitionParser.IntelligenceRuleInfo rule2 = bpAction.intelligenceRules().get(1);
-        assertEquals("bp-critical-escalation", rule2.ruleId());
-        assertEquals("text/fhirpath", rule2.conditionLanguage());
-        assertEquals("http://openphc.org/ActivityDefinition/bp-critical-escalation|1.0.0", rule2.definitionCanonical());
-        assertEquals("CRITICAL", rule2.severity());
-        assertEquals("SUPERVISOR", rule2.target());
+        PlanDefinitionParser.IntelligenceActionInfo action2 = bpAction.intelligenceActions().get(1);
+        assertEquals("bp-critical-escalation", action2.actionId());
+        assertEquals("text/fhirpath", action2.conditionLanguage());
+        assertEquals("http://openphc.org/ActivityDefinition/bp-critical-escalation|1.0.0", action2.definitionCanonical());
+        assertEquals("CRITICAL", action2.severity());
+        assertEquals("SUPERVISOR", action2.target());
     }
 
     @Test
-    void extractActions_actionWithNoSubActions_emptyRulesList() throws IOException {
+    void extractActions_actionWithNoSubActions_emptyIntelligenceActions() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // no-sub-actions has no sub-actions → empty intelligence rules
+        // no-sub-actions has no sub-actions → empty intelligence actions
         PlanDefinitionParser.ActionMetadata noSubs = actions.get(1);
         assertEquals("no-sub-actions", noSubs.id());
-        assertTrue(noSubs.intelligenceRules().isEmpty());
+        assertTrue(noSubs.intelligenceActions().isEmpty());
     }
 
     @Test
@@ -347,8 +347,8 @@ class PlanDefinitionParserTest {
         // Only no-extensions-rule passes both condition + definitionCanonical checks
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
         assertEquals("partial-rules", partial.id());
-        assertEquals(1, partial.intelligenceRules().size());
-        assertEquals("no-extensions-rule", partial.intelligenceRules().get(0).ruleId());
+        assertEquals(1, partial.intelligenceActions().size());
+        assertEquals("no-extensions-rule", partial.intelligenceActions().get(0).actionId());
     }
 
     @Test
@@ -359,35 +359,35 @@ class PlanDefinitionParserTest {
 
         // Verify missing-definition sub-action was skipped
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
-        boolean hasMissingDef = partial.intelligenceRules().stream()
-                .anyMatch(r -> "missing-definition".equals(r.ruleId()));
+        boolean hasMissingDef = partial.intelligenceActions().stream()
+                .anyMatch(a -> "missing-definition".equals(a.actionId()));
         assertFalse(hasMissingDef);
     }
 
     @Test
-    void extractActions_intelligenceRuleWithoutExtensions_nullSeverityAndTarget() throws IOException {
+    void extractActions_intelligenceActionWithoutExtensions_nullSeverityAndTarget() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
         // no-extensions-rule has no severity/target extensions
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
-        PlanDefinitionParser.IntelligenceRuleInfo rule = partial.intelligenceRules().get(0);
-        assertEquals("no-extensions-rule", rule.ruleId());
-        assertEquals("http://openphc.org/ActivityDefinition/no-ext-action|1.0.0", rule.definitionCanonical());
-        assertNull(rule.severity());
-        assertNull(rule.target());
+        PlanDefinitionParser.IntelligenceActionInfo action = partial.intelligenceActions().get(0);
+        assertEquals("no-extensions-rule", action.actionId());
+        assertEquals("http://openphc.org/ActivityDefinition/no-ext-action|1.0.0", action.definitionCanonical());
+        assertNull(action.severity());
+        assertNull(action.target());
     }
 
     @Test
-    void extractActions_existingFixture_hasEmptyIntelligenceRules() {
-        // Existing fixture has no sub-actions → all actions should have empty intelligence rules
+    void extractActions_existingFixture_hasEmptyIntelligenceActions() {
+        // Existing fixture has no sub-actions → all actions should have empty intelligence actions
         PlanDefinition pd = parser.parse(fixtureJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
         for (PlanDefinitionParser.ActionMetadata action : actions) {
-            assertTrue(action.intelligenceRules().isEmpty(),
-                    "Action " + action.id() + " should have empty intelligence rules");
+            assertTrue(action.intelligenceActions().isEmpty(),
+                    "Action " + action.id() + " should have empty intelligence actions");
         }
     }
 

@@ -2,7 +2,6 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.hl7.fhir.r4.model.PlanDefinition;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,13 +13,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.enums.*;
+import org.openphc.cce.compliance.domain.repository.ActionRunContextRepository;
 import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
 import org.openphc.cce.compliance.kafka.producer.IntelligenceTriggerProducer;
-import org.springframework.kafka.support.SendResult;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -34,24 +33,26 @@ import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class IntelligenceRuleEvaluatorTest {
+class IntelligenceActionEvaluatorTest {
 
     @Mock private PlanDefinitionParser planDefinitionParser;
     @Mock private ExpressionEvaluationService expressionEvaluationService;
     @Mock private ActionDefinitionService actionDefinitionService;
     @Mock private IntelligenceTriggerProducer intelligenceTriggerProducer;
     @Mock private ActionRunRepository actionRunRepository;
+    @Mock private ActionRunContextRepository actionRunContextRepository;
     @Mock private DeviationRepository deviationRepository;
 
-    private IntelligenceRuleEvaluator evaluator;
+    private IntelligenceActionEvaluator evaluator;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        evaluator = new IntelligenceRuleEvaluator(
+        evaluator = new IntelligenceActionEvaluator(
                 planDefinitionParser, expressionEvaluationService,
                 actionDefinitionService, intelligenceTriggerProducer,
-                actionRunRepository, deviationRepository, objectMapper);
+                actionRunRepository, actionRunContextRepository,
+                deviationRepository, objectMapper);
     }
 
     // ── Deviation Tests ──
@@ -60,16 +61,17 @@ class IntelligenceRuleEvaluatorTest {
     class EvaluateOnDeviation {
 
         @Test
-        void matchingRule_createsActionRunAndPublishesEvent() {
+        void matchingAction_createsActionRunAndPublishesEvent() {
             StepInstance step = buildStep("bp-check", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
             ActionDefinition actionDef = buildActionDefinition();
+            String expr = "{\"==\": [1, 1]}";
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-1", "text/jsonlogic", "{\"==\": [1, 1]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic", expr,
                             "http://openphc.org/ActivityDefinition/alert|1.0")));
 
-            when(expressionEvaluationService.evaluate(eq("text/jsonlogic"), eq("{\"==\": [1, 1]}"), any()))
+            when(expressionEvaluationService.evaluate(eq("text/jsonlogic"), eq(expr), any()))
                     .thenReturn(true);
             when(actionDefinitionService.resolveByCanonical("http://openphc.org/ActivityDefinition/alert|1.0"))
                     .thenReturn(actionDef);
@@ -83,18 +85,27 @@ class IntelligenceRuleEvaluatorTest {
 
             List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
 
+            // ActionRun created and published
             assertEquals(1, result.size());
             ActionRun actionRun = result.get(0);
             assertEquals(ActionRunStatus.PUBLISHED, actionRun.getStatus());
-            assertEquals("rule-1", actionRun.getRuleId());
-            assertEquals("overdue", actionRun.getTriggerReason());
             assertNotNull(actionRun.getIntelligenceEventId());
 
-            // Verify event was published
+            // Evaluation context saved separately
+            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
+            verify(actionRunContextRepository).save(ctxCaptor.capture());
+            ActionRunContext ctx = ctxCaptor.getValue();
+            assertEquals("bp-high-alert", ctx.getStepActionId());
+            assertEquals("overdue", ctx.getTriggerReason());
+            assertEquals(expr, ctx.getEvaluationExpression());
+            assertNotNull(ctx.getEvaluationContext());
+            assertEquals(actionRun, ctx.getActionRun());
+            assertEquals(deviation, ctx.getDeviation());
+
+            // Event published correctly
             ArgumentCaptor<IntelligenceTriggerEvent> eventCaptor =
                     ArgumentCaptor.forClass(IntelligenceTriggerEvent.class);
             verify(intelligenceTriggerProducer).publish(eventCaptor.capture());
-
             IntelligenceTriggerEvent event = eventCaptor.getValue();
             assertEquals(step.getProtocolInstance().getId(), event.getProtocolInstanceId());
             assertEquals(step.getId(), event.getStepInstanceId());
@@ -103,7 +114,7 @@ class IntelligenceRuleEvaluatorTest {
             assertEquals("OVERDUE", event.getStepState());
             assertEquals("bp-check", event.getActionId());
 
-            // Verify deviation.intelligenceEventId was set
+            // Deviation.intelligenceEventId set
             verify(deviationRepository).save(deviation);
             assertNotNull(deviation.getIntelligenceEventId());
 
@@ -112,12 +123,13 @@ class IntelligenceRuleEvaluatorTest {
         }
 
         @Test
-        void nonMatchingRule_noActionRunCreated() {
+        void nonMatchingAction_noActionRunCreated() {
             StepInstance step = buildStep("bp-check", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-1", "text/jsonlogic", "{\">\": [{\"var\": \"daysOverdue\"}, 30]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic",
+                            "{\">\": [{\"var\": \"daysOverdue\"}, 30]}",
                             "http://openphc.org/ActivityDefinition/alert|1.0")));
 
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
@@ -127,21 +139,22 @@ class IntelligenceRuleEvaluatorTest {
 
             assertTrue(result.isEmpty());
             verify(actionRunRepository, never()).save(any());
+            verify(actionRunContextRepository, never()).save(any());
             verify(intelligenceTriggerProducer, never()).publish(any());
         }
 
         @Test
-        void multipleRules_someMatchSomeDont() {
+        void multipleActions_someMatchSomeDont() {
             StepInstance step = buildStep("bp-check", StepState.MISSED);
             Deviation deviation = buildDeviation(step, DeviationType.MISSED);
             ActionDefinition actionDef = buildActionDefinition();
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-match", "text/jsonlogic", "{\"==\": [1, 1]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic", "{\"==\": [1, 1]}",
                             "http://openphc.org/ActivityDefinition/alert|1.0"),
-                    buildRule("rule-skip", "text/jsonlogic", "{\"==\": [1, 0]}",
+                    buildIntelligenceAction("bp-normal", "text/jsonlogic", "{\"==\": [1, 0]}",
                             "http://openphc.org/ActivityDefinition/other|1.0"),
-                    buildRule("rule-match-2", "text/fhirpath", "true",
+                    buildIntelligenceAction("bp-critical-escalation", "text/fhirpath", "true",
                             "http://openphc.org/ActivityDefinition/escalation|1.0")));
 
             when(expressionEvaluationService.evaluate(eq("text/jsonlogic"), eq("{\"==\": [1, 1]}"), any()))
@@ -162,19 +175,24 @@ class IntelligenceRuleEvaluatorTest {
             List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertEquals(2, result.size());
-            assertEquals("rule-match", result.get(0).getRuleId());
-            assertEquals("rule-match-2", result.get(1).getRuleId());
+
+            // Context saved for each fired action
+            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
+            verify(actionRunContextRepository, times(2)).save(ctxCaptor.capture());
+            List<ActionRunContext> contexts = ctxCaptor.getAllValues();
+            assertEquals("bp-high-alert", contexts.get(0).getStepActionId());
+            assertEquals("bp-critical-escalation", contexts.get(1).getStepActionId());
 
             verify(intelligenceTriggerProducer, times(2)).publish(any());
         }
 
         @Test
-        void missingActionDefinition_ruleSkippedAndLogged() {
+        void missingActionDefinition_actionSkippedAndLogged() {
             StepInstance step = buildStep("bp-check", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-1", "text/jsonlogic", "{\"==\": [1, 1]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic", "{\"==\": [1, 1]}",
                             "http://openphc.org/ActivityDefinition/missing|1.0")));
 
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
@@ -186,14 +204,15 @@ class IntelligenceRuleEvaluatorTest {
 
             assertTrue(result.isEmpty());
             verify(actionRunRepository, never()).save(any());
+            verify(actionRunContextRepository, never()).save(any());
         }
 
         @Test
-        void noRulesOnStep_returnsEmptyList() {
+        void noIntelligenceActionsOnStep_returnsEmptyList() {
             StepInstance step = buildStep("simple-step", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            mockParserReturnsRules(step, List.of());
+            mockParserReturnsIntelligenceActions(step, List.of());
 
             List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
 
@@ -208,11 +227,10 @@ class IntelligenceRuleEvaluatorTest {
             step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(2));
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-1", "text/jsonlogic", "{\"==\": [1, 1]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic", "{\"==\": [1, 1]}",
                             "http://openphc.org/ActivityDefinition/alert|1.0")));
 
-            // Capture the context passed to evaluate
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
                     .thenReturn(false);
 
@@ -227,7 +245,7 @@ class IntelligenceRuleEvaluatorTest {
             assertEquals("bp-check", context.get("actionId").asText());
             assertEquals(0, context.get("repeatIndex").asInt());
             assertTrue(context.has("daysOverdue"));
-            assertTrue(context.get("daysOverdue").asLong() >= 4); // ~5 days ago
+            assertTrue(context.get("daysOverdue").asLong() >= 4);
             assertTrue(context.has("dueDate"));
             assertTrue(context.has("daysPastMissedDate"));
         }
@@ -239,14 +257,14 @@ class IntelligenceRuleEvaluatorTest {
     class EvaluateOnCompletion {
 
         @Test
-        void completionWithMatchingRule_createsActionRun() {
+        void completionWithMatchingAction_createsActionRun() {
             StepInstance step = buildStep("bp-check", StepState.COMPLETED);
             step.setCompletedAt(OffsetDateTime.now(ZoneOffset.UTC));
             step.setCompletionStatus(CompletionStatus.LATE);
             ActionDefinition actionDef = buildActionDefinition();
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("late-notify", "text/jsonlogic",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("late-notify", "text/jsonlogic",
                             "{\"==\": [{\"var\": \"completionStatus\"}, \"late\"]}",
                             "http://openphc.org/ActivityDefinition/late-alert|1.0")));
 
@@ -264,9 +282,13 @@ class IntelligenceRuleEvaluatorTest {
             List<ActionRun> result = evaluator.evaluateOnCompletion(step);
 
             assertEquals(1, result.size());
-            assertEquals("completion", result.get(0).getTriggerReason());
-            assertEquals("late-notify", result.get(0).getRuleId());
-            assertNull(result.get(0).getDeviation());
+
+            // Context saved with correct trigger reason and deviation
+            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
+            verify(actionRunContextRepository).save(ctxCaptor.capture());
+            assertEquals("completion", ctxCaptor.getValue().getTriggerReason());
+            assertEquals("late-notify", ctxCaptor.getValue().getStepActionId());
+            assertNull(ctxCaptor.getValue().getDeviation());
 
             // No deviation to update
             verify(deviationRepository, never()).save(any());
@@ -279,8 +301,8 @@ class IntelligenceRuleEvaluatorTest {
             step.setCompletionStatus(CompletionStatus.ON_TIME);
             step.setDueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(1));
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-1", "text/jsonlogic", "{\"==\": [1, 0]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("check-rule", "text/jsonlogic", "{\"==\": [1, 0]}",
                             "http://openphc.org/ActivityDefinition/alert|1.0")));
 
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
@@ -301,10 +323,10 @@ class IntelligenceRuleEvaluatorTest {
         }
 
         @Test
-        void completionNoRules_returnsEmpty() {
+        void completionNoIntelligenceActions_returnsEmpty() {
             StepInstance step = buildStep("simple-step", StepState.COMPLETED);
 
-            mockParserReturnsRules(step, List.of());
+            mockParserReturnsIntelligenceActions(step, List.of());
 
             List<ActionRun> result = evaluator.evaluateOnCompletion(step);
 
@@ -318,12 +340,12 @@ class IntelligenceRuleEvaluatorTest {
     class EdgeCases {
 
         @Test
-        void conditionEvaluationError_ruleSkipped() {
+        void conditionEvaluationError_actionSkipped() {
             StepInstance step = buildStep("bp-check", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("error-rule", "text/jsonlogic", "invalid-expr",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("error-action", "text/jsonlogic", "invalid-expr",
                             "http://openphc.org/ActivityDefinition/alert|1.0")));
 
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
@@ -333,6 +355,7 @@ class IntelligenceRuleEvaluatorTest {
 
             assertTrue(result.isEmpty());
             verify(actionRunRepository, never()).save(any());
+            verify(actionRunContextRepository, never()).save(any());
         }
 
         @Test
@@ -340,7 +363,6 @@ class IntelligenceRuleEvaluatorTest {
             StepInstance step = buildStep("nonexistent-action", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            // Parser returns actions but none match the step's actionId
             var mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
@@ -360,8 +382,8 @@ class IntelligenceRuleEvaluatorTest {
             deviation.setIntelligenceEventId(existingEventId);
             ActionDefinition actionDef = buildActionDefinition();
 
-            mockParserReturnsRules(step, List.of(
-                    buildRule("rule-1", "text/jsonlogic", "{\"==\": [1, 1]}",
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic", "{\"==\": [1, 1]}",
                             "http://openphc.org/ActivityDefinition/alert|1.0")));
 
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
@@ -380,6 +402,38 @@ class IntelligenceRuleEvaluatorTest {
             // Should not overwrite existing intelligenceEventId
             verify(deviationRepository, never()).save(any());
             assertEquals(existingEventId, deviation.getIntelligenceEventId());
+        }
+
+        @Test
+        void evaluationContextStoredAsJsonNode() {
+            StepInstance step = buildStep("bp-check", StepState.OVERDUE);
+            Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
+            ActionDefinition actionDef = buildActionDefinition();
+
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("bp-high-alert", "text/jsonlogic", "{\"==\": [1, 1]}",
+                            "http://openphc.org/ActivityDefinition/alert|1.0")));
+
+            when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
+                    .thenReturn(true);
+            when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
+            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
+                ActionRun ar = i.getArgument(0);
+                if (ar.getId() == null) ar.setId(UUID.randomUUID());
+                return ar;
+            });
+            when(intelligenceTriggerProducer.publish(any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            evaluator.evaluateOnDeviation(step, deviation);
+
+            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
+            verify(actionRunContextRepository).save(ctxCaptor.capture());
+            JsonNode evalCtx = ctxCaptor.getValue().getEvaluationContext();
+            assertNotNull(evalCtx);
+            assertEquals("overdue", evalCtx.get("stepState").asText());
+            assertEquals("overdue", evalCtx.get("deviationType").asText());
+            assertEquals("bp-check", evalCtx.get("actionId").asText());
         }
     }
 
@@ -440,18 +494,18 @@ class IntelligenceRuleEvaluatorTest {
                 .build();
     }
 
-    private PlanDefinitionParser.IntelligenceRuleInfo buildRule(String ruleId, String language,
-                                                                 String expression, String canonical) {
-        return new PlanDefinitionParser.IntelligenceRuleInfo(
-                ruleId, language, expression, canonical, null, null);
+    private PlanDefinitionParser.IntelligenceActionInfo buildIntelligenceAction(
+            String actionId, String language, String expression, String canonical) {
+        return new PlanDefinitionParser.IntelligenceActionInfo(
+                actionId, language, expression, canonical, null, null);
     }
 
-    private void mockParserReturnsRules(StepInstance step,
-                                         List<PlanDefinitionParser.IntelligenceRuleInfo> rules) {
+    private void mockParserReturnsIntelligenceActions(StepInstance step,
+                                                       List<PlanDefinitionParser.IntelligenceActionInfo> actions) {
         var mockPlanDef = mock(PlanDefinition.class);
         when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
         when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.ActionMetadata(step.getActionId(), "Test Action",
-                        List.of(), List.of(), null, null, null, rules)));
+                        List.of(), List.of(), null, null, null, actions)));
     }
 }

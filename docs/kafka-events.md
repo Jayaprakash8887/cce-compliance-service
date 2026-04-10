@@ -343,7 +343,7 @@ Published when an intelligence rule fires — triggered by deviation detection (
 | `cce.compliance.step.completed.late` | Step completed with `completionStatus=LATE` |
 
 
-> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceRuleEvaluator` extracts intelligence rules from the step's PlanDefinition sub-actions, evaluates each rule's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching rule. An `ActionRun` record tracks each execution. See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-rule-evaluation) for the full pipeline.
+> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition sub-actions, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `ActionRun` record tracks execution; an `ActionRunContext` record stores evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables). See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-rule-evaluation) for the full pipeline.
 
 ---
 
