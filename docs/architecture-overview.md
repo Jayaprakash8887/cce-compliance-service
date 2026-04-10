@@ -127,7 +127,7 @@ sequenceDiagram
     participant Adaptor as Receiver Adaptors
 
     Engine->>Evaluator: Step State Change
-    Evaluator->>Evaluator: Evaluate PlanDefinition sub-action conditions
+    Evaluator->>Evaluator: Evaluate PlanDefinition intelligence action conditions
     Evaluator->>Producer: Publish IntelligenceTriggerEvent
     Producer->>Kafka: cce.intelligence.triggers
     Kafka->>Intel: Deliver trigger event
@@ -156,10 +156,10 @@ See [Kafka Events §5.3](kafka-events.md#53-intelligencetriggerevent-outbound--c
 
 | Aspect | Owner | Details |
 |---|---|---|
-| **Intelligence rule evaluation** | Compliance Service | Evaluates PlanDefinition sub-action conditions, resolves `definitionCanonical` to `ActionDefinition` |
+| **Intelligence action evaluation** | Compliance Service | Evaluates PlanDefinition intelligence action conditions, resolves `definitionCanonical` to `ActionDefinition` |
 | **Trigger event publishing** | Compliance Service | Publishes `IntelligenceTriggerEvent` to Kafka; creates `ActionRun` record (TRIGGERED → PUBLISHED) |
-| **`action_definition` table** | Compliance Service | Schema, writes, Flyway migrations — stores `ActivityDefinition` resources referenced by intelligence rules |
-| **`action_run` table** | Compliance Service | Tracks each intelligence rule execution (status, output, linked event ID) |
+| **`action_definition` table** | Compliance Service | Schema, writes, Flyway migrations — stores `ActivityDefinition` resources referenced by intelligence actions |
+| **`action_run` table** | Compliance Service | Tracks each intelligence action execution (status, output, linked event ID) |
 | **Event consumption & routing** | Intelligence Service | Consumes from `cce.intelligence.triggers`, resolves delivery targets, routes to Receiver Adaptors |
 | **Notification/task delivery** | Intelligence Service + Receiver Adaptors | Translates intelligence events into system-specific records (SMS, in-app alerts, EMR tasks, escalation workflows) |
 | **Kafka topic** | Shared | `cce.intelligence.triggers` — Compliance produces, Intelligence consumes |
@@ -226,7 +226,7 @@ flowchart TD
     S5["Step 5: Two-Tier Matching<br/>(see §5.4 for detailed flow)"] --> S6
 
     S6{"Result Classification"}
-    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Evaluate intelligence rules"]
+    S6 -->|"≥1 matches"| MATCH["For each match:<br/>Enroll patient (if needed) → Create step instance<br/>→ Progressive step instantiation<br/>→ Evaluate intelligence actions"]
     S6 -->|"0 matches"| ZERO["Log ZERO_MATCH"]
 ```
 
@@ -464,7 +464,7 @@ Protocol completion is **automatic** — when all steps reach terminal states (`
 
 ### 6.3 Intelligence Action Evaluation
 
-Intelligence actions are modeled as **nested sub-actions** within a PlanDefinition step action (`action.action[]`). Each intelligence action defines a condition (JSONLogic/FHIRPath) evaluated against step runtime state, and a `definitionCanonical` pointing to an `ActivityDefinition` (stored in the `action_definition` table) that defines the action to take.
+Intelligence actions are modeled as **nested actions** within a PlanDefinition step (`action.action[]`). Each intelligence action defines a condition (JSONLogic/FHIRPath) evaluated against step runtime state, and a `definitionCanonical` pointing to an `ActivityDefinition` (stored in the `action_definition` table) that defines the action to take.
 
 Intelligence action evaluation is triggered on any Step State change. Example:
 1. **On deviation detection** — when a step transitions to `OVERDUE` or `MISSED` (scheduler-driven)
@@ -473,7 +473,7 @@ Intelligence action evaluation is triggered on any Step State change. Example:
 ```mermaid
 flowchart TD
     TRIGGER["Step Completion or Deviation Detected"] --> LOAD["Load PlanDefinition for step's protocol"]
-    LOAD --> EXTRACT["Extract intelligence actions<br/>(nested sub-actions for this actionId)"]
+    LOAD --> EXTRACT["Extract intelligence actions<br/>(nested actions for this step's actionId)"]
     EXTRACT --> LOOP{"For each intelligence action"}
 
     LOOP --> BUILD["Build runtime context:<br/>stepState, deviationType, daysOverdue,<br/>completionStatus, actionId, repeatIndex"]
@@ -515,7 +515,7 @@ The table below maps CCE domain concepts to their FHIR PlanDefinition counterpar
 |---|---|---|
 | **Protocol Definition** | `PlanDefinition` | The clinical protocol (e.g., ANC High-Risk Monitoring) |
 | **Protocol Step** | `PlanDefinition.action` | A step in the protocol (e.g., "ANC Visit 2") |
-| **Intelligence Action** | `PlanDefinition.action.action` | A nested sub-action that defines a conditional intelligence rule |
+| **Intelligence Action** | `PlanDefinition.action.action` | A nested action that defines a conditional intelligence evaluation |
 
 ```mermaid
 flowchart LR
@@ -637,8 +637,8 @@ See [API Reference](api-reference.md) for endpoint details.
 | `cce.events.duplicate` | Counter | Duplicate events detected |
 | `cce.events.zero_match` | Counter | Events with zero trigger matches |
 | `cce.events.intelligence.published` | Counter | Intelligence trigger events published to Kafka |
-| `cce.intelligence.rules.evaluated` | Counter | Total intelligence rule conditions evaluated |
-| `cce.intelligence.rules.fired` | Counter | Intelligence rules that matched and triggered |
+| `cce.intelligence.actions.evaluated` | Counter | Total intelligence action conditions evaluated |
+| `cce.intelligence.actions.fired` | Counter | Intelligence actions that matched and triggered |
 | `cce.intelligence.publish.duration` | Timer | Time to publish intelligence event to Kafka |
 | `cce.action.definitions.active` | Gauge | Active action definitions |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |

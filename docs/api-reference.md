@@ -601,7 +601,7 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 
 ## 8. Action Runs
 
-View intelligence rule execution records.
+View intelligence action execution records.
 
 ### 8.1 List Action Runs
 
@@ -704,7 +704,7 @@ View intelligence rule execution records.
 | `actionRunId` | UUID | No | FK to ActionRun (1:1) |
 | `deviationId` | UUID | Yes | FK to Deviation. `NULL` for completion-triggered actions |
 | `triggerReason` | String | No | `overdue`, `missed`, `completion` |
-| `stepActionId` | String | Yes | PlanDefinition sub-action ID that fired |
+| `stepActionId` | String | Yes | PlanDefinition intelligence action ID that fired |
 | `evaluationExpression` | String | Yes | Condition expression evaluated (audit/debug) |
 | `evaluationContext` | Map | Yes | Runtime variables passed to evaluator (JSONB) |
 | `createdAt` | OffsetDateTime | No | Record creation |

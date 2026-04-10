@@ -293,7 +293,7 @@ graph LR
 
 ### 5.3 IntelligenceTriggerEvent (Outbound — `cce.intelligence.triggers`)
 
-Published when an intelligence rule fires — triggered by deviation detection (OVERDUE/MISSED) or step completion when the step's PlanDefinition action has nested sub-actions with matching conditions.
+Published when an intelligence action fires — triggered by deviation detection (OVERDUE/MISSED) or step completion when the step's PlanDefinition action has nested intelligence actions with matching conditions.
 
 ```json
 {
@@ -343,7 +343,7 @@ Published when an intelligence rule fires — triggered by deviation detection (
 | `cce.compliance.step.completed.late` | Step completed with `completionStatus=LATE` |
 
 
-> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition sub-actions, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `ActionRun` record tracks execution; an `ActionRunContext` record stores evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables). See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-rule-evaluation) for the full pipeline.
+> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `ActionRun` record tracks execution; an `ActionRunContext` record stores evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables). See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-action-evaluation) for the full pipeline.
 
 ---
 
@@ -399,7 +399,7 @@ public void consume(SchedulerTriggerMessage trigger) {
 
 ### 7.1 IntelligenceTriggerProducer
 
-Publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` when intelligence rules fire.
+Publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` when intelligence actions fire.
 
 ```java
 @Component

@@ -327,7 +327,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | `step_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `step_instance.id`. |
 | `deviation_type` | `VARCHAR` | **NOT NULL** | — | Type classification. See [DeviationType](#deviationtype). |
 | `detected_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Detection timestamp. |
-| `intelligence_event_id` | `UUID` | Yes | — | Links to the intelligence event published to Kafka when an intelligence rule fires on this deviation. `NULL` when no intelligence rules are configured for the step. |
+| `intelligence_event_id` | `UUID` | Yes | — | Links to the intelligence event published to Kafka when an intelligence action fires on this deviation. `NULL` when no intelligence actions are configured for the step. |
 | `metadata` | `JSONB` | Yes | — | Deviation-type-specific timing details. See [JSONB: deviation metadata](#deviation--metadata). |
 
 ### Constraints & Indexes
@@ -475,7 +475,7 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 
 ## 10. action_definition
 
-Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when an intelligence rule fires. Referenced by PlanDefinition sub-actions via `definitionCanonical`. Each action definition specifies the type of action (FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest`), severity, target, and the full ActivityDefinition JSON (including message templates and routing configuration).
+Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when an intelligence action fires. Referenced by PlanDefinition intelligence actions via `definitionCanonical`. Each action definition specifies the type of action (FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest`), severity, target, and the full ActivityDefinition JSON (including message templates and routing configuration).
 
 ### Columns
 
@@ -509,13 +509,13 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 
 ### Canonical Reference
 
-The **canonical reference** is `canonical_url|version` (e.g., `ActivityDefinition/anc-escalation-notification|1.0`). Used in PlanDefinition sub-actions as `definitionCanonical` to reference the action to execute.
+The **canonical reference** is `canonical_url|version` (e.g., `ActivityDefinition/anc-escalation-notification|1.0`). Used in PlanDefinition intelligence actions as `definitionCanonical` to reference the action to execute.
 
 ---
 
 ## 11. action_run
 
-Records each execution of an **intelligence action** (PlanDefinition sub-action). Created when a sub-action's condition evaluates to `true` on deviation detection or step completion. Tracks the execution lifecycle from trigger to Kafka publication. Evaluation context (why the action fired) is stored separately in `action_run_context`.
+Records each execution of an **intelligence action** (`PlanDefinition.action.action`). Created when an intelligence action's condition evaluates to `true` on deviation detection or step completion. Tracks the execution lifecycle from trigger to Kafka publication. Evaluation context (why the action fired) is stored separately in `action_run_context`.
 
 ### Columns
 
@@ -549,7 +549,7 @@ Records each execution of an **intelligence action** (PlanDefinition sub-action)
 
 ## 12. action_run_context
 
-Stores the **evaluation context** for each intelligence action run — why the action was triggered, which PlanDefinition sub-action's condition matched, and the runtime variables that were evaluated. Separated from `action_run` because the action execution itself has no dependency on the evaluation context; this data exists for diagnostic insights and auditability.
+Stores the **evaluation context** for each intelligence action run — why the action was triggered, which PlanDefinition intelligence action's condition matched, and the runtime variables that were evaluated. Separated from `action_run` because the action execution itself has no dependency on the evaluation context; this data exists for diagnostic insights and auditability.
 
 ### Columns
 
@@ -559,7 +559,7 @@ Stores the **evaluation context** for each intelligence action run — why the a
 | `action_run_id` | `UUID` | **NOT NULL** | — | Foreign key → `action_run.id`. One-to-one relationship. |
 | `deviation_id` | `UUID` | Yes | — | Foreign key → `deviation.id`. The deviation that triggered the action. `NULL` for completion-triggered actions. |
 | `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this action was evaluated: `overdue`, `missed`, `completion`. |
-| `step_action_id` | `VARCHAR` | Yes | — | The PlanDefinition sub-action ID that fired (e.g., `bp-high-alert`). |
+| `step_action_id` | `VARCHAR` | Yes | — | The PlanDefinition intelligence action ID that fired (e.g., `bp-high-alert`). |
 | `evaluation_expression` | `TEXT` | Yes | — | The condition expression that was evaluated (for debugging/audit). |
 | `evaluation_context` | `JSONB` | Yes | — | Runtime variables passed to the expression evaluator. See [JSONB: action_run_context evaluation_context](#action_run_context--evaluation_context). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
@@ -640,7 +640,7 @@ Stores the **evaluation context** for each intelligence action run — why the a
 
 | Value | Description |
 |-------|-------------|
-| `ACTIVE` | Action definition available for intelligence rule execution. |
+| `ACTIVE` | Action definition available for intelligence action execution. |
 | `RETIRED` | Deactivated. Existing action runs unaffected but no new runs created. |
 
 ### ActionType

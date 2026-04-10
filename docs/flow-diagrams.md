@@ -260,7 +260,7 @@ flowchart TD
 
 ## 5. Deviation Detection & Recording
 
-> **Intelligence rule evaluation** is triggered after each deviation is recorded. See §6 for the full intelligence pipeline flow.
+> **Intelligence action evaluation** is triggered after each deviation is recorded. See §6 for the full intelligence pipeline flow.
 
 ```mermaid
 flowchart TD
@@ -283,9 +283,9 @@ flowchart TD
     D7 --> D8["Evaluate intelligence actions<br/>(IntelligenceActionEvaluator)"]
 ```
 
-## 6. Intelligence Rule Evaluation & Trigger Publishing
+## 6. Intelligence Action Evaluation & Trigger Publishing
 
-This flow is triggered after a deviation is detected (OVERDUE/MISSED) or after a step is completed. The `IntelligenceActionEvaluator` evaluates PlanDefinition sub-action conditions and publishes intelligence events.
+This flow is triggered after a deviation is detected (OVERDUE/MISSED) or after a step is completed. The `IntelligenceActionEvaluator` evaluates PlanDefinition intelligence action conditions and publishes intelligence events.
 
 ```mermaid
 sequenceDiagram
