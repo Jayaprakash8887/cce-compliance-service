@@ -127,7 +127,7 @@ public class IntelligenceActionEvaluator {
         return actionRuns;
     }
 
-    // ── Per intelligence sub-action evaluation ──
+    // ── Per intelligence action evaluation ──
 
     private ActionRun evaluateAction(PlanDefinitionParser.IntelligenceActionInfo action,
                                      StepInstance step, Deviation deviation,

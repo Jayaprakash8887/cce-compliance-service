@@ -299,12 +299,12 @@ class PlanDefinitionParserTest {
     // ── Intelligence Actions Tests ──
 
     @Test
-    void extractActions_extractsIntelligenceActionsFromSubActions() throws IOException {
+    void extractActions_extractsIntelligenceActions() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // blood-pressure-check has 2 intelligence actions (sub-actions)
+        // blood-pressure-check has 2 intelligence actions
         PlanDefinitionParser.ActionMetadata bpAction = actions.get(0);
         assertEquals("blood-pressure-check", bpAction.id());
         assertEquals(2, bpAction.intelligenceActions().size());
@@ -326,24 +326,24 @@ class PlanDefinitionParserTest {
     }
 
     @Test
-    void extractActions_actionWithNoSubActions_emptyIntelligenceActions() throws IOException {
+    void extractActions_actionWithNoIntelligenceActions_emptyList() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // no-sub-actions has no sub-actions → empty intelligence actions
+        // no-sub-actions has no intelligence actions → empty list
         PlanDefinitionParser.ActionMetadata noSubs = actions.get(1);
         assertEquals("no-sub-actions", noSubs.id());
         assertTrue(noSubs.intelligenceActions().isEmpty());
     }
 
     @Test
-    void extractActions_subActionMissingCondition_skipped() throws IOException {
+    void extractActions_intelligenceActionMissingCondition_skipped() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // partial-rules has 3 sub-actions: missing-condition, missing-definition, no-extensions-rule
+        // partial-rules has 3 intelligence actions: missing-condition, missing-definition, no-extensions-rule
         // Only no-extensions-rule passes both condition + definitionCanonical checks
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
         assertEquals("partial-rules", partial.id());
@@ -352,12 +352,12 @@ class PlanDefinitionParserTest {
     }
 
     @Test
-    void extractActions_subActionMissingDefinitionCanonical_skipped() throws IOException {
+    void extractActions_intelligenceActionMissingDefinitionCanonical_skipped() throws IOException {
         String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
         PlanDefinition pd = parser.parse(rulesJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // Verify missing-definition sub-action was skipped
+        // Verify missing-definition intelligence action was skipped
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
         boolean hasMissingDef = partial.intelligenceActions().stream()
                 .anyMatch(a -> "missing-definition".equals(a.actionId()));
@@ -381,7 +381,7 @@ class PlanDefinitionParserTest {
 
     @Test
     void extractActions_existingFixture_hasEmptyIntelligenceActions() {
-        // Existing fixture has no sub-actions → all actions should have empty intelligence actions
+        // Existing fixture has no intelligence actions → all actions should have empty intelligence actions
         PlanDefinition pd = parser.parse(fixtureJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 

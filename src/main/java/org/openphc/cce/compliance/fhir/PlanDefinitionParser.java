@@ -183,7 +183,7 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
-        // Extract intelligence actions from sub-actions
+        // Extract intelligence actions
         List<IntelligenceActionInfo> intelligenceActions = extractIntelligenceActions(action);
 
         return new ActionMetadata(
@@ -201,11 +201,11 @@ public class PlanDefinitionParser {
     private List<IntelligenceActionInfo> extractIntelligenceActions(PlanDefinition.PlanDefinitionActionComponent action) {
         List<IntelligenceActionInfo> actions = new ArrayList<>();
 
-        for (PlanDefinition.PlanDefinitionActionComponent subAction : action.getAction()) {
+        for (PlanDefinition.PlanDefinitionActionComponent intelligenceAction : action.getAction()) {
             // Extract condition (kind=applicability)
             String condLanguage = null;
             String condExpression = null;
-            for (PlanDefinition.PlanDefinitionActionConditionComponent cond : subAction.getCondition()) {
+            for (PlanDefinition.PlanDefinitionActionConditionComponent cond : intelligenceAction.getCondition()) {
                 if (cond.getKind() == PlanDefinition.ActionConditionKind.APPLICABILITY
                         && cond.hasExpression()
                         && cond.getExpression().hasExpression()) {
@@ -215,26 +215,26 @@ public class PlanDefinitionParser {
                 }
             }
 
-            // Skip actions without a condition
+            // Skip intelligence actions without a condition
             if (condLanguage == null || condExpression == null) continue;
 
             // Extract definitionCanonical
             String definitionCanonical = null;
-            if (subAction.hasDefinition() && subAction.getDefinition() instanceof CanonicalType canonical) {
+            if (intelligenceAction.hasDefinition() && intelligenceAction.getDefinition() instanceof CanonicalType canonical) {
                 definitionCanonical = canonical.getValue();
             }
 
-            // Skip actions without a definitionCanonical
+            // Skip intelligence actions without a definitionCanonical
             if (definitionCanonical == null) continue;
 
             // Extract severity and target extensions
-            String severity = extractCodeExtension(subAction,
+            String severity = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
-            String target = extractCodeExtension(subAction,
+            String target = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-target");
 
             actions.add(new IntelligenceActionInfo(
-                    subAction.getId(),
+                    intelligenceAction.getId(),
                     condLanguage,
                     condExpression,
                     definitionCanonical,
