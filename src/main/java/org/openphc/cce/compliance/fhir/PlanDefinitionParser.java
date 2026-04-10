@@ -5,6 +5,7 @@ import ca.uhn.fhir.parser.IParser;
 import org.hl7.fhir.r4.model.*;
 import org.openphc.cce.compliance.domain.entity.TriggerIndex;
 import org.openphc.cce.compliance.domain.entity.TriggerIndexId;
+import org.openphc.cce.compliance.fhir.PlanDefinitionParser.IntelligenceActionInfo;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -182,8 +183,8 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
-        // Extract intelligence rules from sub-actions
-        List<IntelligenceRuleInfo> intelligenceRules = extractIntelligenceRules(action);
+        // Extract intelligence actions
+        List<IntelligenceActionInfo> intelligenceActions = extractIntelligenceActions(action);
 
         return new ActionMetadata(
                 action.getId(),
@@ -193,18 +194,18 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                intelligenceRules
+                intelligenceActions
         );
     }
 
-    private List<IntelligenceRuleInfo> extractIntelligenceRules(PlanDefinition.PlanDefinitionActionComponent action) {
-        List<IntelligenceRuleInfo> rules = new ArrayList<>();
+    private List<IntelligenceActionInfo> extractIntelligenceActions(PlanDefinition.PlanDefinitionActionComponent action) {
+        List<IntelligenceActionInfo> actions = new ArrayList<>();
 
-        for (PlanDefinition.PlanDefinitionActionComponent subAction : action.getAction()) {
+        for (PlanDefinition.PlanDefinitionActionComponent intelligenceAction : action.getAction()) {
             // Extract condition (kind=applicability)
             String condLanguage = null;
             String condExpression = null;
-            for (PlanDefinition.PlanDefinitionActionConditionComponent cond : subAction.getCondition()) {
+            for (PlanDefinition.PlanDefinitionActionConditionComponent cond : intelligenceAction.getCondition()) {
                 if (cond.getKind() == PlanDefinition.ActionConditionKind.APPLICABILITY
                         && cond.hasExpression()
                         && cond.getExpression().hasExpression()) {
@@ -214,26 +215,26 @@ public class PlanDefinitionParser {
                 }
             }
 
-            // Skip rules without a condition
+            // Skip intelligence actions without a condition
             if (condLanguage == null || condExpression == null) continue;
 
             // Extract definitionCanonical
             String definitionCanonical = null;
-            if (subAction.hasDefinition() && subAction.getDefinition() instanceof CanonicalType canonical) {
+            if (intelligenceAction.hasDefinition() && intelligenceAction.getDefinition() instanceof CanonicalType canonical) {
                 definitionCanonical = canonical.getValue();
             }
 
-            // Skip rules without a definitionCanonical
+            // Skip intelligence actions without a definitionCanonical
             if (definitionCanonical == null) continue;
 
             // Extract severity and target extensions
-            String severity = extractCodeExtension(subAction,
+            String severity = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
-            String target = extractCodeExtension(subAction,
+            String target = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-target");
 
-            rules.add(new IntelligenceRuleInfo(
-                    subAction.getId(),
+            actions.add(new IntelligenceActionInfo(
+                    intelligenceAction.getId(),
                     condLanguage,
                     condExpression,
                     definitionCanonical,
@@ -242,7 +243,7 @@ public class PlanDefinitionParser {
             ));
         }
 
-        return rules;
+        return actions;
     }
 
     private Integer extractToleranceDays(PlanDefinition.PlanDefinitionActionComponent action) {
@@ -299,7 +300,7 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            List<IntelligenceRuleInfo> intelligenceRules
+            List<IntelligenceActionInfo> intelligenceActions
     ) {}
 
     public record TriggerInfo(
@@ -347,8 +348,8 @@ public class PlanDefinitionParser {
             String conditionExpression
     ) {}
 
-    public record IntelligenceRuleInfo(
-            String ruleId,
+    public record IntelligenceActionInfo(
+            String actionId,
             String conditionLanguage,
             String conditionExpression,
             String definitionCanonical,

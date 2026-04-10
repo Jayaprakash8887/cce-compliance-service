@@ -15,4 +15,6 @@ public interface ActionDefinitionRepository extends JpaRepository<ActionDefiniti
     Optional<ActionDefinition> findByCanonicalUrlAndVersion(String canonicalUrl, String version);
 
     List<ActionDefinition> findByStatus(ActionDefinitionStatus status);
+
+    List<ActionDefinition> findByCanonicalUrl(String canonicalUrl);
 }

@@ -36,25 +36,12 @@ public class ActionRun {
     @JoinColumn(name = "step_instance_id")
     private StepInstance stepInstance;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "deviation_id")
-    private Deviation deviation;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private ActionRunStatus status;
 
     @Column(name = "intelligence_event_id")
     private UUID intelligenceEventId;
-
-    @Column(name = "trigger_reason", nullable = false)
-    private String triggerReason;
-
-    @Column(name = "rule_id")
-    private String ruleId;
-
-    @Column(name = "rule_expression", columnDefinition = "text")
-    private String ruleExpression;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "output_metadata", columnDefinition = "jsonb")
