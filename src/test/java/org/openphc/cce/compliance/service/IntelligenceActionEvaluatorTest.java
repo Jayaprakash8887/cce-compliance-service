@@ -2,6 +2,8 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.persistence.EntityNotFoundException;
 import org.hl7.fhir.r4.model.PlanDefinition;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,14 +47,16 @@ class IntelligenceActionEvaluatorTest {
 
     private IntelligenceActionEvaluator evaluator;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
+        meterRegistry = new SimpleMeterRegistry();
         evaluator = new IntelligenceActionEvaluator(
                 planDefinitionParser, expressionEvaluationService,
                 actionDefinitionService, intelligenceTriggerProducer,
                 actionRunRepository, actionRunContextRepository,
-                deviationRepository, objectMapper);
+                deviationRepository, objectMapper, meterRegistry);
     }
 
     // ── Deviation Tests ──
@@ -434,6 +438,85 @@ class IntelligenceActionEvaluatorTest {
             assertEquals("overdue", evalCtx.get("stepState").asText());
             assertEquals("overdue", evalCtx.get("deviationType").asText());
             assertEquals("bp-check", evalCtx.get("actionId").asText());
+        }
+    }
+
+    // ── Metrics Tests ──
+
+    @Nested
+    class MetricsTracking {
+
+        @Test
+        void actionsEvaluatedCounter_incrementedForEachConditionCheck() {
+            StepInstance step = buildStep("bp-check", StepState.OVERDUE);
+            Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
+
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("action-1", "text/jsonlogic", "{\"==\": [1, 0]}",
+                            "http://openphc.org/ActivityDefinition/alert|1.0"),
+                    buildIntelligenceAction("action-2", "text/jsonlogic", "{\"==\": [1, 0]}",
+                            "http://openphc.org/ActivityDefinition/other|1.0")));
+
+            when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
+                    .thenReturn(false);
+
+            evaluator.evaluateOnDeviation(step, deviation);
+
+            Counter counter = meterRegistry.find("cce.intelligence.actions.evaluated").counter();
+            assertNotNull(counter);
+            assertEquals(2.0, counter.count());
+        }
+
+        @Test
+        void actionsFiredCounter_incrementedOnlyForMatchingActions() {
+            StepInstance step = buildStep("bp-check", StepState.OVERDUE);
+            Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
+            ActionDefinition actionDef = buildActionDefinition();
+
+            mockParserReturnsIntelligenceActions(step, List.of(
+                    buildIntelligenceAction("action-1", "text/jsonlogic", "{\"==\": [1, 1]}",
+                            "http://openphc.org/ActivityDefinition/alert|1.0"),
+                    buildIntelligenceAction("action-2", "text/jsonlogic", "{\"==\": [1, 0]}",
+                            "http://openphc.org/ActivityDefinition/other|1.0")));
+
+            when(expressionEvaluationService.evaluate(eq("text/jsonlogic"), eq("{\"==\": [1, 1]}"), any()))
+                    .thenReturn(true);
+            when(expressionEvaluationService.evaluate(eq("text/jsonlogic"), eq("{\"==\": [1, 0]}"), any()))
+                    .thenReturn(false);
+            when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
+            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
+                ActionRun ar = i.getArgument(0);
+                if (ar.getId() == null) ar.setId(UUID.randomUUID());
+                return ar;
+            });
+            when(intelligenceTriggerProducer.publish(any()))
+                    .thenReturn(CompletableFuture.completedFuture(null));
+
+            evaluator.evaluateOnDeviation(step, deviation);
+
+            Counter evaluated = meterRegistry.find("cce.intelligence.actions.evaluated").counter();
+            Counter fired = meterRegistry.find("cce.intelligence.actions.fired").counter();
+            assertNotNull(evaluated);
+            assertNotNull(fired);
+            assertEquals(2.0, evaluated.count());
+            assertEquals(1.0, fired.count());
+        }
+
+        @Test
+        void noIntelligenceActions_countersNotIncremented() {
+            StepInstance step = buildStep("simple-step", StepState.OVERDUE);
+            Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
+
+            mockParserReturnsIntelligenceActions(step, List.of());
+
+            evaluator.evaluateOnDeviation(step, deviation);
+
+            Counter evaluated = meterRegistry.find("cce.intelligence.actions.evaluated").counter();
+            Counter fired = meterRegistry.find("cce.intelligence.actions.fired").counter();
+            assertNotNull(evaluated);
+            assertNotNull(fired);
+            assertEquals(0.0, evaluated.count());
+            assertEquals(0.0, fired.count());
         }
     }
 

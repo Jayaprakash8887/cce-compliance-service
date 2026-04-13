@@ -300,8 +300,8 @@ class PlanDefinitionParserTest {
 
     @Test
     void extractActions_extractsIntelligenceActions() throws IOException {
-        String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
-        PlanDefinition pd = parser.parse(rulesJson);
+        String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
+        PlanDefinition pd = parser.parse(actionsJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
         // blood-pressure-check has 2 intelligence actions
@@ -327,8 +327,8 @@ class PlanDefinitionParserTest {
 
     @Test
     void extractActions_actionWithNoIntelligenceActions_emptyList() throws IOException {
-        String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
-        PlanDefinition pd = parser.parse(rulesJson);
+        String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
+        PlanDefinition pd = parser.parse(actionsJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
         // no-sub-actions has no intelligence actions → empty list
@@ -339,22 +339,22 @@ class PlanDefinitionParserTest {
 
     @Test
     void extractActions_intelligenceActionMissingCondition_skipped() throws IOException {
-        String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
-        PlanDefinition pd = parser.parse(rulesJson);
+        String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
+        PlanDefinition pd = parser.parse(actionsJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // partial-rules has 3 intelligence actions: missing-condition, missing-definition, no-extensions-rule
-        // Only no-extensions-rule passes both condition + definitionCanonical checks
+        // partial-actions has 3 intelligence actions: missing-condition, missing-definition, no-extensions-action
+        // Only no-extensions-action passes both condition + definitionCanonical checks
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
-        assertEquals("partial-rules", partial.id());
+        assertEquals("partial-actions", partial.id());
         assertEquals(1, partial.intelligenceActions().size());
-        assertEquals("no-extensions-rule", partial.intelligenceActions().get(0).actionId());
+        assertEquals("no-extensions-action", partial.intelligenceActions().get(0).actionId());
     }
 
     @Test
     void extractActions_intelligenceActionMissingDefinitionCanonical_skipped() throws IOException {
-        String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
-        PlanDefinition pd = parser.parse(rulesJson);
+        String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
+        PlanDefinition pd = parser.parse(actionsJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
         // Verify missing-definition intelligence action was skipped
@@ -366,14 +366,14 @@ class PlanDefinitionParserTest {
 
     @Test
     void extractActions_intelligenceActionWithoutExtensions_nullSeverityAndTarget() throws IOException {
-        String rulesJson = loadFixture("/fhir/plan-definition-with-intelligence-rules.json");
-        PlanDefinition pd = parser.parse(rulesJson);
+        String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
+        PlanDefinition pd = parser.parse(actionsJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // no-extensions-rule has no severity/target extensions
+        // no-extensions-action has no severity/target extensions
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
         PlanDefinitionParser.IntelligenceActionInfo action = partial.intelligenceActions().get(0);
-        assertEquals("no-extensions-rule", action.actionId());
+        assertEquals("no-extensions-action", action.actionId());
         assertEquals("http://openphc.org/ActivityDefinition/no-ext-action|1.0.0", action.definitionCanonical());
         assertNull(action.severity());
         assertNull(action.target());

@@ -2,6 +2,8 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityNotFoundException;
 import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.enums.ActionRunStatus;
@@ -15,6 +17,7 @@ import org.openphc.cce.compliance.kafka.producer.IntelligenceTriggerProducer;
 import org.hl7.fhir.r4.model.PlanDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
@@ -35,6 +38,8 @@ public class IntelligenceActionEvaluator {
     private final ActionRunContextRepository actionRunContextRepository;
     private final DeviationRepository deviationRepository;
     private final ObjectMapper objectMapper;
+    private final Counter actionsEvaluatedCounter;
+    private final Counter actionsFiredCounter;
 
     public IntelligenceActionEvaluator(PlanDefinitionParser planDefinitionParser,
                                      ExpressionEvaluationService expressionEvaluationService,
@@ -43,7 +48,8 @@ public class IntelligenceActionEvaluator {
                                      ActionRunRepository actionRunRepository,
                                      ActionRunContextRepository actionRunContextRepository,
                                      DeviationRepository deviationRepository,
-                                     ObjectMapper objectMapper) {
+                                     ObjectMapper objectMapper,
+                                     MeterRegistry meterRegistry) {
         this.planDefinitionParser = planDefinitionParser;
         this.expressionEvaluationService = expressionEvaluationService;
         this.actionDefinitionService = actionDefinitionService;
@@ -52,6 +58,8 @@ public class IntelligenceActionEvaluator {
         this.actionRunContextRepository = actionRunContextRepository;
         this.deviationRepository = deviationRepository;
         this.objectMapper = objectMapper;
+        this.actionsEvaluatedCounter = meterRegistry.counter("cce.intelligence.actions.evaluated");
+        this.actionsFiredCounter = meterRegistry.counter("cce.intelligence.actions.fired");
     }
 
     /**
@@ -142,6 +150,7 @@ public class IntelligenceActionEvaluator {
 
     private boolean conditionMatches(PlanDefinitionParser.IntelligenceActionInfo action,
                                      JsonNode context) {
+        actionsEvaluatedCounter.increment();
         try {
             boolean matched = expressionEvaluationService.evaluate(
                     action.conditionLanguage(), action.conditionExpression(), context);
@@ -170,58 +179,64 @@ public class IntelligenceActionEvaluator {
                                        StepInstance step, Deviation deviation,
                                        ActionDefinition definition, String triggerReason,
                                        JsonNode evaluationContext) {
+        actionsFiredCounter.increment();
         UUID eventId = UUID.randomUUID();
         ProtocolInstance protocol = step.getProtocolInstance();
 
-        // Create ActionRun (TRIGGERED → PUBLISHED after event is sent)
-        ActionRun actionRun = ActionRun.builder()
-                .actionDefinition(definition)
-                .protocolInstance(protocol)
-                .stepInstance(step)
-                .status(ActionRunStatus.TRIGGERED)
-                .intelligenceEventId(eventId)
-                .build();
-        actionRun = actionRunRepository.save(actionRun);
+        MDC.put("intelligenceEventId", eventId.toString());
+        try {
+            // Create ActionRun (TRIGGERED → PUBLISHED after event is sent)
+            ActionRun actionRun = ActionRun.builder()
+                    .actionDefinition(definition)
+                    .protocolInstance(protocol)
+                    .stepInstance(step)
+                    .status(ActionRunStatus.TRIGGERED)
+                    .intelligenceEventId(eventId)
+                    .build();
+            actionRun = actionRunRepository.save(actionRun);
 
-        // Store evaluation context separately (why this action was triggered)
-        ActionRunContext runContext = ActionRunContext.builder()
-                .actionRun(actionRun)
-                .deviation(deviation)
-                .triggerReason(triggerReason)
-                .stepActionId(action.actionId())
-                .evaluationExpression(action.conditionExpression())
-                .evaluationContext(evaluationContext)
-                .build();
-        actionRunContextRepository.save(runContext);
+            // Store evaluation context separately (why this action was triggered)
+            ActionRunContext runContext = ActionRunContext.builder()
+                    .actionRun(actionRun)
+                    .deviation(deviation)
+                    .triggerReason(triggerReason)
+                    .stepActionId(action.actionId())
+                    .evaluationExpression(action.conditionExpression())
+                    .evaluationContext(evaluationContext)
+                    .build();
+            actionRunContextRepository.save(runContext);
 
-        // Publish intelligence trigger event to Kafka
-        IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
-                .id(eventId)
-                .type("cce.intelligence.trigger")
-                .subject(protocol.getPatientId())
-                .protocolInstanceId(protocol.getId())
-                .stepInstanceId(step.getId())
-                .deviationId(deviation != null ? deviation.getId() : null)
-                .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
-                .stepState(step.getState().name())
-                .actionId(step.getActionId())
-                .protocolCanonical(protocol.getProtocolCanonical())
-                .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .build();
-        intelligenceTriggerProducer.publish(event);
+            // Publish intelligence trigger event to Kafka
+            IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
+                    .id(eventId)
+                    .type("cce.intelligence.trigger")
+                    .subject(protocol.getPatientId())
+                    .protocolInstanceId(protocol.getId())
+                    .stepInstanceId(step.getId())
+                    .deviationId(deviation != null ? deviation.getId() : null)
+                    .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
+                    .stepState(step.getState().name())
+                    .actionId(step.getActionId())
+                    .protocolCanonical(protocol.getProtocolCanonical())
+                    .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+            intelligenceTriggerProducer.publish(event);
 
-        actionRun.setStatus(ActionRunStatus.PUBLISHED);
-        actionRun = actionRunRepository.save(actionRun);
+            actionRun.setStatus(ActionRunStatus.PUBLISHED);
+            actionRun = actionRunRepository.save(actionRun);
 
-        if (deviation != null && deviation.getIntelligenceEventId() == null) {
-            deviation.setIntelligenceEventId(eventId);
-            deviationRepository.save(deviation);
+            if (deviation != null && deviation.getIntelligenceEventId() == null) {
+                deviation.setIntelligenceEventId(eventId);
+                deviationRepository.save(deviation);
+            }
+
+            log.info("Intelligence action fired: actionId={}, definition={}, eventId={}",
+                    action.actionId(), definition.getCanonical(), eventId);
+
+            return actionRun;
+        } finally {
+            MDC.remove("intelligenceEventId");
         }
-
-        log.info("Intelligence action fired: actionId={}, definition={}, eventId={}",
-                action.actionId(), definition.getCanonical(), eventId);
-
-        return actionRun;
     }
 
     // ── Context builders ──

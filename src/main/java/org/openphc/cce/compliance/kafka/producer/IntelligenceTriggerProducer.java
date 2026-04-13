@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.kafka.producer;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import org.openphc.cce.compliance.config.KafkaTopicProperties;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
 import org.slf4j.Logger;
@@ -20,6 +21,7 @@ public class IntelligenceTriggerProducer {
     private final KafkaTemplate<String, Object> kafkaTemplate;
     private final String topic;
     private final Counter publishedCounter;
+    private final Timer publishDurationTimer;
 
     public IntelligenceTriggerProducer(KafkaTemplate<String, Object> kafkaTemplate,
                                        KafkaTopicProperties topicProperties,
@@ -27,6 +29,7 @@ public class IntelligenceTriggerProducer {
         this.kafkaTemplate = kafkaTemplate;
         this.topic = topicProperties.getIntelligenceTriggers();
         this.publishedCounter = meterRegistry.counter("cce.events.intelligence.published");
+        this.publishDurationTimer = meterRegistry.timer("cce.intelligence.publish.duration");
     }
 
     /**
@@ -39,9 +42,11 @@ public class IntelligenceTriggerProducer {
     public CompletableFuture<SendResult<String, Object>> publish(IntelligenceTriggerEvent event) {
         String key = event.getProtocolInstanceId().toString();
 
+        Timer.Sample sample = Timer.start();
         CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, event);
 
         future.whenComplete((result, ex) -> {
+            sample.stop(publishDurationTimer);
             if (ex == null) {
                 publishedCounter.increment();
                 log.info("Published intelligence trigger event: id={}, protocolInstanceId={}, topic={}, partition={}, offset={}",
