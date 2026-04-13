@@ -302,4 +302,234 @@ class DtoMapperTest {
         assertNotNull(dtos);
         assertTrue(dtos.isEmpty());
     }
+
+    @Test
+    void toDto_actionDefinition_mapsAllFields() {
+        JsonNode definition = objectMapper.valueToTree(Map.of("resourceType", "ActivityDefinition"));
+        ActionDefinition entity = ActionDefinition.builder()
+                .id(UUID.randomUUID())
+                .canonicalUrl("http://openphc.org/ActivityDefinition/escalation-alert")
+                .version("1.0")
+                .name("escalation-alert")
+                .title("Escalation Alert")
+                .status(ActionDefinitionStatus.ACTIVE)
+                .actionType(ActionType.CommunicationRequest)
+                .severity(IntelligenceSeverity.HIGH)
+                .target(IntelligenceTarget.SUPERVISOR)
+                .definition(definition)
+                .createdAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC))
+                .updatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC))
+                .build();
+
+        ActionDefinitionDto dto = mapper.toDto(entity);
+
+        assertEquals(entity.getId(), dto.getId());
+        assertEquals("http://openphc.org/ActivityDefinition/escalation-alert", dto.getCanonicalUrl());
+        assertEquals("1.0", dto.getVersion());
+        assertEquals("http://openphc.org/ActivityDefinition/escalation-alert|1.0", dto.getCanonical());
+        assertEquals("escalation-alert", dto.getName());
+        assertEquals("Escalation Alert", dto.getTitle());
+        assertEquals("ACTIVE", dto.getStatus());
+        assertEquals("CommunicationRequest", dto.getActionType());
+        assertEquals("HIGH", dto.getSeverity());
+        assertEquals("SUPERVISOR", dto.getTarget());
+        assertSame(definition, dto.getDefinition());
+        assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
+        assertEquals(entity.getUpdatedAt(), dto.getUpdatedAt());
+    }
+
+    @Test
+    void toDto_actionDefinition_nullableFieldsHandled() {
+        ActionDefinition entity = ActionDefinition.builder()
+                .id(UUID.randomUUID())
+                .canonicalUrl("http://openphc.org/test")
+                .version("1.0")
+                .status(ActionDefinitionStatus.ACTIVE)
+                .actionType(ActionType.Task)
+                .definition(objectMapper.createObjectNode())
+                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .updatedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .build();
+
+        ActionDefinitionDto dto = mapper.toDto(entity);
+
+        assertNull(dto.getName());
+        assertNull(dto.getTitle());
+        assertNull(dto.getSeverity());
+        assertNull(dto.getTarget());
+    }
+
+    @Test
+    void toDto_actionRun_mapsAllFields() {
+        ActionDefinition actionDef = ActionDefinition.builder()
+                .id(UUID.randomUUID())
+                .build();
+        ProtocolInstance protocolInstance = ProtocolInstance.builder()
+                .id(UUID.randomUUID())
+                .protocolDefinition(ProtocolDefinition.builder().id(UUID.randomUUID()).build())
+                .build();
+        StepInstance stepInstance = StepInstance.builder()
+                .id(UUID.randomUUID())
+                .build();
+        UUID intelligenceEventId = UUID.randomUUID();
+        JsonNode outputMetadata = objectMapper.valueToTree(Map.of("template", "v1"));
+
+        ActionRun entity = ActionRun.builder()
+                .id(UUID.randomUUID())
+                .actionDefinition(actionDef)
+                .protocolInstance(protocolInstance)
+                .stepInstance(stepInstance)
+                .status(ActionRunStatus.PUBLISHED)
+                .intelligenceEventId(intelligenceEventId)
+                .outputMetadata(outputMetadata)
+                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
+                .updatedAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
+                .build();
+
+        ActionRunDto dto = mapper.toDto(entity);
+
+        assertEquals(entity.getId(), dto.getId());
+        assertEquals(actionDef.getId(), dto.getActionDefinitionId());
+        assertEquals(protocolInstance.getId(), dto.getProtocolInstanceId());
+        assertEquals(stepInstance.getId(), dto.getStepInstanceId());
+        assertEquals("PUBLISHED", dto.getStatus());
+        assertEquals(intelligenceEventId, dto.getIntelligenceEventId());
+        assertSame(outputMetadata, dto.getOutputMetadata());
+        assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
+        assertEquals(entity.getUpdatedAt(), dto.getUpdatedAt());
+    }
+
+    @Test
+    void toDto_actionRun_nullStepInstance() {
+        ActionDefinition actionDef = ActionDefinition.builder()
+                .id(UUID.randomUUID())
+                .build();
+        ProtocolInstance protocolInstance = ProtocolInstance.builder()
+                .id(UUID.randomUUID())
+                .protocolDefinition(ProtocolDefinition.builder().id(UUID.randomUUID()).build())
+                .build();
+
+        ActionRun entity = ActionRun.builder()
+                .id(UUID.randomUUID())
+                .actionDefinition(actionDef)
+                .protocolInstance(protocolInstance)
+                .status(ActionRunStatus.TRIGGERED)
+                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .updatedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .build();
+
+        ActionRunDto dto = mapper.toDto(entity);
+
+        assertNull(dto.getStepInstanceId());
+        assertNull(dto.getIntelligenceEventId());
+        assertNull(dto.getOutputMetadata());
+    }
+
+    @Test
+    void toDto_actionRunContext_mapsAllFields() {
+        ActionRun actionRun = ActionRun.builder()
+                .id(UUID.randomUUID())
+                .build();
+        Deviation deviation = Deviation.builder()
+                .id(UUID.randomUUID())
+                .build();
+        JsonNode evaluationContext = objectMapper.valueToTree(
+                Map.of("stepState", "overdue", "daysOverdue", 3));
+
+        ActionRunContext entity = ActionRunContext.builder()
+                .id(UUID.randomUUID())
+                .actionRun(actionRun)
+                .deviation(deviation)
+                .triggerReason("DEVIATION_DETECTED")
+                .stepActionId("bp-check")
+                .evaluationExpression("{\">\": [{\"var\": \"daysOverdue\"}, 2]}")
+                .evaluationContext(evaluationContext)
+                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
+                .build();
+
+        ActionRunContextDto dto = mapper.toDto(entity);
+
+        assertEquals(entity.getId(), dto.getId());
+        assertEquals(actionRun.getId(), dto.getActionRunId());
+        assertEquals(deviation.getId(), dto.getDeviationId());
+        assertEquals("DEVIATION_DETECTED", dto.getTriggerReason());
+        assertEquals("bp-check", dto.getStepActionId());
+        assertEquals("{\">\": [{\"var\": \"daysOverdue\"}, 2]}", dto.getEvaluationExpression());
+        assertSame(evaluationContext, dto.getEvaluationContext());
+        assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
+    }
+
+    @Test
+    void toDto_actionRunContext_nullDeviation() {
+        ActionRun actionRun = ActionRun.builder()
+                .id(UUID.randomUUID())
+                .build();
+
+        ActionRunContext entity = ActionRunContext.builder()
+                .id(UUID.randomUUID())
+                .actionRun(actionRun)
+                .triggerReason("STEP_COMPLETED")
+                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .build();
+
+        ActionRunContextDto dto = mapper.toDto(entity);
+
+        assertNull(dto.getDeviationId());
+    }
+
+    @Test
+    void toDtoActionDefinitionList_mapsAll() {
+        ActionDefinition entity = ActionDefinition.builder()
+                .id(UUID.randomUUID())
+                .canonicalUrl("http://openphc.org/test")
+                .version("1.0")
+                .status(ActionDefinitionStatus.ACTIVE)
+                .actionType(ActionType.Task)
+                .definition(objectMapper.createObjectNode())
+                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .updatedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .build();
+
+        List<ActionDefinitionDto> dtos = mapper.toDtoActionDefinitionList(List.of(entity));
+
+        assertEquals(1, dtos.size());
+        assertEquals(entity.getId(), dtos.get(0).getId());
+    }
+
+    @Test
+    void toDtoActionDefinitionList_nullReturnsEmpty() {
+        List<ActionDefinitionDto> dtos = mapper.toDtoActionDefinitionList(null);
+        assertNotNull(dtos);
+        assertTrue(dtos.isEmpty());
+    }
+
+    @Test
+    void toDtoActionRunList_mapsAll() {
+        ActionDefinition actionDef = ActionDefinition.builder().id(UUID.randomUUID()).build();
+        ProtocolInstance protocolInstance = ProtocolInstance.builder()
+                .id(UUID.randomUUID())
+                .protocolDefinition(ProtocolDefinition.builder().id(UUID.randomUUID()).build())
+                .build();
+
+        ActionRun entity = ActionRun.builder()
+                .id(UUID.randomUUID())
+                .actionDefinition(actionDef)
+                .protocolInstance(protocolInstance)
+                .status(ActionRunStatus.PUBLISHED)
+                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .updatedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .build();
+
+        List<ActionRunDto> dtos = mapper.toDtoActionRunList(List.of(entity));
+
+        assertEquals(1, dtos.size());
+        assertEquals(entity.getId(), dtos.get(0).getId());
+    }
+
+    @Test
+    void toDtoActionRunList_nullReturnsEmpty() {
+        List<ActionRunDto> dtos = mapper.toDtoActionRunList(null);
+        assertNotNull(dtos);
+        assertTrue(dtos.isEmpty());
+    }
 }

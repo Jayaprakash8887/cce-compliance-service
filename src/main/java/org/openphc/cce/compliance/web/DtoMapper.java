@@ -141,4 +141,63 @@ public class DtoMapper {
         }
         return entities.stream().map(this::toDto).toList();
     }
+
+    public ActionDefinitionDto toDto(ActionDefinition entity) {
+        return ActionDefinitionDto.builder()
+                .id(entity.getId())
+                .canonicalUrl(entity.getCanonicalUrl())
+                .version(entity.getVersion())
+                .canonical(entity.getCanonical())
+                .name(entity.getName())
+                .title(entity.getTitle())
+                .status(entity.getStatus().name())
+                .actionType(entity.getActionType().name())
+                .severity(entity.getSeverity() != null ? entity.getSeverity().name() : null)
+                .target(entity.getTarget() != null ? entity.getTarget().name() : null)
+                .definition(entity.getDefinition())
+                .createdAt(entity.getCreatedAt())
+                .updatedAt(entity.getUpdatedAt())
+                .build();
+    }
+
+    public ActionRunDto toDto(ActionRun entity) {
+        return ActionRunDto.builder()
+                .id(entity.getId())
+                .actionDefinitionId(entity.getActionDefinition().getId())
+                .protocolInstanceId(entity.getProtocolInstance().getId())
+                .stepInstanceId(entity.getStepInstance() != null ? entity.getStepInstance().getId() : null)
+                .status(entity.getStatus().name())
+                .intelligenceEventId(entity.getIntelligenceEventId())
+                .outputMetadata(entity.getOutputMetadata())
+                .createdAt(entity.getCreatedAt())
+                .updatedAt(entity.getUpdatedAt())
+                .build();
+    }
+
+    public ActionRunContextDto toDto(ActionRunContext entity) {
+        return ActionRunContextDto.builder()
+                .id(entity.getId())
+                .actionRunId(entity.getActionRun().getId())
+                .deviationId(entity.getDeviation() != null ? entity.getDeviation().getId() : null)
+                .triggerReason(entity.getTriggerReason())
+                .stepActionId(entity.getStepActionId())
+                .evaluationExpression(entity.getEvaluationExpression())
+                .evaluationContext(entity.getEvaluationContext())
+                .createdAt(entity.getCreatedAt())
+                .build();
+    }
+
+    public List<ActionDefinitionDto> toDtoActionDefinitionList(List<ActionDefinition> entities) {
+        if (entities == null) {
+            return Collections.emptyList();
+        }
+        return entities.stream().map(this::toDto).toList();
+    }
+
+    public List<ActionRunDto> toDtoActionRunList(List<ActionRun> entities) {
+        if (entities == null) {
+            return Collections.emptyList();
+        }
+        return entities.stream().map(this::toDto).toList();
+    }
 }

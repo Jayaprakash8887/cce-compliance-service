@@ -10,6 +10,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
@@ -48,6 +49,9 @@ class StepInstanceServiceTest {
     @Mock
     private AuditService auditService;
 
+    @Mock
+    private IntelligenceActionEvaluator intelligenceActionEvaluator;
+
     private StepInstanceService service;
     private ObjectMapper objectMapper;
 
@@ -56,7 +60,8 @@ class StepInstanceServiceTest {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         service = new StepInstanceService(stepInstanceRepository,
-                planDefinitionParser, protocolInstanceService, deviationService, auditService);
+                planDefinitionParser, protocolInstanceService, deviationService, auditService,
+                intelligenceActionEvaluator);
     }
 
     @Nested
@@ -345,8 +350,12 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.DUE, null, null);
             step.setId(stepId);
 
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.OVERDUE), any()))
+                    .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -361,6 +370,7 @@ class StepInstanceServiceTest {
             verify(deviationService).recordDeviation(
                     eq(step.getProtocolInstance()), eq(step), eq(DeviationType.OVERDUE),
                     any());
+            verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
         }
 
         @Test
@@ -369,8 +379,12 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.OVERDUE, null, null);
             step.setId(stepId);
 
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+                    .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -385,6 +399,7 @@ class StepInstanceServiceTest {
             verify(deviationService).recordDeviation(
                     eq(step.getProtocolInstance()), eq(step), eq(DeviationType.MISSED),
                     any());
+            verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
 
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }
@@ -581,6 +596,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.SKIPPED, step.getState());
             verify(deviationService, never()).recordDeviation(any(), any(), any(), any());
+            verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }
 
@@ -592,8 +608,12 @@ class StepInstanceServiceTest {
             step.setRequiredBehavior("must");
             step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
 
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+                    .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -606,6 +626,7 @@ class StepInstanceServiceTest {
             assertEquals(StepState.MISSED, step.getState());
             verify(deviationService).recordDeviation(eq(step.getProtocolInstance()), eq(step),
                     eq(DeviationType.MISSED), any());
+            verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
         }
 
         @Test
@@ -616,8 +637,12 @@ class StepInstanceServiceTest {
             step.setRequiredBehavior(null);
             step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
 
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+                    .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -629,6 +654,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.MISSED, step.getState());
             verify(deviationService).recordDeviation(any(), any(), eq(DeviationType.MISSED), any());
+            verify(intelligenceActionEvaluator).evaluateOnDeviation(eq(step), eq(deviation));
         }
     }
 

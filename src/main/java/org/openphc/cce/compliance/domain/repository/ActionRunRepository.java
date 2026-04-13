@@ -1,6 +1,7 @@
 package org.openphc.cce.compliance.domain.repository;
 
 import org.openphc.cce.compliance.domain.entity.ActionRun;
+import org.openphc.cce.compliance.domain.enums.ActionRunStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -16,7 +17,7 @@ public interface ActionRunRepository extends JpaRepository<ActionRun, UUID> {
 
     List<ActionRun> findByStepInstanceId(UUID stepInstanceId);
 
-    List<ActionRun> findByDeviationId(UUID deviationId);
+    List<ActionRun> findByStatus(ActionRunStatus status);
 
     boolean existsByActionDefinitionId(UUID actionDefinitionId);
 }

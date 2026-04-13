@@ -1,6 +1,7 @@
 package org.openphc.cce.compliance.service;
 
 import jakarta.persistence.EntityNotFoundException;
+import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.CompletionStatus;
@@ -38,17 +39,20 @@ public class StepInstanceService {
     private final ProtocolInstanceService protocolInstanceService;
     private final DeviationService deviationService;
     private final AuditService auditService;
+    private final IntelligenceActionEvaluator intelligenceActionEvaluator;
 
     public StepInstanceService(StepInstanceRepository stepInstanceRepository,
                                PlanDefinitionParser planDefinitionParser,
                                ProtocolInstanceService protocolInstanceService,
                                DeviationService deviationService,
-                               AuditService auditService) {
+                               AuditService auditService,
+                               IntelligenceActionEvaluator intelligenceActionEvaluator) {
         this.stepInstanceRepository = stepInstanceRepository;
         this.planDefinitionParser = planDefinitionParser;
         this.protocolInstanceService = protocolInstanceService;
         this.deviationService = deviationService;
         this.auditService = auditService;
+        this.intelligenceActionEvaluator = intelligenceActionEvaluator;
     }
 
     /**
@@ -128,7 +132,8 @@ public class StepInstanceService {
             case "PENDING_TO_DUE" -> applyTransition(step, StepState.PENDING, StepState.DUE);
             case "DUE_TO_OVERDUE" -> {
                 applyTransition(step, StepState.DUE, StepState.OVERDUE);
-                createDeviation(step, DeviationType.OVERDUE);
+                Deviation deviation = createDeviation(step, DeviationType.OVERDUE);
+                intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
             }
             case "OVERDUE_TO_MISSED" -> {
                 if ("could".equals(step.getRequiredBehavior())) {
@@ -137,7 +142,8 @@ public class StepInstanceService {
                             step.getId());
                 } else {
                     applyTransition(step, StepState.OVERDUE, StepState.MISSED);
-                    createDeviation(step, DeviationType.MISSED);
+                    Deviation deviation = createDeviation(step, DeviationType.MISSED);
+                    intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
                 }
                 // Check if protocol is now complete (MISSED/SKIPPED are terminal)
                 protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -182,7 +188,7 @@ public class StepInstanceService {
                 step.getId(), expectedState, newState, step.getActionId());
     }
 
-    private void createDeviation(StepInstance step, DeviationType deviationType) {
+    private Deviation createDeviation(StepInstance step, DeviationType deviationType) {
         ProtocolInstance protocolInstance = step.getProtocolInstance();
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -196,7 +202,7 @@ public class StepInstanceService {
                     Duration.between(step.getMissedDate(), now).toDays());
         }
 
-        deviationService.recordDeviation(protocolInstance, step, deviationType,
+        return deviationService.recordDeviation(protocolInstance, step, deviationType,
                 metadata.isEmpty() ? null : metadata);
     }
 
