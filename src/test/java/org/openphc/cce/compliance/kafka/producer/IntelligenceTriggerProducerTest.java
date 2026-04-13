@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.kafka.producer;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
@@ -69,6 +70,11 @@ class IntelligenceTriggerProducerTest {
         assertNotNull(counter);
         assertEquals(1.0, counter.count());
 
+        // Timer should record the publish duration
+        Timer timer = meterRegistry.find("cce.intelligence.publish.duration").timer();
+        assertNotNull(timer);
+        assertEquals(1, timer.count());
+
         verify(kafkaTemplate).send("cce.intelligence.triggers", expectedKey, event);
     }
 
@@ -106,6 +112,11 @@ class IntelligenceTriggerProducerTest {
         Counter counter = meterRegistry.find("cce.events.intelligence.published").counter();
         assertNotNull(counter);
         assertEquals(0.0, counter.count());
+
+        // Timer should still record (measures publish attempt, not just success)
+        Timer timer = meterRegistry.find("cce.intelligence.publish.duration").timer();
+        assertNotNull(timer);
+        assertEquals(1, timer.count());
     }
 
     @Test

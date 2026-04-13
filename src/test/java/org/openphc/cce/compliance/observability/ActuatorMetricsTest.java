@@ -6,7 +6,9 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.compliance.config.ObservabilityConfig;
+import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
+import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -26,9 +28,11 @@ class ActuatorMetricsTest {
         registry = new SimpleMeterRegistry();
         ProtocolInstanceRepository repo = mock(ProtocolInstanceRepository.class);
         when(repo.countByStatus(ProtocolInstanceStatus.ACTIVE)).thenReturn(3L);
+        ActionDefinitionRepository actionDefRepo = mock(ActionDefinitionRepository.class);
+        when(actionDefRepo.countByStatus(ActionDefinitionStatus.ACTIVE)).thenReturn(2L);
 
         ObservabilityConfig config = new ObservabilityConfig();
-        MeterBinder binder = config.cceMetrics(repo);
+        MeterBinder binder = config.cceMetrics(repo, actionDefRepo);
         binder.bindTo(registry);
     }
 
@@ -61,6 +65,30 @@ class ActuatorMetricsTest {
     }
 
     @Test
+    void intelligenceActionsEvaluatedCounter_isRegistered() {
+        assertNotNull(registry.find("cce.intelligence.actions.evaluated").counter());
+    }
+
+    @Test
+    void intelligenceActionsFiredCounter_isRegistered() {
+        assertNotNull(registry.find("cce.intelligence.actions.fired").counter());
+    }
+
+    @Test
+    void intelligencePublishDurationTimer_isRegistered() {
+        var timer = registry.find("cce.intelligence.publish.duration").timer();
+        assertNotNull(timer);
+        assertEquals(0, timer.count());
+    }
+
+    @Test
+    void actionDefinitionsActiveGauge_isRegistered() {
+        var gauge = registry.find("cce.action.definitions.active").gauge();
+        assertNotNull(gauge);
+        assertEquals(2.0, gauge.value());
+    }
+
+    @Test
     void stepMatchingDurationTimer_isRegistered() {
         var timer = registry.find("cce.step.matching.duration").timer();
         assertNotNull(timer);
@@ -85,9 +113,11 @@ class ActuatorMetricsTest {
     void protocolInstancesActiveGauge_reflectsUpdates() {
         ProtocolInstanceRepository repo = mock(ProtocolInstanceRepository.class);
         when(repo.countByStatus(ProtocolInstanceStatus.ACTIVE)).thenReturn(0L).thenReturn(10L);
+        ActionDefinitionRepository actionDefRepo = mock(ActionDefinitionRepository.class);
+        when(actionDefRepo.countByStatus(ActionDefinitionStatus.ACTIVE)).thenReturn(0L);
 
         MeterRegistry freshRegistry = new SimpleMeterRegistry();
-        new ObservabilityConfig().cceMetrics(repo).bindTo(freshRegistry);
+        new ObservabilityConfig().cceMetrics(repo, actionDefRepo).bindTo(freshRegistry);
 
         var gauge = freshRegistry.find("cce.protocol.instances.active").gauge();
         assertNotNull(gauge);

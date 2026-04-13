@@ -1,0 +1,425 @@
+package org.openphc.cce.compliance;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
+import org.openphc.cce.compliance.domain.entity.StepInstance;
+import org.openphc.cce.compliance.domain.enums.ActionRunStatus;
+import org.openphc.cce.compliance.domain.enums.DeviationType;
+import org.openphc.cce.compliance.domain.enums.StepState;
+import org.openphc.cce.compliance.domain.repository.*;
+import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
+import org.openphc.cce.compliance.kafka.model.SchedulerTriggerMessage;
+import org.openphc.cce.compliance.service.ActionDefinitionService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.test.web.servlet.MockMvc;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.Map;
+import java.util.UUID;
+
+import static java.util.concurrent.TimeUnit.SECONDS;
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
+
+/**
+ * End-to-end integration tests for the intelligence pipeline:
+ * Event → Match → Enroll → Scheduler transition → Deviation → Intelligence action evaluation
+ * → ActionRun created → IntelligenceTriggerEvent published to Kafka
+ *
+ * Also covers ActionRun API endpoints (GET list + GET by ID).
+ */
+class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @Autowired
+    private ObjectMapper objectMapper;
+
+    @Autowired
+    private KafkaTemplate<String, Object> kafkaTemplate;
+
+    @Autowired
+    private ProtocolInstanceRepository protocolInstanceRepository;
+
+    @Autowired
+    private StepInstanceRepository stepInstanceRepository;
+
+    @Autowired
+    private DeviationRepository deviationRepository;
+
+    @Autowired
+    private ActionRunRepository actionRunRepository;
+
+    @Autowired
+    private ActionRunContextRepository actionRunContextRepository;
+
+    @Autowired
+    private ActionDefinitionService actionDefinitionService;
+
+    @Value("${cce.kafka.topics.inbound-events}")
+    private String inboundTopic;
+
+    @Value("${cce.kafka.topics.scheduler-triggers}")
+    private String schedulerTopic;
+
+    private String protocolVersion;
+
+    @BeforeEach
+    void loadProtocolAndActionDefinition() throws Exception {
+        protocolVersion = "1.0.0-intel-" + UUID.randomUUID().toString().substring(0, 8);
+
+        // Load PlanDefinition with intelligence actions
+        String planDefJson = Files.readString(
+                Path.of("src/integrationTest/resources/fhir/plan-definition-with-intelligence.json"));
+        String modifiedPlanDef = planDefJson.replace("\"version\": \"1.0.0\"",
+                "\"version\": \"" + protocolVersion + "\"");
+        String protocolRequest = objectMapper.writeValueAsString(
+                Map.of("planDefinitionJson", modifiedPlanDef));
+
+        mockMvc.perform(post("/v1/compliance/protocol-definitions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(protocolRequest))
+                .andExpect(status().isCreated());
+
+        // Create matching ActionDefinition (url|version must match definitionCanonical in PlanDefinition)
+        String actDefJson = Files.readString(
+                Path.of("src/integrationTest/resources/fhir/activity-definition-escalation.json"));
+
+        // Only create if not already present (shared across tests in this class)
+        try {
+            actionDefinitionService.resolveByCanonical(
+                    "http://openphc.org/ActivityDefinition/escalation-alert|1.0.0");
+        } catch (Exception e) {
+            actionDefinitionService.createActionDefinition(objectMapper.readTree(actDefJson));
+        }
+    }
+
+    /**
+     * Sends an Encounter event to enroll a patient and waits for enrollment
+     * in the intelligence protocol specifically.
+     * Returns the protocol instance for the intelligence PlanDefinition.
+     */
+    private ProtocolInstance enrollAndWait(String patientId) throws Exception {
+        String expectedCanonical = "http://openphc.org/PlanDefinition/anc-intelligence-integration|" + protocolVersion;
+
+        ObjectNode data = objectMapper.createObjectNode();
+        data.put("resourceType", "Encounter");
+        data.put("status", "in-progress");
+
+        CloudEventMessage event = CloudEventMessage.builder()
+                .id("intel-enroll-" + UUID.randomUUID())
+                .source("integration-test-intelligence")
+                .type("org.openphc.fhir.Encounter.create")
+                .specversion("1.0")
+                .subject(patientId)
+                .time(OffsetDateTime.now(ZoneOffset.UTC))
+                .datacontenttype("application/json")
+                .correlationid(UUID.randomUUID().toString())
+                .facilityid("facility-1")
+                .data(data)
+                .build();
+
+        kafkaTemplate.send(inboundTopic, event);
+
+        await().atMost(30, SECONDS).untilAsserted(() -> {
+            var instances = protocolInstanceRepository.findByPatientId(patientId);
+            assertThat(instances).anyMatch(i -> i.getProtocolCanonical().equals(expectedCanonical));
+        });
+
+        return protocolInstanceRepository.findByPatientId(patientId).stream()
+                .filter(i -> i.getProtocolCanonical().equals(expectedCanonical))
+                .findFirst().orElseThrow();
+    }
+
+    // ── Intelligence Pipeline Tests ──
+
+    @Nested
+    class IntelligenceEvaluation {
+
+        @Test
+        void dueToOverdue_evaluatesIntelligenceActions_createsActionRun() throws Exception {
+            String patientId = "patient-intel-overdue-" + UUID.randomUUID();
+            ProtocolInstance protocolInstance = enrollAndWait(patientId);
+            UUID protocolInstanceId = protocolInstance.getId();
+
+            // Create a DUE step with past overdue date to trigger DUE_TO_OVERDUE transition
+            StepInstance dueStep = StepInstance.builder()
+                    .protocolInstance(protocolInstance)
+                    .actionId("encounter-step")
+                    .repeatIndex(0)
+                    .state(StepState.DUE)
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .requiredBehavior("must")
+                    .build();
+            dueStep = stepInstanceRepository.save(dueStep);
+
+            UUID stepId = dueStep.getId();
+
+            // Send scheduler trigger: DUE_TO_OVERDUE
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_OVERDUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .correlationid(UUID.randomUUID().toString())
+                    .build();
+
+            kafkaTemplate.send(schedulerTopic, trigger);
+
+            // Wait for step to transition to OVERDUE
+            await().atMost(30, SECONDS).untilAsserted(() -> {
+                StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
+                assertThat(updated.getState()).isEqualTo(StepState.OVERDUE);
+            });
+
+            // Verify deviation was created
+            var deviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
+            assertThat(deviations).anyMatch(d ->
+                    d.getStepInstance().getId().equals(stepId) &&
+                            d.getDeviationType() == DeviationType.OVERDUE);
+
+            // Verify ActionRun was created by intelligence evaluation
+            await().atMost(10, SECONDS).untilAsserted(() -> {
+                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+                assertThat(actionRuns).isNotEmpty();
+            });
+
+            var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+            assertThat(actionRuns).hasSize(1);
+
+            var actionRun = actionRuns.get(0);
+            assertThat(actionRun.getStatus()).isEqualTo(ActionRunStatus.PUBLISHED);
+            assertThat(actionRun.getIntelligenceEventId()).isNotNull();
+
+            // Verify full ActionRun details via REST API (avoids LazyInitializationException)
+            mockMvc.perform(get("/v1/compliance/action-runs/{id}", actionRun.getId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.intelligenceEventId").isNotEmpty())
+                    .andExpect(jsonPath("$.protocolInstanceId").value(protocolInstanceId.toString()))
+                    .andExpect(jsonPath("$.stepInstanceId").value(stepId.toString()))
+                    .andExpect(jsonPath("$.context").isNotEmpty())
+                    .andExpect(jsonPath("$.context.triggerReason").value("overdue"))
+                    .andExpect(jsonPath("$.context.stepActionId").value("overdue-escalation"))
+                    .andExpect(jsonPath("$.context.evaluationContext").isNotEmpty());
+
+            // Verify deviation.intelligenceEventId was set
+            var updatedDeviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
+            var deviation = updatedDeviations.stream()
+                    .filter(d -> d.getStepInstance().getId().equals(stepId))
+                    .findFirst().orElseThrow();
+            assertThat(deviation.getIntelligenceEventId()).isNotNull();
+            assertThat(deviation.getIntelligenceEventId()).isEqualTo(actionRun.getIntelligenceEventId());
+        }
+
+        @Test
+        void overdueToMissed_evaluatesMissedAction_createsActionRun() throws Exception {
+            String patientId = "patient-intel-missed-" + UUID.randomUUID();
+            ProtocolInstance protocolInstance = enrollAndWait(patientId);
+            UUID protocolInstanceId = protocolInstance.getId();
+
+            // Create an OVERDUE step with past missed date
+            StepInstance overdueStep = StepInstance.builder()
+                    .protocolInstance(protocolInstance)
+                    .actionId("encounter-step")
+                    .repeatIndex(0)
+                    .state(StepState.OVERDUE)
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                    .requiredBehavior("must")
+                    .build();
+            overdueStep = stepInstanceRepository.save(overdueStep);
+
+            UUID stepId = overdueStep.getId();
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("OVERDUE_TO_MISSED")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .correlationid(UUID.randomUUID().toString())
+                    .build();
+
+            kafkaTemplate.send(schedulerTopic, trigger);
+
+            await().atMost(30, SECONDS).untilAsserted(() -> {
+                StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
+                assertThat(updated.getState()).isEqualTo(StepState.MISSED);
+            });
+
+            // The "missed-critical-alert" intelligence action matches deviationType == "missed"
+            await().atMost(10, SECONDS).untilAsserted(() -> {
+                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+                assertThat(actionRuns).isNotEmpty();
+            });
+
+            var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+            assertThat(actionRuns).hasSize(1);
+
+            var actionRun = actionRuns.get(0);
+            assertThat(actionRun.getStatus()).isEqualTo(ActionRunStatus.PUBLISHED);
+            assertThat(actionRun.getIntelligenceEventId()).isNotNull();
+
+            var context = actionRunContextRepository.findByActionRunId(actionRun.getId());
+            assertThat(context).isPresent();
+            assertThat(context.get().getTriggerReason()).isEqualTo("missed");
+            assertThat(context.get().getStepActionId()).isEqualTo("missed-critical-alert");
+        }
+
+        @Test
+        void noMatchingIntelligenceAction_noActionRunCreated() throws Exception {
+            String patientId = "patient-intel-nomatch-" + UUID.randomUUID();
+            ProtocolInstance protocolInstance = enrollAndWait(patientId);
+
+            // Create a PENDING step that transitions to DUE — no deviation, no intelligence eval
+            StepInstance pendingStep = StepInstance.builder()
+                    .protocolInstance(protocolInstance)
+                    .actionId("encounter-step")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .requiredBehavior("must")
+                    .build();
+            pendingStep = stepInstanceRepository.save(pendingStep);
+
+            UUID stepId = pendingStep.getId();
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("PENDING_TO_DUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .correlationid(UUID.randomUUID().toString())
+                    .build();
+
+            kafkaTemplate.send(schedulerTopic, trigger);
+
+            await().atMost(30, SECONDS).untilAsserted(() -> {
+                StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
+                assertThat(updated.getState()).isEqualTo(StepState.DUE);
+            });
+
+            // PENDING→DUE does not create a deviation, so no intelligence actions should fire
+            var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+            assertThat(actionRuns).isEmpty();
+        }
+    }
+
+    // ── ActionRun API Tests ──
+
+    @Nested
+    class ActionRunApi {
+
+        @Test
+        void getActionRunById_returnsCorrectData() throws Exception {
+            String patientId = "patient-intel-api-get-" + UUID.randomUUID();
+            ProtocolInstance protocolInstance = enrollAndWait(patientId);
+            UUID protocolInstanceId = protocolInstance.getId();
+
+            // Trigger intelligence action via DUE_TO_OVERDUE
+            StepInstance dueStep = StepInstance.builder()
+                    .protocolInstance(protocolInstance)
+                    .actionId("encounter-step")
+                    .repeatIndex(0)
+                    .state(StepState.DUE)
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .requiredBehavior("must")
+                    .build();
+            dueStep = stepInstanceRepository.save(dueStep);
+            UUID stepId = dueStep.getId();
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_OVERDUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .correlationid(UUID.randomUUID().toString())
+                    .build();
+
+            kafkaTemplate.send(schedulerTopic, trigger);
+
+            await().atMost(30, SECONDS).untilAsserted(() -> {
+                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+                assertThat(actionRuns).isNotEmpty();
+            });
+
+            var actionRun = actionRunRepository.findByStepInstanceId(stepId).get(0);
+
+            // GET by ID
+            mockMvc.perform(get("/v1/compliance/action-runs/{id}", actionRun.getId()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$.id").value(actionRun.getId().toString()))
+                    .andExpect(jsonPath("$.status").value("PUBLISHED"))
+                    .andExpect(jsonPath("$.intelligenceEventId").isNotEmpty())
+                    .andExpect(jsonPath("$.protocolInstanceId").value(protocolInstanceId.toString()))
+                    .andExpect(jsonPath("$.stepInstanceId").value(stepId.toString()))
+                    .andExpect(jsonPath("$.context").isNotEmpty())
+                    .andExpect(jsonPath("$.context.triggerReason").value("overdue"))
+                    .andExpect(jsonPath("$.context.stepActionId").value("overdue-escalation"));
+        }
+
+        @Test
+        void listActionRuns_filterByProtocolInstanceId() throws Exception {
+            String patientId = "patient-intel-api-list-" + UUID.randomUUID();
+            ProtocolInstance protocolInstance = enrollAndWait(patientId);
+            UUID protocolInstanceId = protocolInstance.getId();
+
+            StepInstance dueStep = StepInstance.builder()
+                    .protocolInstance(protocolInstance)
+                    .actionId("encounter-step")
+                    .repeatIndex(0)
+                    .state(StepState.DUE)
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .requiredBehavior("must")
+                    .build();
+            dueStep = stepInstanceRepository.save(dueStep);
+            UUID stepId = dueStep.getId();
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_OVERDUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .correlationid(UUID.randomUUID().toString())
+                    .build();
+
+            kafkaTemplate.send(schedulerTopic, trigger);
+
+            await().atMost(30, SECONDS).untilAsserted(() -> {
+                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
+                assertThat(actionRuns).isNotEmpty();
+            });
+
+            // GET list filtered by protocolInstanceId
+            mockMvc.perform(get("/v1/compliance/action-runs")
+                            .param("protocolInstanceId", protocolInstanceId.toString()))
+                    .andExpect(status().isOk())
+                    .andExpect(jsonPath("$").isArray())
+                    .andExpect(jsonPath("$[0].protocolInstanceId").value(protocolInstanceId.toString()))
+                    .andExpect(jsonPath("$[0].status").value("PUBLISHED"));
+        }
+
+        @Test
+        void getActionRunById_notFound_returns404() throws Exception {
+            mockMvc.perform(get("/v1/compliance/action-runs/{id}", UUID.randomUUID()))
+                    .andExpect(status().isNotFound());
+        }
+    }
+}

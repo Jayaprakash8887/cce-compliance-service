@@ -1,10 +1,10 @@
 {
   "resourceType": "PlanDefinition",
-  "id": "anc-intelligence-rules",
-  "url": "http://openphc.org/PlanDefinition/anc-intelligence-rules",
+  "id": "anc-intelligence-actions",
+  "url": "http://openphc.org/PlanDefinition/anc-intelligence-actions",
   "version": "1.0.0",
-  "name": "ANCIntelligenceRulesProtocol",
-  "title": "ANC Protocol with Intelligence Rules",
+  "name": "ANCIntelligenceActionsProtocol",
+  "title": "ANC Protocol with Intelligence Actions",
   "status": "active",
   "action": [
     {
@@ -35,7 +35,7 @@
       "action": [
         {
           "id": "bp-high-alert",
-          "title": "High BP Alert Rule",
+          "title": "High BP Alert Action",
           "condition": [
             {
               "kind": "applicability",
@@ -59,7 +59,7 @@
         },
         {
           "id": "bp-critical-escalation",
-          "title": "Critical BP Escalation Rule",
+          "title": "Critical BP Escalation Action",
           "condition": [
             {
               "kind": "applicability",
@@ -99,7 +99,7 @@
       ]
     },
     {
-      "id": "partial-rules",
+      "id": "partial-actions",
       "title": "Action With Incomplete Sub-Actions",
       "trigger": [
         {
@@ -115,12 +115,12 @@
       "action": [
         {
           "id": "missing-condition",
-          "title": "Rule Without Condition",
+          "title": "Action Without Condition",
           "definitionCanonical": "http://openphc.org/ActivityDefinition/some-action|1.0.0"
         },
         {
           "id": "missing-definition",
-          "title": "Rule Without DefinitionCanonical",
+          "title": "Action Without DefinitionCanonical",
           "condition": [
             {
               "kind": "applicability",
@@ -132,8 +132,8 @@
           ]
         },
         {
-          "id": "no-extensions-rule",
-          "title": "Valid Rule Without Extensions",
+          "id": "no-extensions-action",
+          "title": "Valid Action Without Extensions",
           "condition": [
             {
               "kind": "applicability",
