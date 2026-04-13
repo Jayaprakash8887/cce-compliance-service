@@ -386,6 +386,20 @@ class DtoMapperTest {
                 .updatedAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
                 .build();
 
+        Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+        JsonNode evaluationContext = objectMapper.valueToTree(Map.of("stepState", "overdue"));
+        ActionRunContext context = ActionRunContext.builder()
+                .id(UUID.randomUUID())
+                .actionRun(entity)
+                .deviation(deviation)
+                .triggerReason("DEVIATION_DETECTED")
+                .stepActionId("bp-check")
+                .evaluationExpression("{\">\": [{\"var\": \"daysOverdue\"}, 2]}")
+                .evaluationContext(evaluationContext)
+                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
+                .build();
+        entity.setContext(context);
+
         ActionRunDto dto = mapper.toDto(entity);
 
         assertEquals(entity.getId(), dto.getId());
@@ -397,6 +411,13 @@ class DtoMapperTest {
         assertSame(outputMetadata, dto.getOutputMetadata());
         assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
         assertEquals(entity.getUpdatedAt(), dto.getUpdatedAt());
+
+        assertNotNull(dto.getContext());
+        assertEquals(context.getId(), dto.getContext().getId());
+        assertEquals(entity.getId(), dto.getContext().getActionRunId());
+        assertEquals(deviation.getId(), dto.getContext().getDeviationId());
+        assertEquals("DEVIATION_DETECTED", dto.getContext().getTriggerReason());
+        assertEquals("bp-check", dto.getContext().getStepActionId());
     }
 
     @Test
@@ -423,6 +444,7 @@ class DtoMapperTest {
         assertNull(dto.getStepInstanceId());
         assertNull(dto.getIntelligenceEventId());
         assertNull(dto.getOutputMetadata());
+        assertNull(dto.getContext());
     }
 
     @Test

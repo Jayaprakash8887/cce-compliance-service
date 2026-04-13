@@ -47,6 +47,9 @@ public class ActionRun {
     @Column(name = "output_metadata", columnDefinition = "jsonb")
     private JsonNode outputMetadata;
 
+    @OneToOne(mappedBy = "actionRun", fetch = FetchType.LAZY)
+    private ActionRunContext context;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

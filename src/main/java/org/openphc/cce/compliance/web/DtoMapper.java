@@ -169,6 +169,7 @@ public class DtoMapper {
                 .status(entity.getStatus().name())
                 .intelligenceEventId(entity.getIntelligenceEventId())
                 .outputMetadata(entity.getOutputMetadata())
+                .context(entity.getContext() != null ? toDto(entity.getContext()) : null)
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();

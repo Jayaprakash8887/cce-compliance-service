@@ -20,6 +20,7 @@ public class ActionRunDto {
     private String status;
     private UUID intelligenceEventId;
     private JsonNode outputMetadata;
+    private ActionRunContextDto context;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
 }

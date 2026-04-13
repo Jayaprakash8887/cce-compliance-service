@@ -5,6 +5,8 @@ import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.entity.ActionRun;
+import org.openphc.cce.compliance.domain.entity.ActionRunContext;
+import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.*;
@@ -44,6 +46,8 @@ class ActionRunControllerTest {
     private static final UUID PROTOCOL_INSTANCE_ID = UUID.fromString("880e8400-e29b-41d4-a716-446655440000");
     private static final UUID STEP_INSTANCE_ID = UUID.fromString("990e8400-e29b-41d4-a716-446655440000");
     private static final UUID INTELLIGENCE_EVENT_ID = UUID.fromString("aa0e8400-e29b-41d4-a716-446655440000");
+    private static final UUID CONTEXT_ID = UUID.fromString("bb0e8400-e29b-41d4-a716-446655440000");
+    private static final UUID DEVIATION_ID = UUID.fromString("cc0e8400-e29b-41d4-a716-446655440000");
 
     private ActionRun buildActionRun() {
         ActionDefinition actionDef = ActionDefinition.builder()
@@ -72,6 +76,20 @@ class ActionRunControllerTest {
         run.setOutputMetadata(objectMapper.createObjectNode().put("template", "escalation-v1"));
         run.setCreatedAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC));
         run.setUpdatedAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC));
+
+        Deviation deviation = Deviation.builder().id(DEVIATION_ID).build();
+        ActionRunContext context = ActionRunContext.builder()
+                .id(CONTEXT_ID)
+                .actionRun(run)
+                .deviation(deviation)
+                .triggerReason("DEVIATION_DETECTED")
+                .stepActionId("bp-check")
+                .evaluationExpression("{\">\": [{\"var\": \"daysOverdue\"}, 2]}")
+                .evaluationContext(objectMapper.createObjectNode().put("stepState", "overdue"))
+                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
+                .build();
+        run.setContext(context);
+
         return run;
     }
 
@@ -89,7 +107,10 @@ class ActionRunControllerTest {
                 .andExpect(jsonPath("$[0].protocolInstanceId").value(PROTOCOL_INSTANCE_ID.toString()))
                 .andExpect(jsonPath("$[0].stepInstanceId").value(STEP_INSTANCE_ID.toString()))
                 .andExpect(jsonPath("$[0].status").value("PUBLISHED"))
-                .andExpect(jsonPath("$[0].intelligenceEventId").value(INTELLIGENCE_EVENT_ID.toString()));
+                .andExpect(jsonPath("$[0].intelligenceEventId").value(INTELLIGENCE_EVENT_ID.toString()))
+                .andExpect(jsonPath("$[0].context.id").value(CONTEXT_ID.toString()))
+                .andExpect(jsonPath("$[0].context.deviationId").value(DEVIATION_ID.toString()))
+                .andExpect(jsonPath("$[0].context.triggerReason").value("DEVIATION_DETECTED"));
     }
 
     @Test
@@ -158,7 +179,10 @@ class ActionRunControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.id").value(ACTION_RUN_ID.toString()))
                 .andExpect(jsonPath("$.status").value("PUBLISHED"))
-                .andExpect(jsonPath("$.intelligenceEventId").value(INTELLIGENCE_EVENT_ID.toString()));
+                .andExpect(jsonPath("$.intelligenceEventId").value(INTELLIGENCE_EVENT_ID.toString()))
+                .andExpect(jsonPath("$.context.id").value(CONTEXT_ID.toString()))
+                .andExpect(jsonPath("$.context.triggerReason").value("DEVIATION_DETECTED"))
+                .andExpect(jsonPath("$.context.stepActionId").value("bp-check"));
     }
 
     @Test
@@ -180,5 +204,17 @@ class ActionRunControllerTest {
         mockMvc.perform(get("/v1/compliance/action-runs/{id}", ACTION_RUN_ID))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.stepInstanceId").doesNotExist());
+    }
+
+    @Test
+    void getById_nullContext_returns200() throws Exception {
+        ActionRun run = buildActionRun();
+        run.setContext(null);
+        when(actionRunService.findById(ACTION_RUN_ID)).thenReturn(run);
+
+        mockMvc.perform(get("/v1/compliance/action-runs/{id}", ACTION_RUN_ID))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(ACTION_RUN_ID.toString()))
+                .andExpect(jsonPath("$.context").doesNotExist());
     }
 }
