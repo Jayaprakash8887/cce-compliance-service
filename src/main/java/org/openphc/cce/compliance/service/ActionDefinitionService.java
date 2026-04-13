@@ -176,6 +176,11 @@ public class ActionDefinitionService {
     }
 
     @Transactional(readOnly = true)
+    public List<ActionDefinition> findByStatus(ActionDefinitionStatus status) {
+        return actionDefinitionRepository.findByStatus(status);
+    }
+
+    @Transactional(readOnly = true)
     public List<ActionDefinition> findByCanonicalUrl(String canonicalUrl) {
         return actionDefinitionRepository.findByCanonicalUrl(canonicalUrl);
     }
