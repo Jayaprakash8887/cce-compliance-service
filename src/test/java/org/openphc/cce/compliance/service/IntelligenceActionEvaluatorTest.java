@@ -113,9 +113,9 @@ class IntelligenceActionEvaluatorTest {
             IntelligenceTriggerEvent event = eventCaptor.getValue();
             assertEquals(step.getProtocolInstance().getId(), event.getProtocolInstanceId());
             assertEquals(step.getId(), event.getStepInstanceId());
-            assertEquals(deviation.getId(), event.getDeviationId());
+            assertNotNull(event.getActionRunId());
             assertEquals("overdue", event.getDeviationType());
-            assertEquals("OVERDUE", event.getStepState());
+            assertEquals("overdue", event.getStepState());
             assertEquals("bp-check", event.getActionId());
 
             // Deviation.intelligenceEventId set

@@ -230,13 +230,12 @@ public class IntelligenceActionEvaluator {
             // Publish intelligence trigger event to Kafka
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
                     .id(eventId)
-                    .type("cce.intelligence.trigger")
                     .subject(protocol.getPatientId())
+                    .actionRunId(actionRun.getId())
                     .protocolInstanceId(protocol.getId())
                     .stepInstanceId(step.getId())
-                    .deviationId(deviation != null ? deviation.getId() : null)
                     .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
-                    .stepState(step.getState().name())
+                    .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
                     .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
@@ -301,4 +300,5 @@ public class IntelligenceActionEvaluator {
 
         return context;
     }
+
 }

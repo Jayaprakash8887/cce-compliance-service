@@ -144,16 +144,14 @@ class IntelligenceTriggerProducerTest {
     private IntelligenceTriggerEvent buildEvent() {
         return IntelligenceTriggerEvent.builder()
                 .id(UUID.randomUUID())
-                .type("cce.intelligence.trigger")
                 .subject("patient-1")
+                .actionRunId(UUID.randomUUID())
                 .protocolInstanceId(UUID.randomUUID())
                 .stepInstanceId(UUID.randomUUID())
-                .deviationId(UUID.randomUUID())
                 .deviationType("overdue")
-                .stepState("OVERDUE")
+                .stepState("overdue")
                 .actionId("blood-pressure-check")
                 .protocolCanonical("http://openphc.org/PlanDefinition/anc-high-risk|1.0.0")
-                .facilityId("facility-1")
                 .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
     }
