@@ -56,7 +56,7 @@ class IntelligenceActionEvaluatorTest {
                 planDefinitionParser, expressionEvaluationService,
                 actionDefinitionService, intelligenceTriggerProducer,
                 actionRunRepository, actionRunContextRepository,
-                deviationRepository, objectMapper, meterRegistry);
+                deviationRepository, objectMapper, meterRegistry, 256);
     }
 
     // ── Deviation Tests ──

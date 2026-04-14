@@ -70,6 +70,8 @@ cce:
     retry:
       max-attempts: 3
       backoff-interval-ms: 1000
+  intelligence:
+    plan-definition-cache-size: ${CCE_PLAN_DEFINITION_CACHE_SIZE:256}
 
 # --- Actuator ---
 management:

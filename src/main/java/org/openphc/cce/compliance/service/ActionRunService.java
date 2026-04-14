@@ -21,23 +21,23 @@ public class ActionRunService {
     }
 
     public ActionRun findById(UUID id) {
-        return actionRunRepository.findById(id)
+        return actionRunRepository.findWithGraphById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Action run not found: " + id));
     }
 
     public List<ActionRun> findAll() {
-        return actionRunRepository.findAll();
+        return actionRunRepository.findWithGraphBy();
     }
 
     public List<ActionRun> findByProtocolInstanceId(UUID protocolInstanceId) {
-        return actionRunRepository.findByProtocolInstanceId(protocolInstanceId);
+        return actionRunRepository.findWithGraphByProtocolInstanceId(protocolInstanceId);
     }
 
     public List<ActionRun> findByActionDefinitionId(UUID actionDefinitionId) {
-        return actionRunRepository.findByActionDefinitionId(actionDefinitionId);
+        return actionRunRepository.findWithGraphByActionDefinitionId(actionDefinitionId);
     }
 
     public List<ActionRun> findByStatus(ActionRunStatus status) {
-        return actionRunRepository.findByStatus(status);
+        return actionRunRepository.findWithGraphByStatus(status);
     }
 }
