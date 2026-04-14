@@ -5,6 +5,56 @@ All notable changes to the CCE Compliance Service will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026
+
+### Added
+
+#### Intelligence Pipeline
+- `IntelligenceActionEvaluator` — core engine evaluating PlanDefinition intelligence actions on deviation detection and step completion
+- Intelligence action extraction from nested `PlanDefinition.action.action[]` with condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and target extensions
+- `IntelligenceTriggerProducer` — publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` Kafka topic (fire-and-forget, keyed by protocolInstanceId)
+- `ActionRun` + `ActionRunContext` entities tracking each intelligence action execution with status lifecycle (TRIGGERED → PUBLISHED)
+- `ActionDefinition` entity for FHIR `ActivityDefinition` resources — CRUD operations via `ActionDefinitionService`
+- Flyway V2 migration: `action_definition`, `action_run`, `action_run_context` tables with indexes, constraints, and foreign keys
+
+#### New Enums
+- `ActionDefinitionStatus` (ACTIVE, RETIRED)
+- `ActionType` (CommunicationRequest, Task, ServiceRequest)
+- `IntelligenceSeverity` (LOW, MEDIUM, HIGH, CRITICAL)
+- `IntelligenceTarget` (PATIENT, ASSIGNED_WORKER, SUPERVISOR, FACILITY)
+- `ActionRunStatus` (TRIGGERED, PUBLISHED, FAILED, CANCELLED)
+
+#### REST API
+- `ActionDefinitionController` — 6 endpoints: POST create, GET list (filter by status), GET by ID, PUT update, POST retire, DELETE
+- `ActionRunController` — 2 endpoints: GET list (filter by protocolInstanceId, actionDefinitionId, status), GET by ID (includes embedded ActionRunContext)
+- DTOs: `ActionDefinitionDto`, `ActionRunDto`, `ActionRunContextDto`
+
+#### Observability
+- `cce.intelligence.actions.evaluated` counter — total intelligence action conditions evaluated
+- `cce.intelligence.actions.fired` counter — actions that matched and triggered
+- `cce.intelligence.publish.duration` timer — Kafka publish latency
+- `cce.action.definitions.active` gauge — active action definitions count
+- `cce.events.intelligence.published` counter — now actively incremented
+- MDC `intelligenceEventId` context during intelligence event publishing
+
+#### Wiring
+- `StepInstanceService.applySchedulerTransition()` — calls `evaluateOnDeviation()` after OVERDUE/MISSED deviation creation
+- `ComplianceEngine.processMatch()` / `processExplicitMatch()` — calls `evaluateOnCompletion()` after step completion
+
+### Changed
+
+#### Performance Optimizations
+- `ActionRunRepository` — added `@EntityGraph` fetch queries (`findWithGraphBy*`) to eliminate N+1 lazy loading on ActionRun list/detail endpoints
+- `ActionRunService` — uses eager-fetch repository methods for all DTO-facing queries
+- `IntelligenceActionEvaluator` — bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects, avoiding FHIR re-parsing on every deviation/completion evaluation
+- `PlanDefinitionParser.ActionMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
+
+### Testing
+- 352 unit tests (was 254 in v1.0.0) — 98 new tests for intelligence pipeline
+- 39 integration tests (was 24 in v1.0.0) — 15 new: `ActionDefinitionApiIntegrationTest` (9), `IntelligencePipelineIntegrationTest` (6)
+
+---
+
 ## [1.0.0] - 2025
 
 ### Added

@@ -1,4 +1,131 @@
-# Release Notes — v1.0.0
+# Release Notes — v1.1.0
+
+**Release Date:** 2026  
+**Component:** `cce-compliance-service`  
+**Java:** 21 LTS | **Spring Boot:** 3.4.2 | **PostgreSQL:** 16 | **Kafka:** 3.x KRaft
+
+---
+
+## Overview
+
+Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recording, and publishing of intelligence actions defined within FHIR `PlanDefinition` protocols. When a step deviation is detected (OVERDUE/MISSED) or a step is completed, nested intelligence actions are evaluated against runtime context using JSONLogic/FHIRPath conditions. Matching actions resolve to `ActivityDefinition`-backed action definitions, create auditable `ActionRun` records, and publish trigger events to Kafka for downstream processing by the CCE Intelligence Service.
+
+---
+
+## Feature Summary
+
+### Intelligence Action Evaluation
+- Nested `PlanDefinition.action.action[]` intelligence actions extracted during protocol loading
+- Each intelligence action has a condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and target extensions
+- `IntelligenceActionEvaluator` evaluates actions at two trigger points:
+  - **Deviation detection** — when a step transitions to OVERDUE or MISSED
+  - **Step completion** — when a step is completed (for actions like "notify on late completion")
+- Context variables available to conditions: `stepState`, `deviationType`, `daysOverdue`, `daysPastMissedDate`, `actionId`, `repeatIndex`, `completionStatus`, `completedAt`
+- Bounded PlanDefinition parse cache eliminates redundant FHIR parsing per protocol
+
+### Action Definitions (FHIR ActivityDefinition)
+- CRUD operations for `ActivityDefinition` resources stored as `ActionDefinition` entities
+- Canonical URL + version uniqueness enforced
+- Status lifecycle: ACTIVE → RETIRED
+- Referenced by intelligence actions via `definitionCanonical` (format: `url|version`)
+- Action types: `CommunicationRequest`, `Task`, `ServiceRequest` (from FHIR `ActivityDefinition.kind`)
+- Severity levels: LOW, MEDIUM, HIGH, CRITICAL
+- Target routing: PATIENT, ASSIGNED_WORKER, SUPERVISOR, FACILITY
+
+### Action Run Tracking
+- `ActionRun` entity records each intelligence action execution with status (TRIGGERED → PUBLISHED)
+- `ActionRunContext` entity (1:1) stores evaluation context: trigger reason, condition expression, evaluation data, deviation link
+- `intelligenceEventId` (UUID) links ActionRun → Kafka event → Deviation for full traceability
+
+### Intelligence Trigger Publishing
+- `IntelligenceTriggerProducer` publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` topic
+- Kafka key: `protocolInstanceId` (partition locality for per-patient ordering)
+- Fire-and-forget model — publishing failures are logged but don't fail the main transaction
+- Event payload includes: protocolInstanceId, stepInstanceId, deviationId, deviationType, stepState, actionId, protocolCanonical
+
+### REST API Additions
+- **Action Definitions** — 6 endpoints at `/v1/compliance/action-definitions`:
+  - `POST /` — create from ActivityDefinition JSON
+  - `GET /` — list all (filter by status)
+  - `GET /{id}` — get by ID
+  - `PUT /{id}` — update definition
+  - `POST /{id}/retire` — retire
+  - `DELETE /{id}` — delete (fails if action runs reference it)
+- **Action Runs** — 2 endpoints at `/v1/compliance/action-runs`:
+  - `GET /` — list all (filter by protocolInstanceId, actionDefinitionId, status)
+  - `GET /{id}` — get by ID (includes embedded ActionRunContext)
+
+### Observability
+- New Micrometer metrics: `cce.intelligence.actions.evaluated`, `cce.intelligence.actions.fired`, `cce.intelligence.publish.duration`, `cce.action.definitions.active` (gauge)
+- MDC `intelligenceEventId` context during intelligence event publishing
+- Structured log messages for intelligence pipeline steps
+
+### Performance Optimizations
+- `@EntityGraph` eager-fetch queries on `ActionRunRepository` eliminate N+1 lazy loading for ActionRun API endpoints
+- Bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects in `IntelligenceActionEvaluator`
+
+---
+
+## Architecture Update
+
+```
+Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
+                                    ├── Idempotency (EventLogService)
+                                    ├── Resource Extraction (ResourceInfoExtractor)
+                                    ├── Tier 1 Matching (TriggerMatchingService)
+                                    ├── Tier 2 Evaluation (ExpressionEvaluationService)
+                                    ├── Enrollment (ProtocolInstanceService)
+                                    ├── Step Management (StepInstanceService)
+                                    │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
+                                    ├── Deviation Detection (DeviationService)
+                                    │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
+                                    ├── Intelligence Publishing (IntelligenceTriggerProducer)
+                                    └── Audit Logging (AuditService)
+```
+
+---
+
+## Database Schema Changes
+
+3 new tables added via Flyway V2 migration (`V2__intelligence_tables.sql`):
+- `action_definition` — FHIR ActivityDefinition storage with canonical uniqueness
+- `action_run` — Intelligence action execution records
+- `action_run_context` — Evaluation context (1:1 with action_run)
+
+Total tables: 10 (was 7 in v1.0.0)
+
+---
+
+## Migration from v1.0.0
+
+1. Apply Flyway V2 migration (automatic on startup)
+2. No breaking changes to existing REST API endpoints
+3. No changes to existing Kafka message schemas
+4. New intelligence triggers will only fire for protocols with nested intelligence actions in their PlanDefinition
+
+---
+
+## Known Limitations (v1.1.0)
+
+- **Intelligence event delivery/routing:** This service publishes trigger events to `cce.intelligence.triggers` — actual delivery to Receiver Adaptors is handled by the CCE Intelligence Service
+- **No CQL support:** Only JSONLogic and FHIRPath expression languages are supported
+- **`cce.protocol.control` topic reserved:** Not implemented
+- **No multi-tenancy:** Single-tenant deployment assumed
+- **No authentication at service level:** Security handled by CCE API Gateway
+- **ActionRun status transitions:** Only TRIGGERED → PUBLISHED is automated; FAILED/CANCELLED require manual intervention or future automation
+
+---
+
+## Test Coverage
+
+- **352 unit tests** covering all services, controllers, mappers, and intelligence pipeline
+- **39 integration tests** covering end-to-end workflows with EmbeddedKafka + H2
+- JaCoCo coverage reports via `./gradlew test jacocoTestReport`
+
+---
+---
+
+# Release Notes — v1.0.0 (Previous)
 
 **Release Date:** 2025  
 **Component:** `cce-compliance-service`  

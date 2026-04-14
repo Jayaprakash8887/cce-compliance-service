@@ -190,9 +190,9 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 9 JPA entities (+ ActionDefinition, ActionRun)
+│   ├── entity/                                # 11 JPA entities (incl. ActionDefinition, ActionRun, ActionRunContext)
 │   ├── enums/                                 # 12 value-based enums
-│   └── repository/                            # 9 Spring Data JPA repositories
+│   └── repository/                            # 10 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
 │   ├── config/                                # Consumer/Producer factories, topic bindings
@@ -468,7 +468,7 @@ Intelligence actions are modeled as **nested actions** within a PlanDefinition s
 
 Intelligence action evaluation is triggered on any Step State change. Example:
 1. **On deviation detection** — when a step transitions to `OVERDUE` or `MISSED` (scheduler-driven)
-2. **On step completion** — when a step is completed by an inbound event (for rules like "notify on late completion")
+2. **On step completion** — when a step is completed by an inbound event (for actions like "notify on late completion")
 
 ```mermaid
 flowchart TD

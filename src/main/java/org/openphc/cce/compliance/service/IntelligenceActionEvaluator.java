@@ -18,12 +18,14 @@ import org.hl7.fhir.r4.model.PlanDefinition;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class IntelligenceActionEvaluator {
@@ -40,6 +42,8 @@ public class IntelligenceActionEvaluator {
     private final ObjectMapper objectMapper;
     private final Counter actionsEvaluatedCounter;
     private final Counter actionsFiredCounter;
+    private final int maxPlanDefinitionCacheSize;
+    private final Map<UUID, PlanDefinition> parsedPlanDefinitionCache = new ConcurrentHashMap<>();
 
     public IntelligenceActionEvaluator(PlanDefinitionParser planDefinitionParser,
                                      ExpressionEvaluationService expressionEvaluationService,
@@ -49,7 +53,8 @@ public class IntelligenceActionEvaluator {
                                      ActionRunContextRepository actionRunContextRepository,
                                      DeviationRepository deviationRepository,
                                      ObjectMapper objectMapper,
-                                     MeterRegistry meterRegistry) {
+                                     MeterRegistry meterRegistry,
+                                     @Value("${cce.intelligence.plan-definition-cache-size:256}") int maxPlanDefinitionCacheSize) {
         this.planDefinitionParser = planDefinitionParser;
         this.expressionEvaluationService = expressionEvaluationService;
         this.actionDefinitionService = actionDefinitionService;
@@ -60,6 +65,7 @@ public class IntelligenceActionEvaluator {
         this.objectMapper = objectMapper;
         this.actionsEvaluatedCounter = meterRegistry.counter("cce.intelligence.actions.evaluated");
         this.actionsFiredCounter = meterRegistry.counter("cce.intelligence.actions.fired");
+        this.maxPlanDefinitionCacheSize = maxPlanDefinitionCacheSize;
     }
 
     /**
@@ -71,7 +77,7 @@ public class IntelligenceActionEvaluator {
      */
     public List<ActionRun> evaluateOnDeviation(StepInstance step, Deviation deviation) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
-        PlanDefinition planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
+        PlanDefinition planDefinition = getCachedPlanDefinition(protocolDef);
 
         JsonNode context = objectMapper.valueToTree(buildDeviationContext(step, deviation));
         String triggerReason = deviation.getDeviationType().name().toLowerCase();
@@ -108,7 +114,7 @@ public class IntelligenceActionEvaluator {
      */
     public List<ActionRun> evaluateOnCompletion(StepInstance step) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
-        PlanDefinition planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
+        PlanDefinition planDefinition = getCachedPlanDefinition(protocolDef);
 
         JsonNode context = objectMapper.valueToTree(buildCompletionContext(step));
 
@@ -133,6 +139,21 @@ public class IntelligenceActionEvaluator {
         }
 
         return actionRuns;
+    }
+
+    // ── Parsed PlanDefinition cache ──
+
+    private PlanDefinition getCachedPlanDefinition(ProtocolDefinition protocolDef) {
+        return parsedPlanDefinitionCache.computeIfAbsent(protocolDef.getId(), id -> {
+            if (parsedPlanDefinitionCache.size() >= maxPlanDefinitionCacheSize) {
+                parsedPlanDefinitionCache.clear();
+            }
+            return planDefinitionParser.parse(protocolDef.getDefinition().toString());
+        });
+    }
+
+    public void evictPlanDefinitionCache(UUID protocolDefinitionId) {
+        parsedPlanDefinitionCache.remove(protocolDefinitionId);
     }
 
     // ── Per intelligence action evaluation ──
@@ -209,13 +230,12 @@ public class IntelligenceActionEvaluator {
             // Publish intelligence trigger event to Kafka
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
                     .id(eventId)
-                    .type("cce.intelligence.trigger")
                     .subject(protocol.getPatientId())
+                    .actionRunId(actionRun.getId())
                     .protocolInstanceId(protocol.getId())
                     .stepInstanceId(step.getId())
-                    .deviationId(deviation != null ? deviation.getId() : null)
                     .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
-                    .stepState(step.getState().name())
+                    .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
                     .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
@@ -280,4 +300,5 @@ public class IntelligenceActionEvaluator {
 
         return context;
     }
+
 }
