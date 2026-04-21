@@ -87,13 +87,4 @@ class EnumValuesTest {
         assertNotNull(IntelligenceSeverity.valueOf("HIGH"));
         assertNotNull(IntelligenceSeverity.valueOf("CRITICAL"));
     }
-
-    @Test
-    void actionRunStatus_hasCorrectValues() {
-        assertEquals(4, ActionRunStatus.values().length);
-        assertNotNull(ActionRunStatus.valueOf("TRIGGERED"));
-        assertNotNull(ActionRunStatus.valueOf("PUBLISHED"));
-        assertNotNull(ActionRunStatus.valueOf("FAILED"));
-        assertNotNull(ActionRunStatus.valueOf("CANCELLED"));
-    }
 }

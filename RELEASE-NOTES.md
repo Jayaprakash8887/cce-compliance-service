@@ -8,7 +8,7 @@
 
 ## Overview
 
-Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recording, and publishing of intelligence actions defined within FHIR `PlanDefinition` protocols. When a step deviation is detected (OVERDUE/MISSED) or a step is completed, nested intelligence actions are evaluated against runtime context using JSONLogic/FHIRPath conditions. Matching actions resolve to `ActivityDefinition`-backed action definitions, create auditable `ActionRun` records, and publish trigger events to Kafka for downstream processing by the CCE Intelligence Service.
+Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recording, and publishing of intelligence actions defined within FHIR `PlanDefinition` protocols. When a step deviation is detected (OVERDUE/MISSED) or a step is completed, nested intelligence actions are evaluated against runtime context using JSONLogic/FHIRPath conditions. Matching actions resolve to `ActivityDefinition`-backed action definitions, create an `IntelligenceEventLog` record, and publish trigger events to Kafka for downstream processing by the CCE Intelligence Service.
 
 ---
 
@@ -32,10 +32,11 @@ Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recordin
 - Severity levels: LOW, MEDIUM, HIGH, CRITICAL
 - Target routing: PATIENT, ASSIGNED_WORKER, SUPERVISOR, FACILITY
 
-### Action Run Tracking
-- `ActionRun` entity records each intelligence action execution with status (TRIGGERED → PUBLISHED)
-- `ActionRunContext` entity (1:1) stores evaluation context: trigger reason, condition expression, evaluation data, deviation link
-- `intelligenceEventId` (UUID) links ActionRun → Kafka event → Deviation for full traceability
+### Intelligence Event Logging
+- `IntelligenceEventLog` entity records each intelligence action execution in a single flat row
+- Stores the complete Kafka event payload (`event_payload` JSONB), evaluation context, trigger reason, and publish status
+- `published` boolean tracks whether the event was successfully sent to Kafka
+- No FK constraints — plain UUID columns for full decoupling from core compliance tables
 
 ### Intelligence Trigger Publishing
 - `IntelligenceTriggerProducer` publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` topic
@@ -51,9 +52,9 @@ Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recordin
   - `PUT /{id}` — update definition
   - `POST /{id}/retire` — retire
   - `DELETE /{id}` — delete (fails if action runs reference it)
-- **Action Runs** — 2 endpoints at `/v1/compliance/action-runs`:
-  - `GET /` — list all (filter by protocolInstanceId, actionDefinitionId, status)
-  - `GET /{id}` — get by ID (includes embedded ActionRunContext)
+- **Intelligence Events** — 2 endpoints at `/v1/compliance/intelligence-events`:
+  - `GET /` — list all (filter by protocolInstanceId, actionDefinitionId, published)
+  - `GET /{id}` — get by ID
 
 ### Observability
 - New Micrometer metrics: `cce.intelligence.actions.evaluated`, `cce.intelligence.actions.fired`, `cce.intelligence.publish.duration`, `cce.action.definitions.active` (gauge)
@@ -61,7 +62,6 @@ Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recordin
 - Structured log messages for intelligence pipeline steps
 
 ### Performance Optimizations
-- `@EntityGraph` eager-fetch queries on `ActionRunRepository` eliminate N+1 lazy loading for ActionRun API endpoints
 - Bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects in `IntelligenceActionEvaluator`
 
 ---
@@ -87,12 +87,11 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 
 ## Database Schema Changes
 
-3 new tables added via Flyway V2 migration (`V2__intelligence_tables.sql`):
+2 new tables added via Flyway V2 migration (`V2__intelligence_tables.sql`):
 - `action_definition` — FHIR ActivityDefinition storage with canonical uniqueness
-- `action_run` — Intelligence action execution records
-- `action_run_context` — Evaluation context (1:1 with action_run)
+- `intelligence_event_log` — Intelligence action execution and evaluation context (flat, no FKs)
 
-Total tables: 10 (was 7 in v1.0.0)
+Total tables: 9 (was 7 in v1.0.0)
 
 ---
 
@@ -112,7 +111,6 @@ Total tables: 10 (was 7 in v1.0.0)
 - **`cce.protocol.control` topic reserved:** Not implemented
 - **No multi-tenancy:** Single-tenant deployment assumed
 - **No authentication at service level:** Security handled by CCE API Gateway
-- **ActionRun status transitions:** Only TRIGGERED → PUBLISHED is automated; FAILED/CANCELLED require manual intervention or future automation
 
 ---
 

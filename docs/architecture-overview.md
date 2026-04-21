@@ -157,9 +157,9 @@ See [Kafka Events §5.3](kafka-events.md#53-intelligencetriggerevent-outbound--c
 | Aspect | Owner | Details |
 |---|---|---|
 | **Intelligence action evaluation** | Compliance Service | Evaluates PlanDefinition intelligence action conditions, resolves `definitionCanonical` to `ActionDefinition` |
-| **Trigger event publishing** | Compliance Service | Publishes `IntelligenceTriggerEvent` to Kafka; creates `ActionRun` record (TRIGGERED → PUBLISHED) |
+| **Trigger event publishing** | Compliance Service | Publishes `IntelligenceTriggerEvent` to Kafka; creates `intelligence_event_log` record (published=false → true) |
 | **`action_definition` table** | Compliance Service | Schema, writes, Flyway migrations — stores `ActivityDefinition` resources referenced by intelligence actions |
-| **`action_run` table** | Compliance Service | Tracks each intelligence action execution (status, output, linked event ID) |
+| **`intelligence_event_log` table** | Compliance Service | Tracks each intelligence action execution with evaluation context and Kafka event payload |
 | **Event consumption & routing** | Intelligence Service | Consumes from `cce.intelligence.triggers`, resolves delivery targets, routes to Receiver Adaptors |
 | **Notification/task delivery** | Intelligence Service + Receiver Adaptors | Translates intelligence events into system-specific records (SMS, in-app alerts, EMR tasks, escalation workflows) |
 | **Kafka topic** | Shared | `cce.intelligence.triggers` — Compliance produces, Intelligence consumes |
@@ -190,8 +190,8 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 11 JPA entities (incl. ActionDefinition, ActionRun, ActionRunContext)
-│   ├── enums/                                 # 12 value-based enums
+│   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog)
+│   ├── enums/                                 # 11 value-based enums
 │   └── repository/                            # 10 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
@@ -483,9 +483,9 @@ flowchart TD
     EVAL -->|"true"| RESOLVE["Resolve definitionCanonical<br/>→ ActionDefinition"]
 
     RESOLVE -->|"Not found"| LOG_SKIP["Log warning, skip"]
-    RESOLVE -->|"Found"| RUN["Create ActionRun<br/>(status=TRIGGERED)"]
+    RESOLVE -->|"Found"| RUN["Create IntelligenceEventLog<br/>(published=false)"]
     RUN --> PUB["Build & publish<br/>IntelligenceTriggerEvent<br/>to cce.intelligence.triggers"]
-    PUB --> UPDATE["Update ActionRun<br/>(status=PUBLISHED)"]
+    PUB --> UPDATE["Update IntelligenceEventLog<br/>(published=true, publishedAt)"]
     UPDATE --> LINK["Link deviation.intelligenceEventId"]
 
     SKIP --> LOOP
@@ -558,7 +558,7 @@ flowchart LR
 ```
 
 Each **intelligence action** (`PlanDefinition.action.action`) contains:
-- `id` — unique identifier (mapped to `stepActionId` in `action_run_context`)
+- `id` — unique identifier (mapped to `stepActionId` in `intelligence_event_log`)
 - `condition[kind=applicability]` — JSONLogic/FHIRPath expression evaluated against step runtime state
 - `definitionCanonical` — reference to an `ActivityDefinition` that defines the action to take
 - `extension` — severity and target metadata
@@ -608,16 +608,18 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 | `target` | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` (from PlanDefinition extension) |
 | `definition` | Full ActivityDefinition JSON (message template, routing config) |
 
-#### Action Runs
+#### Intelligence Event Logging
 
-`ActionRun` records track each intelligence action execution for auditability:
+`IntelligenceEventLog` records track each intelligence action execution in a single flat row for auditability:
 
 | Field | Description |
 |---|---|
-| `status` | `TRIGGERED` → `PUBLISHED` (success) or `FAILED` (publish error) |
-| `intelligenceEventId` | UUID of the published Kafka message |
+| `published` | `false` → `true` (on successful Kafka publish) |
+| `event_payload` | Complete `IntelligenceTriggerEvent` JSON published to Kafka |
+| `trigger_reason` | Why the action fired: `overdue`, `missed`, `completion` |
+| `evaluation_context` | Runtime variables passed to the condition evaluator |
 
-Evaluation context (trigger reason, step action ID, expression, deviation reference) is stored in the associated `action_run_context` record. See [Data Dictionary §12](data-dictionary.md#12-action_run_context).
+All execution and evaluation context is stored in a single row — no FK constraints, no joins required. See [Data Dictionary §11](data-dictionary.md#11-intelligence_event_log).
 
 ## 7. Security
 

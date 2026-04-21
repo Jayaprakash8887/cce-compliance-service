@@ -7,7 +7,7 @@ import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
 import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
-import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
+import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -25,14 +25,14 @@ public class ActionDefinitionService {
     private static final Logger log = LoggerFactory.getLogger(ActionDefinitionService.class);
 
     private final ActionDefinitionRepository actionDefinitionRepository;
-    private final ActionRunRepository actionRunRepository;
+    private final IntelligenceEventLogRepository intelligenceEventLogRepository;
     private final AuditService auditService;
 
     public ActionDefinitionService(ActionDefinitionRepository actionDefinitionRepository,
-                                   ActionRunRepository actionRunRepository,
+                                   IntelligenceEventLogRepository intelligenceEventLogRepository,
                                    AuditService auditService) {
         this.actionDefinitionRepository = actionDefinitionRepository;
-        this.actionRunRepository = actionRunRepository;
+        this.intelligenceEventLogRepository = intelligenceEventLogRepository;
         this.auditService = auditService;
     }
 
@@ -147,14 +147,14 @@ public class ActionDefinitionService {
     }
 
     /**
-     * Delete an ActionDefinition. Fails if any ActionRun references it.
+     * Delete an ActionDefinition. Fails if any intelligence event references it.
      */
     public void deleteActionDefinition(UUID id) {
         ActionDefinition actionDef = findByIdOrThrow(id);
 
-        if (actionRunRepository.existsByActionDefinitionId(id)) {
+        if (intelligenceEventLogRepository.existsByActionDefinitionId(id)) {
             throw new IllegalStateException(
-                    "Cannot delete action definition with existing action runs: " + id);
+                    "Cannot delete action definition with existing intelligence events: " + id);
         }
 
         actionDefinitionRepository.delete(actionDef);

@@ -316,7 +316,7 @@ Published when an intelligence action fires — triggered by deviation detection
 |---|---|---|
 | `id` | UUID | Unique event identifier |
 | `subject` | String | Patient identifier (UPID) |
-| `actionRunId` | UUID | ActionRun record tracking this execution |
+| `actionRunId` | UUID | Intelligence event log record ID tracking this execution |
 | `actionDefinitionId` | UUID | ActionDefinition that was resolved and triggered |
 | `protocolDefinitionId` | UUID | Protocol definition the step belongs to |
 | `actionType` | String | Action type from ActionDefinition (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`) |
@@ -338,7 +338,7 @@ Published when an intelligence action fires — triggered by deviation detection
 | Step completed with `completionStatus=LATE` |
 
 
-> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `ActionRun` record tracks execution; an `ActionRunContext` record stores evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables). See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-action-evaluation) for the full pipeline.
+> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `IntelligenceEventLog` record stores the complete event payload, evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables), and publish status. See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-action-evaluation) for the full pipeline.
 
 ---
 

@@ -360,143 +360,84 @@ class DtoMapperTest {
     }
 
     @Test
-    void toDto_actionRun_mapsAllFields() {
-        ActionDefinition actionDef = ActionDefinition.builder()
-                .id(UUID.randomUUID())
-                .build();
-        ProtocolInstance protocolInstance = ProtocolInstance.builder()
-                .id(UUID.randomUUID())
-                .protocolDefinition(ProtocolDefinition.builder().id(UUID.randomUUID()).build())
-                .build();
-        StepInstance stepInstance = StepInstance.builder()
-                .id(UUID.randomUUID())
-                .build();
-        UUID intelligenceEventId = UUID.randomUUID();
-        JsonNode outputMetadata = objectMapper.valueToTree(Map.of("template", "v1"));
-
-        ActionRun entity = ActionRun.builder()
-                .id(UUID.randomUUID())
-                .actionDefinition(actionDef)
-                .protocolInstance(protocolInstance)
-                .stepInstance(stepInstance)
-                .status(ActionRunStatus.PUBLISHED)
-                .intelligenceEventId(intelligenceEventId)
-                .outputMetadata(outputMetadata)
-                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
-                .updatedAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
-                .build();
-
-        Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+    void toDto_intelligenceEventLog_mapsAllFields() {
+        UUID actionDefId = UUID.randomUUID();
+        UUID protocolInstanceId = UUID.randomUUID();
+        UUID stepInstanceId = UUID.randomUUID();
+        UUID deviationId = UUID.randomUUID();
         JsonNode evaluationContext = objectMapper.valueToTree(Map.of("stepState", "overdue"));
-        ActionRunContext context = ActionRunContext.builder()
+        JsonNode eventPayload = objectMapper.valueToTree(Map.of("id", UUID.randomUUID().toString()));
+        OffsetDateTime publishedAt = OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC);
+        OffsetDateTime createdAt = OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC);
+
+        IntelligenceEventLog entity = IntelligenceEventLog.builder()
                 .id(UUID.randomUUID())
-                .actionRun(entity)
-                .deviation(deviation)
-                .triggerReason("DEVIATION_DETECTED")
+                .eventPayload(eventPayload)
+                .actionDefinitionId(actionDefId)
+                .protocolInstanceId(protocolInstanceId)
+                .stepInstanceId(stepInstanceId)
+                .deviationId(deviationId)
+                .subject("patient-1")
+                .actionType("CommunicationRequest")
+                .intelligenceChannel("sms")
+                .stepState("overdue")
+                .triggerReason("overdue")
                 .stepActionId("bp-check")
                 .evaluationExpression("{\">\": [{\"var\": \"daysOverdue\"}, 2]}")
                 .evaluationContext(evaluationContext)
-                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
+                .published(true)
+                .publishedAt(publishedAt)
+                .createdAt(createdAt)
                 .build();
-        entity.setContext(context);
 
-        ActionRunDto dto = mapper.toDto(entity);
+        IntelligenceEventLogDto dto = mapper.toDto(entity);
 
         assertEquals(entity.getId(), dto.getId());
-        assertEquals(actionDef.getId(), dto.getActionDefinitionId());
-        assertEquals(protocolInstance.getId(), dto.getProtocolInstanceId());
-        assertEquals(stepInstance.getId(), dto.getStepInstanceId());
-        assertEquals("PUBLISHED", dto.getStatus());
-        assertEquals(intelligenceEventId, dto.getIntelligenceEventId());
-        assertSame(outputMetadata, dto.getOutputMetadata());
-        assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
-        assertEquals(entity.getUpdatedAt(), dto.getUpdatedAt());
-
-        assertNotNull(dto.getContext());
-        assertEquals(context.getId(), dto.getContext().getId());
-        assertEquals(entity.getId(), dto.getContext().getActionRunId());
-        assertEquals(deviation.getId(), dto.getContext().getDeviationId());
-        assertEquals("DEVIATION_DETECTED", dto.getContext().getTriggerReason());
-        assertEquals("bp-check", dto.getContext().getStepActionId());
-    }
-
-    @Test
-    void toDto_actionRun_nullStepInstance() {
-        ActionDefinition actionDef = ActionDefinition.builder()
-                .id(UUID.randomUUID())
-                .build();
-        ProtocolInstance protocolInstance = ProtocolInstance.builder()
-                .id(UUID.randomUUID())
-                .protocolDefinition(ProtocolDefinition.builder().id(UUID.randomUUID()).build())
-                .build();
-
-        ActionRun entity = ActionRun.builder()
-                .id(UUID.randomUUID())
-                .actionDefinition(actionDef)
-                .protocolInstance(protocolInstance)
-                .status(ActionRunStatus.TRIGGERED)
-                .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .updatedAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .build();
-
-        ActionRunDto dto = mapper.toDto(entity);
-
-        assertNull(dto.getStepInstanceId());
-        assertNull(dto.getIntelligenceEventId());
-        assertNull(dto.getOutputMetadata());
-        assertNull(dto.getContext());
-    }
-
-    @Test
-    void toDto_actionRunContext_mapsAllFields() {
-        ActionRun actionRun = ActionRun.builder()
-                .id(UUID.randomUUID())
-                .build();
-        Deviation deviation = Deviation.builder()
-                .id(UUID.randomUUID())
-                .build();
-        JsonNode evaluationContext = objectMapper.valueToTree(
-                Map.of("stepState", "overdue", "daysOverdue", 3));
-
-        ActionRunContext entity = ActionRunContext.builder()
-                .id(UUID.randomUUID())
-                .actionRun(actionRun)
-                .deviation(deviation)
-                .triggerReason("DEVIATION_DETECTED")
-                .stepActionId("bp-check")
-                .evaluationExpression("{\">\": [{\"var\": \"daysOverdue\"}, 2]}")
-                .evaluationContext(evaluationContext)
-                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
-                .build();
-
-        ActionRunContextDto dto = mapper.toDto(entity);
-
-        assertEquals(entity.getId(), dto.getId());
-        assertEquals(actionRun.getId(), dto.getActionRunId());
-        assertEquals(deviation.getId(), dto.getDeviationId());
-        assertEquals("DEVIATION_DETECTED", dto.getTriggerReason());
+        assertSame(eventPayload, dto.getEventPayload());
+        assertEquals(actionDefId, dto.getActionDefinitionId());
+        assertEquals(protocolInstanceId, dto.getProtocolInstanceId());
+        assertEquals(stepInstanceId, dto.getStepInstanceId());
+        assertEquals(deviationId, dto.getDeviationId());
+        assertEquals("patient-1", dto.getSubject());
+        assertEquals("CommunicationRequest", dto.getActionType());
+        assertEquals("sms", dto.getIntelligenceChannel());
+        assertEquals("overdue", dto.getStepState());
+        assertEquals("overdue", dto.getTriggerReason());
         assertEquals("bp-check", dto.getStepActionId());
         assertEquals("{\">\": [{\"var\": \"daysOverdue\"}, 2]}", dto.getEvaluationExpression());
         assertSame(evaluationContext, dto.getEvaluationContext());
-        assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
+        assertTrue(dto.isPublished());
+        assertEquals(publishedAt, dto.getPublishedAt());
+        assertEquals(createdAt, dto.getCreatedAt());
     }
 
     @Test
-    void toDto_actionRunContext_nullDeviation() {
-        ActionRun actionRun = ActionRun.builder()
-                .id(UUID.randomUUID())
-                .build();
+    void toDto_intelligenceEventLog_nullOptionalFields() {
+        JsonNode eventPayload = objectMapper.valueToTree(Map.of("id", UUID.randomUUID().toString()));
 
-        ActionRunContext entity = ActionRunContext.builder()
+        IntelligenceEventLog entity = IntelligenceEventLog.builder()
                 .id(UUID.randomUUID())
-                .actionRun(actionRun)
-                .triggerReason("STEP_COMPLETED")
+                .eventPayload(eventPayload)
+                .actionDefinitionId(UUID.randomUUID())
+                .protocolInstanceId(UUID.randomUUID())
+                .subject("patient-1")
+                .actionType("Task")
+                .intelligenceChannel("email")
+                .stepState("completed")
+                .triggerReason("completion")
+                .published(false)
                 .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
 
-        ActionRunContextDto dto = mapper.toDto(entity);
+        IntelligenceEventLogDto dto = mapper.toDto(entity);
 
+        assertNull(dto.getStepInstanceId());
         assertNull(dto.getDeviationId());
+        assertNull(dto.getStepActionId());
+        assertNull(dto.getEvaluationExpression());
+        assertNull(dto.getEvaluationContext());
+        assertFalse(dto.isPublished());
+        assertNull(dto.getPublishedAt());
     }
 
     @Test
@@ -526,31 +467,31 @@ class DtoMapperTest {
     }
 
     @Test
-    void toDtoActionRunList_mapsAll() {
-        ActionDefinition actionDef = ActionDefinition.builder().id(UUID.randomUUID()).build();
-        ProtocolInstance protocolInstance = ProtocolInstance.builder()
+    void toDtoIntelligenceEventLogList_mapsAll() {
+        JsonNode eventPayload = objectMapper.valueToTree(Map.of("id", UUID.randomUUID().toString()));
+        IntelligenceEventLog entity = IntelligenceEventLog.builder()
                 .id(UUID.randomUUID())
-                .protocolDefinition(ProtocolDefinition.builder().id(UUID.randomUUID()).build())
-                .build();
-
-        ActionRun entity = ActionRun.builder()
-                .id(UUID.randomUUID())
-                .actionDefinition(actionDef)
-                .protocolInstance(protocolInstance)
-                .status(ActionRunStatus.PUBLISHED)
+                .eventPayload(eventPayload)
+                .actionDefinitionId(UUID.randomUUID())
+                .protocolInstanceId(UUID.randomUUID())
+                .subject("patient-1")
+                .actionType("Task")
+                .intelligenceChannel("email")
+                .stepState("completed")
+                .triggerReason("completion")
+                .published(true)
                 .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .updatedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
 
-        List<ActionRunDto> dtos = mapper.toDtoActionRunList(List.of(entity));
+        List<IntelligenceEventLogDto> dtos = mapper.toDtoIntelligenceEventLogList(List.of(entity));
 
         assertEquals(1, dtos.size());
         assertEquals(entity.getId(), dtos.get(0).getId());
     }
 
     @Test
-    void toDtoActionRunList_nullReturnsEmpty() {
-        List<ActionRunDto> dtos = mapper.toDtoActionRunList(null);
+    void toDtoIntelligenceEventLogList_nullReturnsEmpty() {
+        List<IntelligenceEventLogDto> dtos = mapper.toDtoIntelligenceEventLogList(null);
         assertNotNull(dtos);
         assertTrue(dtos.isEmpty());
     }

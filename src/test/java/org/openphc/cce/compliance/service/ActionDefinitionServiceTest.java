@@ -15,7 +15,7 @@ import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
 import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
-import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
+import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 
 import java.util.List;
 import java.util.Optional;
@@ -32,7 +32,7 @@ class ActionDefinitionServiceTest {
     private ActionDefinitionRepository actionDefinitionRepository;
 
     @Mock
-    private ActionRunRepository actionRunRepository;
+    private IntelligenceEventLogRepository intelligenceEventLogRepository;
 
     @Mock
     private AuditService auditService;
@@ -42,7 +42,7 @@ class ActionDefinitionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ActionDefinitionService(actionDefinitionRepository, actionRunRepository, auditService);
+        service = new ActionDefinitionService(actionDefinitionRepository, intelligenceEventLogRepository, auditService);
     }
 
     // ── Create Tests ──
@@ -273,11 +273,11 @@ class ActionDefinitionServiceTest {
     class Delete {
 
         @Test
-        void noActionRuns_deletesSuccessfully() {
+        void noIntelligenceEvents_deletesSuccessfully() {
             UUID id = UUID.randomUUID();
             ActionDefinition actionDef = buildExistingActionDef(id);
             when(actionDefinitionRepository.findById(id)).thenReturn(Optional.of(actionDef));
-            when(actionRunRepository.existsByActionDefinitionId(id)).thenReturn(false);
+            when(intelligenceEventLogRepository.existsByActionDefinitionId(id)).thenReturn(false);
 
             service.deleteActionDefinition(id);
 
@@ -285,15 +285,15 @@ class ActionDefinitionServiceTest {
         }
 
         @Test
-        void withActionRuns_throwsIllegalState() {
+        void withIntelligenceEvents_throwsIllegalState() {
             UUID id = UUID.randomUUID();
             ActionDefinition actionDef = buildExistingActionDef(id);
             when(actionDefinitionRepository.findById(id)).thenReturn(Optional.of(actionDef));
-            when(actionRunRepository.existsByActionDefinitionId(id)).thenReturn(true);
+            when(intelligenceEventLogRepository.existsByActionDefinitionId(id)).thenReturn(true);
 
             IllegalStateException ex = assertThrows(IllegalStateException.class,
                     () -> service.deleteActionDefinition(id));
-            assertTrue(ex.getMessage().contains("existing action runs"));
+            assertTrue(ex.getMessage().contains("existing intelligence events"));
 
             verify(actionDefinitionRepository, never()).delete(any());
         }

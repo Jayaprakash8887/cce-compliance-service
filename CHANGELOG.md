@@ -13,21 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `IntelligenceActionEvaluator` — core engine evaluating PlanDefinition intelligence actions on deviation detection and step completion
 - Intelligence action extraction from nested `PlanDefinition.action.action[]` with condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and target extensions
 - `IntelligenceTriggerProducer` — publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` Kafka topic (fire-and-forget, keyed by protocolInstanceId)
-- `ActionRun` + `ActionRunContext` entities tracking each intelligence action execution with status lifecycle (TRIGGERED → PUBLISHED)
+- `IntelligenceEventLog` entity recording each intelligence action execution with evaluation context and Kafka event payload
 - `ActionDefinition` entity for FHIR `ActivityDefinition` resources — CRUD operations via `ActionDefinitionService`
-- Flyway V2 migration: `action_definition`, `action_run`, `action_run_context` tables with indexes, constraints, and foreign keys
+- Flyway V2 migration: `action_definition`, `intelligence_event_log` tables with indexes
 
 #### New Enums
 - `ActionDefinitionStatus` (ACTIVE, RETIRED)
 - `ActionType` (CommunicationRequest, Task, ServiceRequest)
 - `IntelligenceSeverity` (LOW, MEDIUM, HIGH, CRITICAL)
 - `IntelligenceTarget` (PATIENT, ASSIGNED_WORKER, SUPERVISOR, FACILITY)
-- `ActionRunStatus` (TRIGGERED, PUBLISHED, FAILED, CANCELLED)
 
 #### REST API
 - `ActionDefinitionController` — 6 endpoints: POST create, GET list (filter by status), GET by ID, PUT update, POST retire, DELETE
-- `ActionRunController` — 2 endpoints: GET list (filter by protocolInstanceId, actionDefinitionId, status), GET by ID (includes embedded ActionRunContext)
-- DTOs: `ActionDefinitionDto`, `ActionRunDto`, `ActionRunContextDto`
+- `IntelligenceEventLogController` — 2 endpoints: GET list (filter by protocolInstanceId, actionDefinitionId, published), GET by ID
+- DTOs: `ActionDefinitionDto`, `IntelligenceEventLogDto`
 
 #### Observability
 - `cce.intelligence.actions.evaluated` counter — total intelligence action conditions evaluated
@@ -44,8 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Performance Optimizations
-- `ActionRunRepository` — added `@EntityGraph` fetch queries (`findWithGraphBy*`) to eliminate N+1 lazy loading on ActionRun list/detail endpoints
-- `ActionRunService` — uses eager-fetch repository methods for all DTO-facing queries
 - `IntelligenceActionEvaluator` — bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects, avoiding FHIR re-parsing on every deviation/completion evaluation
 - `PlanDefinitionParser.ActionMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
 

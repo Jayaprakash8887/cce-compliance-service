@@ -15,9 +15,8 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.enums.*;
-import org.openphc.cce.compliance.domain.repository.ActionRunContextRepository;
-import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
+import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -41,12 +40,11 @@ class IntelligenceActionEvaluatorTest {
     @Mock private ExpressionEvaluationService expressionEvaluationService;
     @Mock private ActionDefinitionService actionDefinitionService;
     @Mock private IntelligenceTriggerProducer intelligenceTriggerProducer;
-    @Mock private ActionRunRepository actionRunRepository;
-    @Mock private ActionRunContextRepository actionRunContextRepository;
+    @Mock private IntelligenceEventLogRepository intelligenceEventLogRepository;
     @Mock private DeviationRepository deviationRepository;
 
     private IntelligenceActionEvaluator evaluator;
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
     private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
@@ -55,7 +53,7 @@ class IntelligenceActionEvaluatorTest {
         evaluator = new IntelligenceActionEvaluator(
                 planDefinitionParser, expressionEvaluationService,
                 actionDefinitionService, intelligenceTriggerProducer,
-                actionRunRepository, actionRunContextRepository,
+                intelligenceEventLogRepository,
                 deviationRepository, objectMapper, meterRegistry, 256);
     }
 
@@ -65,7 +63,7 @@ class IntelligenceActionEvaluatorTest {
     class EvaluateOnDeviation {
 
         @Test
-        void matchingAction_createsActionRunAndPublishesEvent() {
+        void matchingAction_createsEventLogAndPublishesEvent() {
             StepInstance step = buildStep("bp-check", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
             ActionDefinition actionDef = buildActionDefinition();
@@ -79,32 +77,28 @@ class IntelligenceActionEvaluatorTest {
                     .thenReturn(true);
             when(actionDefinitionService.resolveByCanonical("http://openphc.org/ActivityDefinition/alert|1.0"))
                     .thenReturn(actionDef);
-            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
-                ActionRun ar = i.getArgument(0);
-                if (ar.getId() == null) ar.setId(UUID.randomUUID());
-                return ar;
+            when(intelligenceEventLogRepository.save(any(IntelligenceEventLog.class))).thenAnswer(i -> {
+                IntelligenceEventLog log = i.getArgument(0);
+                if (log.getId() == null) log.setId(UUID.randomUUID());
+                return log;
             });
             when(intelligenceTriggerProducer.publish(any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
-            // ActionRun created and published
+            // Event log created and published
             assertEquals(1, result.size());
-            ActionRun actionRun = result.get(0);
-            assertEquals(ActionRunStatus.PUBLISHED, actionRun.getStatus());
-            assertNotNull(actionRun.getIntelligenceEventId());
+            IntelligenceEventLog eventLog = result.get(0);
+            assertTrue(eventLog.isPublished());
+            assertNotNull(eventLog.getPublishedAt());
 
-            // Evaluation context saved separately
-            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
-            verify(actionRunContextRepository).save(ctxCaptor.capture());
-            ActionRunContext ctx = ctxCaptor.getValue();
-            assertEquals("bp-high-alert", ctx.getStepActionId());
-            assertEquals("overdue", ctx.getTriggerReason());
-            assertEquals(expr, ctx.getEvaluationExpression());
-            assertNotNull(ctx.getEvaluationContext());
-            assertEquals(actionRun, ctx.getActionRun());
-            assertEquals(deviation, ctx.getDeviation());
+            // Audit context stored directly on the event log
+            assertEquals("bp-high-alert", eventLog.getStepActionId());
+            assertEquals("overdue", eventLog.getTriggerReason());
+            assertEquals(expr, eventLog.getEvaluationExpression());
+            assertNotNull(eventLog.getEvaluationContext());
+            assertEquals(deviation.getId(), eventLog.getDeviationId());
 
             // Event published correctly
             ArgumentCaptor<IntelligenceTriggerEvent> eventCaptor =
@@ -122,12 +116,12 @@ class IntelligenceActionEvaluatorTest {
             verify(deviationRepository).save(deviation);
             assertNotNull(deviation.getIntelligenceEventId());
 
-            // ActionRun saved twice (TRIGGERED → PUBLISHED)
-            verify(actionRunRepository, times(2)).save(any(ActionRun.class));
+            // Event log saved twice (unpublished → published)
+            verify(intelligenceEventLogRepository, times(2)).save(any(IntelligenceEventLog.class));
         }
 
         @Test
-        void nonMatchingAction_noActionRunCreated() {
+        void nonMatchingAction_noEventLogCreated() {
             StepInstance step = buildStep("bp-check", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
@@ -139,11 +133,10 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
                     .thenReturn(false);
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertTrue(result.isEmpty());
-            verify(actionRunRepository, never()).save(any());
-            verify(actionRunContextRepository, never()).save(any());
+            verify(intelligenceEventLogRepository, never()).save(any());
             verify(intelligenceTriggerProducer, never()).publish(any());
         }
 
@@ -168,24 +161,21 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(eq("text/fhirpath"), eq("true"), any()))
                     .thenReturn(true);
             when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
-            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
-                ActionRun ar = i.getArgument(0);
-                if (ar.getId() == null) ar.setId(UUID.randomUUID());
-                return ar;
+            when(intelligenceEventLogRepository.save(any(IntelligenceEventLog.class))).thenAnswer(i -> {
+                IntelligenceEventLog log = i.getArgument(0);
+                if (log.getId() == null) log.setId(UUID.randomUUID());
+                return log;
             });
             when(intelligenceTriggerProducer.publish(any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertEquals(2, result.size());
 
-            // Context saved for each fired action
-            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
-            verify(actionRunContextRepository, times(2)).save(ctxCaptor.capture());
-            List<ActionRunContext> contexts = ctxCaptor.getAllValues();
-            assertEquals("bp-high-alert", contexts.get(0).getStepActionId());
-            assertEquals("bp-critical-escalation", contexts.get(1).getStepActionId());
+            // Audit context stored directly on each event log
+            assertEquals("bp-high-alert", result.get(0).getStepActionId());
+            assertEquals("bp-critical-escalation", result.get(1).getStepActionId());
 
             verify(intelligenceTriggerProducer, times(2)).publish(any());
         }
@@ -204,11 +194,10 @@ class IntelligenceActionEvaluatorTest {
             when(actionDefinitionService.resolveByCanonical("http://openphc.org/ActivityDefinition/missing|1.0"))
                     .thenThrow(new EntityNotFoundException("not found"));
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertTrue(result.isEmpty());
-            verify(actionRunRepository, never()).save(any());
-            verify(actionRunContextRepository, never()).save(any());
+            verify(intelligenceEventLogRepository, never()).save(any());
         }
 
         @Test
@@ -218,7 +207,7 @@ class IntelligenceActionEvaluatorTest {
 
             mockParserReturnsIntelligenceActions(step, List.of());
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertTrue(result.isEmpty());
             verify(expressionEvaluationService, never()).evaluate(anyString(), anyString(), any());
@@ -261,7 +250,7 @@ class IntelligenceActionEvaluatorTest {
     class EvaluateOnCompletion {
 
         @Test
-        void completionWithMatchingAction_createsActionRun() {
+        void completionWithMatchingAction_createsEventLog() {
             StepInstance step = buildStep("bp-check", StepState.COMPLETED);
             step.setCompletedAt(OffsetDateTime.now(ZoneOffset.UTC));
             step.setCompletionStatus(CompletionStatus.LATE);
@@ -275,24 +264,23 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
                     .thenReturn(true);
             when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
-            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
-                ActionRun ar = i.getArgument(0);
-                if (ar.getId() == null) ar.setId(UUID.randomUUID());
-                return ar;
+            when(intelligenceEventLogRepository.save(any(IntelligenceEventLog.class))).thenAnswer(i -> {
+                IntelligenceEventLog log = i.getArgument(0);
+                if (log.getId() == null) log.setId(UUID.randomUUID());
+                return log;
             });
             when(intelligenceTriggerProducer.publish(any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
 
-            List<ActionRun> result = evaluator.evaluateOnCompletion(step);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnCompletion(step);
 
             assertEquals(1, result.size());
 
-            // Context saved with correct trigger reason and deviation
-            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
-            verify(actionRunContextRepository).save(ctxCaptor.capture());
-            assertEquals("completion", ctxCaptor.getValue().getTriggerReason());
-            assertEquals("late-notify", ctxCaptor.getValue().getStepActionId());
-            assertNull(ctxCaptor.getValue().getDeviation());
+            // Audit context stored directly on the event log with correct trigger reason
+            IntelligenceEventLog eventLog = result.get(0);
+            assertEquals("completion", eventLog.getTriggerReason());
+            assertEquals("late-notify", eventLog.getStepActionId());
+            assertNull(eventLog.getDeviationId());
 
             // No deviation to update
             verify(deviationRepository, never()).save(any());
@@ -332,7 +320,7 @@ class IntelligenceActionEvaluatorTest {
 
             mockParserReturnsIntelligenceActions(step, List.of());
 
-            List<ActionRun> result = evaluator.evaluateOnCompletion(step);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnCompletion(step);
 
             assertTrue(result.isEmpty());
         }
@@ -355,11 +343,10 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
                     .thenThrow(new RuntimeException("parse error"));
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertTrue(result.isEmpty());
-            verify(actionRunRepository, never()).save(any());
-            verify(actionRunContextRepository, never()).save(any());
+            verify(intelligenceEventLogRepository, never()).save(any());
         }
 
         @Test
@@ -373,7 +360,7 @@ class IntelligenceActionEvaluatorTest {
                     new PlanDefinitionParser.ActionMetadata("other-action", "Other",
                             List.of(), List.of(), null, null, null, List.of())));
 
-            List<ActionRun> result = evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
             assertTrue(result.isEmpty());
         }
@@ -393,10 +380,10 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
                     .thenReturn(true);
             when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
-            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
-                ActionRun ar = i.getArgument(0);
-                if (ar.getId() == null) ar.setId(UUID.randomUUID());
-                return ar;
+            when(intelligenceEventLogRepository.save(any(IntelligenceEventLog.class))).thenAnswer(i -> {
+                IntelligenceEventLog log = i.getArgument(0);
+                if (log.getId() == null) log.setId(UUID.randomUUID());
+                return log;
             });
             when(intelligenceTriggerProducer.publish(any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
@@ -421,19 +408,18 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(anyString(), anyString(), any()))
                     .thenReturn(true);
             when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
-            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
-                ActionRun ar = i.getArgument(0);
-                if (ar.getId() == null) ar.setId(UUID.randomUUID());
-                return ar;
+            when(intelligenceEventLogRepository.save(any(IntelligenceEventLog.class))).thenAnswer(i -> {
+                IntelligenceEventLog log = i.getArgument(0);
+                if (log.getId() == null) log.setId(UUID.randomUUID());
+                return log;
             });
             when(intelligenceTriggerProducer.publish(any()))
                     .thenReturn(CompletableFuture.completedFuture(null));
 
-            evaluator.evaluateOnDeviation(step, deviation);
+            List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
-            ArgumentCaptor<ActionRunContext> ctxCaptor = ArgumentCaptor.forClass(ActionRunContext.class);
-            verify(actionRunContextRepository).save(ctxCaptor.capture());
-            JsonNode evalCtx = ctxCaptor.getValue().getEvaluationContext();
+            assertEquals(1, result.size());
+            JsonNode evalCtx = result.get(0).getEvaluationContext();
             assertNotNull(evalCtx);
             assertEquals("overdue", evalCtx.get("stepState").asText());
             assertEquals("overdue", evalCtx.get("deviationType").asText());
@@ -484,10 +470,10 @@ class IntelligenceActionEvaluatorTest {
             when(expressionEvaluationService.evaluate(eq("text/jsonlogic"), eq("{\"==\": [1, 0]}"), any()))
                     .thenReturn(false);
             when(actionDefinitionService.resolveByCanonical(anyString())).thenReturn(actionDef);
-            when(actionRunRepository.save(any(ActionRun.class))).thenAnswer(i -> {
-                ActionRun ar = i.getArgument(0);
-                if (ar.getId() == null) ar.setId(UUID.randomUUID());
-                return ar;
+            when(intelligenceEventLogRepository.save(any(IntelligenceEventLog.class))).thenAnswer(i -> {
+                IntelligenceEventLog log = i.getArgument(0);
+                if (log.getId() == null) log.setId(UUID.randomUUID());
+                return log;
             });
             when(intelligenceTriggerProducer.publish(any()))
                     .thenReturn(CompletableFuture.completedFuture(null));

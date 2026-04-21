@@ -18,11 +18,10 @@
 8. [event_log](#8-event_log)
 9. [audit_log](#9-audit_log)
 10. [action_definition](#10-action_definition)
-11. [action_run](#11-action_run)
-12. [action_run_context](#12-action_run_context)
-13. [Enumerated Value Reference](#13-enumerated-value-reference)
-14. [Relationships & Foreign Keys](#14-relationships--foreign-keys)
-15. [JSONB Column Schemas](#15-jsonb-column-schemas)
+11. [intelligence_event_log](#11-intelligence_event_log)
+12. [Enumerated Value Reference](#12-enumerated-value-reference)
+13. [Relationships & Foreign Keys](#13-relationships--foreign-keys)
+14. [JSONB Column Schemas](#14-jsonb-column-schemas)
 
 ---
 
@@ -34,10 +33,7 @@ erDiagram
     PROTOCOL_DEFINITION ||--o{ TRIGGER_INDEX : "indexed by"
     PROTOCOL_INSTANCE ||--o{ STEP_INSTANCE : "contains"
     PROTOCOL_INSTANCE ||--o{ DEVIATION : "has"
-    PROTOCOL_INSTANCE ||--o{ ACTION_RUN : "tracks"
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
-    STEP_INSTANCE ||--o{ ACTION_RUN : "triggers"
-    ACTION_DEFINITION ||--o{ ACTION_RUN : "defines"
 
     PROTOCOL_DEFINITION {
         uuid id PK
@@ -142,31 +138,26 @@ erDiagram
         timestamptz updated_at
     }
 
-    ACTION_RUN {
+    INTELLIGENCE_EVENT_LOG {
         uuid id PK
-        uuid action_definition_id FK
-        uuid protocol_instance_id FK
-        uuid step_instance_id FK
-        varchar status
-        uuid intelligence_event_id
-        jsonb output_metadata
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    ACTION_RUN_CONTEXT {
-        uuid id PK
-        uuid action_run_id FK
-        uuid deviation_id FK
+        jsonb event_payload
+        uuid action_definition_id
+        uuid protocol_instance_id
+        uuid step_instance_id
+        uuid deviation_id
+        varchar subject
+        varchar action_type
+        varchar intelligence_channel
+        varchar step_state
         varchar trigger_reason
         varchar step_action_id
         text evaluation_expression
         jsonb evaluation_context
+        boolean published
+        timestamptz published_at
+        text error_message
         timestamptz created_at
     }
-
-    ACTION_RUN ||--|| ACTION_RUN_CONTEXT : "has context"
-    DEVIATION ||--o{ ACTION_RUN_CONTEXT : "produces"
 ```
 
 > **Note:** The `scheduler_lease` table is owned and managed by the CCE Scheduler Service and is not shown in this ERD. See [Architecture Overview §1.1](architecture-overview.md#11-scheduler-service-contract) for the Scheduler Service interaction model.
@@ -185,8 +176,7 @@ erDiagram
 | 6 | `event_log` | Immutable log of all inbound CloudEvents and their processing outcomes | High (every event) |
 | 7 | `audit_log` | System and user audit trail | Medium–High |
 | 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence actions | Low (tens) |
-| 9 | `action_run` | Intelligence action execution records | Medium–High |
-| 10 | `action_run_context` | Evaluation context for intelligence action runs (why the action fired) | Medium–High (1:1 with action_run) |
+| 9 | `intelligence_event_log` | Intelligence action execution and evaluation context (flat, no FKs) | Medium–High |
 ---
 
 ## 3. protocol_definition
@@ -513,69 +503,51 @@ The **canonical reference** is `canonical_url|version` (e.g., `ActivityDefinitio
 
 ---
 
-## 11. action_run
+## 11. intelligence_event_log
 
-Records each execution of an **intelligence action** (`PlanDefinition.action.action`). Created when an intelligence action's condition evaluates to `true` on deviation detection or step completion. Tracks the execution lifecycle from trigger to Kafka publication. Evaluation context (why the action fired) is stored separately in `action_run_context`.
-
-### Columns
-
-| Column | Data Type | Nullable | Default | Description |
-|--------|-----------|----------|---------|-------------|
-| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
-| `action_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `action_definition.id`. The action definition that was executed. |
-| `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. The patient's protocol journey. |
-| `step_instance_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. The step that triggered the action. `NULL` for protocol-level actions. |
-| `status` | `VARCHAR` | **NOT NULL** | — | Execution status. See [ActionRunStatus](#actionrunstatus). |
-| `intelligence_event_id` | `UUID` | Yes | — | UUID of the published `IntelligenceTriggerEvent` on Kafka. Populated on successful publish. |
-| `output_metadata` | `JSONB` | Yes | — | Action-specific output context. See [JSONB: action_run output_metadata](#action_run--output_metadata). |
-| `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
-| `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
-
-### Constraints & Indexes
-
-| Type | Name | Details |
-|------|------|---------|  
-| Primary Key | `action_run_pkey` | `id` |
-| Foreign Key | `action_run_action_definition_id_fkey` | `action_definition_id` → `action_definition(id)` |
-| Foreign Key | `action_run_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
-| Foreign Key | `action_run_step_instance_id_fkey` | `step_instance_id` → `step_instance(id)` |
-| Check | — | `status IN ('TRIGGERED', 'PUBLISHED', 'FAILED', 'CANCELLED')` |
-| B-tree Index | `idx_action_run_protocol_instance` | `protocol_instance_id` — All runs for a protocol instance. |
-| B-tree Index | `idx_action_run_action_definition` | `action_definition_id` — All runs for an action definition. |
-| B-tree Index | `idx_action_run_status` | `status` — Filter by execution status. |
-| Partial B-tree | `idx_action_run_step_instance` | `step_instance_id WHERE step_instance_id IS NOT NULL` |
-
----
-
-## 12. action_run_context
-
-Stores the **evaluation context** for each intelligence action run — why the action was triggered, which PlanDefinition intelligence action's condition matched, and the runtime variables that were evaluated. Separated from `action_run` because the action execution itself has no dependency on the evaluation context; this data exists for diagnostic insights and auditability.
+Records each execution of an **intelligence action** (`PlanDefinition.action.action`) in a single flat row. Created when an intelligence action's condition evaluates to `true` on deviation detection or step completion. Combines the action execution record and its evaluation context (trigger reason, expression, runtime variables) into one table — no foreign key constraints, just plain UUID columns for full decoupling. The `event_payload` JSONB column stores the complete `IntelligenceTriggerEvent` published to Kafka, and the `published` boolean tracks whether the event was successfully sent.
 
 ### Columns
 
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
-| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
-| `action_run_id` | `UUID` | **NOT NULL** | — | Foreign key → `action_run.id`. One-to-one relationship. |
-| `deviation_id` | `UUID` | Yes | — | Foreign key → `deviation.id`. The deviation that triggered the action. `NULL` for completion-triggered actions. |
+| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. Maps to `actionRunId` in `IntelligenceTriggerEvent` for backward compatibility. |
+| `event_payload` | `JSONB` | **NOT NULL** | — | Complete `IntelligenceTriggerEvent` published to Kafka. See [JSONB: intelligence_event_log event_payload](#intelligence_event_log--event_payload). |
+| `action_definition_id` | `UUID` | **NOT NULL** | — | ActionDefinition that was resolved and triggered. Plain UUID (no FK constraint). |
+| `protocol_instance_id` | `UUID` | **NOT NULL** | — | The patient's protocol journey. Plain UUID (no FK constraint). |
+| `step_instance_id` | `UUID` | Yes | — | The step that triggered the action. `NULL` for protocol-level actions. |
+| `deviation_id` | `UUID` | Yes | — | The deviation that triggered the action. `NULL` for completion-triggered actions. |
+| `subject` | `VARCHAR` | **NOT NULL** | — | Patient identifier (UPID). Denormalized for direct queries. |
+| `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`). |
+| `intelligence_channel` | `VARCHAR` | Yes | — | Intelligence channel from PlanDefinition override or ActionDefinition. |
+| `step_state` | `VARCHAR` | Yes | — | Step state at time of evaluation (e.g., `overdue`, `missed`, `completed`). |
 | `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this action was evaluated: `overdue`, `missed`, `completion`. |
 | `step_action_id` | `VARCHAR` | Yes | — | The PlanDefinition intelligence action ID that fired (e.g., `bp-high-alert`). |
 | `evaluation_expression` | `TEXT` | Yes | — | The condition expression that was evaluated (for debugging/audit). |
-| `evaluation_context` | `JSONB` | Yes | — | Runtime variables passed to the expression evaluator. See [JSONB: action_run_context evaluation_context](#action_run_context--evaluation_context). |
+| `evaluation_context` | `JSONB` | Yes | — | Runtime variables passed to the expression evaluator. See [JSONB: intelligence_event_log evaluation_context](#intelligence_event_log--evaluation_context). |
+| `published` | `BOOLEAN` | **NOT NULL** | `false` | Whether the event was successfully published to Kafka. |
+| `published_at` | `TIMESTAMPTZ` | Yes | — | Timestamp of successful Kafka publish. `NULL` until published. |
+| `error_message` | `TEXT` | Yes | — | Error message if Kafka publish failed. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 
 ### Constraints & Indexes
 
 | Type | Name | Details |
-|------|------|---------|  
-| Primary Key | `action_run_context_pkey` | `id` |
-| Foreign Key | `action_run_context_action_run_id_fkey` | `action_run_id` → `action_run(id)` |
-| Foreign Key | `action_run_context_deviation_id_fkey` | `deviation_id` → `deviation(id)` |
-| Unique | `action_run_context_action_run_id_unique` | `action_run_id` — Enforces 1:1 relationship. |
-| B-tree Index | `idx_action_run_context_action_run` | `action_run_id` |
-| Partial B-tree | `idx_action_run_context_deviation` | `deviation_id WHERE deviation_id IS NOT NULL` |
+|------|------|---------|
+| Primary Key | `intelligence_event_log_pkey` | `id` |
+| B-tree Index | `idx_intel_event_log_action_definition` | `action_definition_id` — All events for an action definition. |
+| B-tree Index | `idx_intel_event_log_protocol_instance` | `protocol_instance_id` — All events for a protocol instance. |
+| Partial B-tree | `idx_intel_event_log_step_instance` | `step_instance_id WHERE step_instance_id IS NOT NULL` |
+| B-tree Index | `idx_intel_event_log_subject` | `subject` — Patient-centric intelligence event queries. |
+| Partial B-tree | `idx_intel_event_log_published` | `published WHERE published = false` — Find unpublished events for retry. |
 
-## 13. Enumerated Value Reference
+### Design Notes
+
+- **No FK constraints:** All UUID columns (`action_definition_id`, `protocol_instance_id`, `step_instance_id`, `deviation_id`) are plain UUIDs with no foreign key references. This decouples the intelligence event log from the core compliance tables and keeps the JPA entity flat.
+- **Fat event pattern:** The `event_payload` JSONB column stores the complete Kafka event, making each row self-contained. Consumers of the REST API can see exactly what was published without joining other tables.
+- **`published` boolean:** A simple boolean tracks whether the event was successfully sent to Kafka.
+
+## 12. Enumerated Value Reference
 
 ### ProtocolDefinitionStatus
 
@@ -641,7 +613,7 @@ Stores the **evaluation context** for each intelligence action run — why the a
 | Value | Description |
 |-------|-------------|
 | `ACTIVE` | Action definition available for intelligence action execution. |
-| `RETIRED` | Deactivated. Existing action runs unaffected but no new runs created. |
+| `RETIRED` | Deactivated. Existing intelligence events unaffected but no new events created. |
 
 ### ActionType
 
@@ -673,18 +645,9 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 | `SUPERVISOR` | Directed to the supervisor. |
 | `FACILITY` | Directed to the healthcare facility. |
 
-### ActionRunStatus
-
-| Value | Description |
-|-------|-------------|
-| `TRIGGERED` | Rule condition evaluated to true. ActionRun created. |
-| `PUBLISHED` | Intelligence event successfully published to Kafka. |
-| `FAILED` | Intelligence event publish failed. |
-| `CANCELLED` | ActionRun cancelled (e.g., protocol withdrawn before publish). |
-
 ---
 
-## 14. Relationships & Foreign Keys
+## 13. Relationships & Foreign Keys
 
 | Parent Table | Child Table | FK Column | Cascade | Description |
 |-------------|-------------|-----------|---------|-------------|
@@ -693,17 +656,15 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 | `protocol_instance` | `step_instance` | `protocol_instance_id` | JPA `CascadeType.ALL` | Steps fully managed by parent. |
 | `protocol_instance` | `deviation` | `protocol_instance_id` | JPA `CascadeType.ALL` | Deviations fully managed by parent. |
 | `step_instance` | `deviation` | `step_instance_id` | No cascade (DB level) | Reference only; not cascade-deleted. |
-| `action_definition` | `action_run` | `action_definition_id` | No cascade | Deletion prevented if action runs exist. |
-| `protocol_instance` | `action_run` | `protocol_instance_id` | No cascade (DB level) | Reference only. |
-| `step_instance` | `action_run` | `step_instance_id` | No cascade (DB level) | Nullable reference. |
-| `action_run` | `action_run_context` | `action_run_id` | No cascade | 1:1 evaluation context. Unique constraint enforces single context per run. |
-| `deviation` | `action_run_context` | `deviation_id` | No cascade (DB level) | Nullable reference. Context-only; the deviation that triggered evaluation. |
+| `action_definition` | `intelligence_event_log` | `action_definition_id` | No FK constraint | Plain UUID; delete guard in application code. |
+
+> **Note:** The `intelligence_event_log` table uses plain UUID columns with no foreign key constraints. Referential integrity for `action_definition_id`, `protocol_instance_id`, `step_instance_id`, and `deviation_id` is enforced at the application level.
 
 
 
 ---
 
-## 15. JSONB Column Schemas
+## 14. JSONB Column Schemas
 
 ### protocol_definition — `definition`
 
@@ -828,41 +789,30 @@ The `definition` column stores the complete FHIR R4 ActivityDefinition resource.
 }
 ```
 
-### action_run — `output_metadata`
+### intelligence_event_log — `event_payload`
 
-Contains context information resolved at rule execution time. Used for downstream intelligence event routing and template variable resolution.
-
-| Field | Type | Presence | Description |
-|-------|------|----------|-------------|
-| `patientId` | String | Always | Patient UPID |
-| `actionId` | String | Always | Step definition action ID |
-| `protocolCanonical` | String | Always | Protocol `url\|version` |
-| `facilityId` | String | When available | Healthcare facility FOSA ID |
-| `severity` | String | Always | Resolved severity (`low`, `medium`, `high`, `critical`) |
-| `target` | String | Always | Resolved target (`patient`, `assigned_worker`, `supervisor`, `facility`) |
-| `actionType` | String | Always | FHIR `kind` value from ActionDefinition (`CommunicationRequest`, `Task`, `ServiceRequest`) |
-| `stepState` | String | Always | Current step state at time of rule evaluation |
-| `deviationType` | String | When deviation | `overdue` or `missed` |
-| `daysOverdue` | Long | When overdue | Days past due date |
-
-**Example:**
+The `event_payload` column stores the complete `IntelligenceTriggerEvent` published to Kafka. This is the "fat event" — a self-contained record of exactly what was sent.
 
 ```json
 {
-  "patientId": "260225-0002-5501",
-  "actionId": "anc-visit-2",
-  "protocolCanonical": "http://openphc.org/fhir/PlanDefinition/anc-high-risk|2.1",
-  "facilityId": "0002",
-  "severity": "high",
-  "target": "supervisor",
+  "id": "550e8400-e29b-41d4-a716-446655440099",
+  "subject": "260225-0002-5501",
+  "actionRunId": "770e8400-e29b-41d4-a716-446655440000",
+  "actionDefinitionId": "aad00001-0001-0001-0001-000000000001",
+  "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
   "actionType": "CommunicationRequest",
+  "severity": "HIGH",
+  "intelligenceChannel": "supervisor",
   "stepState": "overdue",
-  "deviationType": "overdue",
-  "daysOverdue": 5
+  "actionId": "viral-load-check",
+  "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
+  "detectedAt": "2026-03-25T00:00:05Z"
 }
 ```
 
-### action_run_context — `evaluation_context`
+> **Note:** The `actionRunId` field in the event payload maps to the `intelligence_event_log.id` (the row's primary key). This field name is kept for backward compatibility with the Intelligence Service consumer.
+
+### intelligence_event_log — `evaluation_context`
 
 Captures the full runtime variable map that was passed to the condition expression evaluator. Contents vary by trigger reason.
 

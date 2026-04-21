@@ -242,7 +242,7 @@ class ActionDefinitionControllerTest {
     // --- DELETE /{id} ---
 
     @Test
-    void delete_noActionRuns_returns204() throws Exception {
+    void delete_noIntelligenceEvents_returns204() throws Exception {
         doNothing().when(actionDefinitionService).deleteActionDefinition(ACTION_DEF_ID);
 
         mockMvc.perform(delete("/v1/compliance/action-definitions/{id}", ACTION_DEF_ID))
@@ -252,15 +252,15 @@ class ActionDefinitionControllerTest {
     }
 
     @Test
-    void delete_withActionRuns_returns409() throws Exception {
+    void delete_withIntelligenceEvents_returns409() throws Exception {
         doThrow(new IllegalStateException(
-                "Cannot delete action definition with existing action runs: " + ACTION_DEF_ID))
+                "Cannot delete action definition with existing intelligence events: " + ACTION_DEF_ID))
                 .when(actionDefinitionService).deleteActionDefinition(ACTION_DEF_ID);
 
         mockMvc.perform(delete("/v1/compliance/action-definitions/{id}", ACTION_DEF_ID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
-                        "Cannot delete action definition with existing action runs: " + ACTION_DEF_ID));
+                        "Cannot delete action definition with existing intelligence events: " + ACTION_DEF_ID));
     }
 
     @Test

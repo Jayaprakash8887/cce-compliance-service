@@ -3,7 +3,7 @@
 -- ==============================================================================
 -- Flyway Migration: V2
 -- Database: PostgreSQL 16
--- Adds: action_definition, action_run, action_run_context
+-- Adds: action_definition, intelligence_event_log
 -- ==============================================================================
 
 -- =============================================
@@ -33,53 +33,44 @@ CREATE INDEX idx_action_definition_status ON action_definition (status) WHERE st
 CREATE INDEX idx_action_definition_canonical ON action_definition (canonical_url);
 
 -- =============================================
--- 9. action_run
+-- 9. intelligence_event_log
 -- =============================================
-CREATE TABLE action_run (
+-- Single flat table replacing action_run + action_run_context.
+-- Stores the published event payload (fat event) alongside audit context.
+-- No FK relationships — IDs stored as plain UUIDs for decoupling.
+CREATE TABLE intelligence_event_log (
     id                      UUID            NOT NULL DEFAULT gen_random_uuid(),
+
+    -- Published event payload (self-contained, all data needed for debugging & replay)
+    event_payload           JSONB           NOT NULL,
+
+    -- Denormalized keys for querying (extracted from event)
     action_definition_id    UUID            NOT NULL,
     protocol_instance_id    UUID            NOT NULL,
     step_instance_id        UUID,
-    status                  VARCHAR         NOT NULL,
-    intelligence_event_id   UUID,
-    output_metadata         JSONB,
-    created_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    updated_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
-
-    CONSTRAINT action_run_pkey PRIMARY KEY (id),
-    CONSTRAINT action_run_action_definition_id_fkey
-        FOREIGN KEY (action_definition_id) REFERENCES action_definition(id),
-    CONSTRAINT action_run_protocol_instance_id_fkey
-        FOREIGN KEY (protocol_instance_id) REFERENCES protocol_instance(id),
-    CONSTRAINT action_run_step_instance_id_fkey
-        FOREIGN KEY (step_instance_id) REFERENCES step_instance(id)
-);
-
-CREATE INDEX idx_action_run_protocol_instance ON action_run (protocol_instance_id);
-CREATE INDEX idx_action_run_action_definition ON action_run (action_definition_id);
-CREATE INDEX idx_action_run_status ON action_run (status);
-CREATE INDEX idx_action_run_step_instance ON action_run (step_instance_id) WHERE step_instance_id IS NOT NULL;
-
--- =============================================
--- 10. action_run_context
--- =============================================
-CREATE TABLE action_run_context (
-    id                      UUID            NOT NULL DEFAULT gen_random_uuid(),
-    action_run_id           UUID            NOT NULL,
     deviation_id            UUID,
+    subject                 VARCHAR         NOT NULL,
+    action_type             VARCHAR         NOT NULL,
+    intelligence_channel    VARCHAR         NOT NULL,
+    step_state              VARCHAR         NOT NULL,
+
+    -- Audit context (not in the event — explains why this action fired)
     trigger_reason          VARCHAR         NOT NULL,
     step_action_id          VARCHAR,
     evaluation_expression   TEXT,
     evaluation_context      JSONB,
+
+    -- Lifecycle
+    published               BOOLEAN         NOT NULL DEFAULT FALSE,
+    published_at            TIMESTAMPTZ,
+    error_message           TEXT,
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
-    CONSTRAINT action_run_context_pkey PRIMARY KEY (id),
-    CONSTRAINT action_run_context_action_run_id_fkey
-        FOREIGN KEY (action_run_id) REFERENCES action_run(id),
-    CONSTRAINT action_run_context_deviation_id_fkey
-        FOREIGN KEY (deviation_id) REFERENCES deviation(id),
-    CONSTRAINT action_run_context_action_run_id_unique UNIQUE (action_run_id)
+    CONSTRAINT intelligence_event_log_pkey PRIMARY KEY (id)
 );
 
-CREATE INDEX idx_action_run_context_action_run ON action_run_context (action_run_id);
-CREATE INDEX idx_action_run_context_deviation ON action_run_context (deviation_id) WHERE deviation_id IS NOT NULL;
+CREATE INDEX idx_intelligence_event_log_action_definition ON intelligence_event_log (action_definition_id);
+CREATE INDEX idx_intelligence_event_log_protocol_instance ON intelligence_event_log (protocol_instance_id);
+CREATE INDEX idx_intelligence_event_log_step_instance ON intelligence_event_log (step_instance_id) WHERE step_instance_id IS NOT NULL;
+CREATE INDEX idx_intelligence_event_log_subject ON intelligence_event_log (subject);
+CREATE INDEX idx_intelligence_event_log_published ON intelligence_event_log (published) WHERE published = FALSE;
