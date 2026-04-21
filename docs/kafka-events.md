@@ -305,8 +305,6 @@ Published when an intelligence action fires — triggered by deviation detection
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
   "intelligenceChannel": "supervisor",
-  "facilityId": "0002",
-  "deviationType": "overdue",
   "stepState": "overdue",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
@@ -324,8 +322,6 @@ Published when an intelligence action fires — triggered by deviation detection
 | `actionType` | String | Action type from ActionDefinition (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`) |
 | `severity` | String | Severity from PlanDefinition override or ActionDefinition (e.g., `HIGH`, `MEDIUM`, `LOW`, `CRITICAL`) |
 | `intelligenceChannel` | String | Intelligence channel from PlanDefinition override or ActionDefinition (e.g., `supervisor`, `high_hospital_alert`) |
-| `facilityId` | String | Healthcare facility FOSA ID, extracted from subject UPID |
-| `deviationType` | String | `overdue` or `missed` (null for completion triggers) |
 | `stepState` | String | Current step state (lowercase) |
 | `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |

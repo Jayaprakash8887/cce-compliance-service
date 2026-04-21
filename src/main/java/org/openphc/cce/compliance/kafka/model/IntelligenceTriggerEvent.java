@@ -26,8 +26,6 @@ public class IntelligenceTriggerEvent {
     private String actionType;
     private String severity;
     private String intelligenceChannel;
-    private String facilityId;
-    private String deviationType;
     private String stepState;
     private String actionId;
     private String protocolCanonical;

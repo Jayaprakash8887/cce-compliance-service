@@ -244,8 +244,6 @@ public class IntelligenceActionEvaluator {
                     .actionType(definition.getActionType().name())
                     .severity(severity)
                     .intelligenceChannel(intelligenceChannel)
-                    .facilityId(extractFacilityId(protocol.getPatientId()))
-                    .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
                     .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
@@ -310,15 +308,6 @@ public class IntelligenceActionEvaluator {
         }
 
         return context;
-    }
-
-    /**
-     * Extract facility ID from UPID format: YYMMDD-FFFF-NNNN where FFFF is the facility FOSA code.
-     */
-    private String extractFacilityId(String patientId) {
-        if (patientId == null) return null;
-        String[] parts = patientId.split("-");
-        return parts.length >= 2 ? parts[1] : null;
     }
 
 }

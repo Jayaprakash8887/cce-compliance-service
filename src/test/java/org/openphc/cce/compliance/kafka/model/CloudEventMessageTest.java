@@ -219,8 +219,6 @@ class CloudEventMessageTest {
                 .actionType("CommunicationRequest")
                 .severity("HIGH")
                 .intelligenceChannel("supervisor")
-                .facilityId("0002")
-                .deviationType("overdue")
                 .stepState("overdue")
                 .actionId("viral-load-check")
                 .protocolCanonical("http://example.org/PlanDefinition/hiv-treatment|1.0")
@@ -238,8 +236,6 @@ class CloudEventMessageTest {
         assertEquals("CommunicationRequest", node.get("actionType").asText());
         assertEquals("HIGH", node.get("severity").asText());
         assertEquals("supervisor", node.get("intelligenceChannel").asText());
-        assertEquals("0002", node.get("facilityId").asText());
-        assertEquals("overdue", node.get("deviationType").asText());
         assertEquals("overdue", node.get("stepState").asText());
         assertEquals("viral-load-check", node.get("actionId").asText());
         assertEquals("http://example.org/PlanDefinition/hiv-treatment|1.0", node.get("protocolCanonical").asText());
@@ -254,7 +250,6 @@ class CloudEventMessageTest {
                 .subject("patient-100")
                 .actionRunId(UUID.randomUUID())
                 .actionType("Task")
-                .deviationType("missed")
                 .stepState("missed")
                 .actionId("lab-check")
                 .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
@@ -267,7 +262,6 @@ class CloudEventMessageTest {
         assertFalse(node.has("protocolCanonical"));
         assertFalse(node.has("severity"));
         assertFalse(node.has("intelligenceChannel"));
-        assertFalse(node.has("facilityId"));
         assertFalse(node.has("actionDefinitionId"));
         assertFalse(node.has("protocolDefinitionId"));
         assertFalse(node.has("metadata"));
@@ -285,8 +279,6 @@ class CloudEventMessageTest {
                   "actionType": "CommunicationRequest",
                   "severity": "HIGH",
                   "intelligenceChannel": "supervisor",
-                  "facilityId": "0002",
-                  "deviationType": "overdue",
                   "stepState": "overdue",
                   "actionId": "bp-check",
                   "protocolCanonical": "http://example.org/pd|1.0",
@@ -302,8 +294,6 @@ class CloudEventMessageTest {
         assertEquals("CommunicationRequest", event.getActionType());
         assertEquals("HIGH", event.getSeverity());
         assertEquals("supervisor", event.getIntelligenceChannel());
-        assertEquals("0002", event.getFacilityId());
-        assertEquals("overdue", event.getDeviationType());
         assertEquals("overdue", event.getStepState());
         assertEquals("bp-check", event.getActionId());
         assertEquals("http://example.org/pd|1.0", event.getProtocolCanonical());

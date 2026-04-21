@@ -115,7 +115,6 @@ class IntelligenceActionEvaluatorTest {
             assertEquals(step.getProtocolInstance().getProtocolDefinition().getId(), event.getProtocolDefinitionId());
             assertEquals(actionDef.getActionType().name(), event.getActionType());
             assertNotNull(event.getActionRunId());
-            assertEquals("overdue", event.getDeviationType());
             assertEquals("overdue", event.getStepState());
             assertEquals("bp-check", event.getActionId());
 
