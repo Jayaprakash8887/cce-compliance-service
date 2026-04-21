@@ -50,7 +50,7 @@
               "valueCode": "HIGH"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-channel",
               "valueCode": "ASSIGNED_WORKER"
             }
           ]
@@ -74,7 +74,7 @@
               "valueCode": "CRITICAL"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-channel",
               "valueCode": "SUPERVISOR"
             }
           ]

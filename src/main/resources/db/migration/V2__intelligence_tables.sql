@@ -18,7 +18,7 @@ CREATE TABLE action_definition (
     status              VARCHAR         NOT NULL,
     action_type         VARCHAR         NOT NULL,
     severity            VARCHAR,
-    target              VARCHAR,
+    intelligence_channel VARCHAR,
     definition          JSONB           NOT NULL,
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),

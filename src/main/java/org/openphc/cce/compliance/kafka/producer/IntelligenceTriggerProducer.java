@@ -40,7 +40,7 @@ public class IntelligenceTriggerProducer {
      * @return a CompletableFuture with the send result
      */
     public CompletableFuture<SendResult<String, Object>> publish(IntelligenceTriggerEvent event) {
-        String key = event.getProtocolInstanceId().toString();
+        String key = event.getActionRunId().toString();
 
         Timer.Sample sample = Timer.start();
         CompletableFuture<SendResult<String, Object>> future = kafkaTemplate.send(topic, key, event);
@@ -49,12 +49,12 @@ public class IntelligenceTriggerProducer {
             sample.stop(publishDurationTimer);
             if (ex == null) {
                 publishedCounter.increment();
-                log.info("Published intelligence trigger event: id={}, protocolInstanceId={}, topic={}, partition={}, offset={}",
+                log.info("Published intelligence trigger event: id={}, actionRunId={}, topic={}, partition={}, offset={}",
                         event.getId(), key, topic,
                         result.getRecordMetadata().partition(),
                         result.getRecordMetadata().offset());
             } else {
-                log.error("Failed to publish intelligence trigger event: id={}, protocolInstanceId={}, topic={}",
+                log.error("Failed to publish intelligence trigger event: id={}, actionRunId={}, topic={}",
                         event.getId(), key, topic, ex);
             }
         });

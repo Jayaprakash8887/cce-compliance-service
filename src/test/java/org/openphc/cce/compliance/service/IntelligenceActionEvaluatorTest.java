@@ -111,8 +111,9 @@ class IntelligenceActionEvaluatorTest {
                     ArgumentCaptor.forClass(IntelligenceTriggerEvent.class);
             verify(intelligenceTriggerProducer).publish(eventCaptor.capture());
             IntelligenceTriggerEvent event = eventCaptor.getValue();
-            assertEquals(step.getProtocolInstance().getId(), event.getProtocolInstanceId());
-            assertEquals(step.getId(), event.getStepInstanceId());
+            assertEquals(actionDef.getId(), event.getActionDefinitionId());
+            assertEquals(step.getProtocolInstance().getProtocolDefinition().getId(), event.getProtocolDefinitionId());
+            assertEquals(actionDef.getActionType().name(), event.getActionType());
             assertNotNull(event.getActionRunId());
             assertEquals("overdue", event.getDeviationType());
             assertEquals("overdue", event.getStepState());

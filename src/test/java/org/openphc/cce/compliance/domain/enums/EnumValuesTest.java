@@ -89,15 +89,6 @@ class EnumValuesTest {
     }
 
     @Test
-    void intelligenceTarget_hasCorrectValues() {
-        assertEquals(4, IntelligenceTarget.values().length);
-        assertNotNull(IntelligenceTarget.valueOf("PATIENT"));
-        assertNotNull(IntelligenceTarget.valueOf("ASSIGNED_WORKER"));
-        assertNotNull(IntelligenceTarget.valueOf("SUPERVISOR"));
-        assertNotNull(IntelligenceTarget.valueOf("FACILITY"));
-    }
-
-    @Test
     void actionRunStatus_hasCorrectValues() {
         assertEquals(4, ActionRunStatus.values().length);
         assertNotNull(ActionRunStatus.valueOf("TRIGGERED"));

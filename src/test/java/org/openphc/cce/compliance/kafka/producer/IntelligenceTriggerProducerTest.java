@@ -47,7 +47,7 @@ class IntelligenceTriggerProducerTest {
     @Test
     void publish_success_incrementsCounterAndResolvesFuture() throws Exception {
         IntelligenceTriggerEvent event = buildEvent();
-        String expectedKey = event.getProtocolInstanceId().toString();
+        String expectedKey = event.getActionRunId().toString();
 
         RecordMetadata metadata = new RecordMetadata(
                 new TopicPartition("cce.intelligence.triggers", 3), 0, 42, 0L, 0, 0);
@@ -79,9 +79,9 @@ class IntelligenceTriggerProducerTest {
     }
 
     @Test
-    void publish_usesProtocolInstanceIdAsKey() {
+    void publish_usesActionRunIdAsKey() {
         IntelligenceTriggerEvent event = buildEvent();
-        String expectedKey = event.getProtocolInstanceId().toString();
+        String expectedKey = event.getActionRunId().toString();
 
         CompletableFuture<SendResult<String, Object>> future = new CompletableFuture<>();
         future.completeExceptionally(new RuntimeException("test failure"));
@@ -123,7 +123,7 @@ class IntelligenceTriggerProducerTest {
     void publish_multipleSuccessfulEvents_counterIncrementsCorrectly() {
         for (int i = 0; i < 3; i++) {
             IntelligenceTriggerEvent event = buildEvent();
-            String key = event.getProtocolInstanceId().toString();
+            String key = event.getActionRunId().toString();
 
             RecordMetadata metadata = new RecordMetadata(
                     new TopicPartition("cce.intelligence.triggers", 0), 0, i, 0L, 0, 0);
@@ -144,10 +144,14 @@ class IntelligenceTriggerProducerTest {
     private IntelligenceTriggerEvent buildEvent() {
         return IntelligenceTriggerEvent.builder()
                 .id(UUID.randomUUID())
-                .subject("patient-1")
+                .subject("260225-0002-5501")
                 .actionRunId(UUID.randomUUID())
-                .protocolInstanceId(UUID.randomUUID())
-                .stepInstanceId(UUID.randomUUID())
+                .actionDefinitionId(UUID.randomUUID())
+                .protocolDefinitionId(UUID.randomUUID())
+                .actionType("CommunicationRequest")
+                .severity("HIGH")
+                .intelligenceChannel("supervisor")
+                .facilityId("0002")
                 .deviationType("overdue")
                 .stepState("overdue")
                 .actionId("blood-pressure-check")

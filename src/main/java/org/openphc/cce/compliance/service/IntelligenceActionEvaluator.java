@@ -228,12 +228,23 @@ public class IntelligenceActionEvaluator {
             actionRunContextRepository.save(runContext);
 
             // Publish intelligence trigger event to Kafka
+            String intelligenceChannel = action.intelligenceChannel() != null
+                    ? action.intelligenceChannel()
+                    : definition.getIntelligenceChannel();
+            String severity = action.severity() != null
+                    ? action.severity()
+                    : (definition.getSeverity() != null ? definition.getSeverity().name() : null);
+
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
                     .id(eventId)
                     .subject(protocol.getPatientId())
                     .actionRunId(actionRun.getId())
-                    .protocolInstanceId(protocol.getId())
-                    .stepInstanceId(step.getId())
+                    .actionDefinitionId(definition.getId())
+                    .protocolDefinitionId(protocol.getProtocolDefinition().getId())
+                    .actionType(definition.getActionType().name())
+                    .severity(severity)
+                    .intelligenceChannel(intelligenceChannel)
+                    .facilityId(extractFacilityId(protocol.getPatientId()))
                     .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
                     .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
@@ -299,6 +310,15 @@ public class IntelligenceActionEvaluator {
         }
 
         return context;
+    }
+
+    /**
+     * Extract facility ID from UPID format: YYMMDD-FFFF-NNNN where FFFF is the facility FOSA code.
+     */
+    private String extractFacilityId(String patientId) {
+        if (patientId == null) return null;
+        String[] parts = patientId.split("-");
+        return parts.length >= 2 ? parts[1] : null;
     }
 
 }
