@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
-import org.openphc.cce.compliance.domain.enums.ActionRunStatus;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
 import org.openphc.cce.compliance.domain.enums.StepState;
 import org.openphc.cce.compliance.domain.repository.*;
@@ -36,9 +35,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * End-to-end integration tests for the intelligence pipeline:
  * Event → Match → Enroll → Scheduler transition → Deviation → Intelligence action evaluation
- * → ActionRun created → IntelligenceTriggerEvent published to Kafka
+ * → IntelligenceEventLog created → IntelligenceTriggerEvent published to Kafka
  *
- * Also covers ActionRun API endpoints (GET list + GET by ID).
+ * Also covers Intelligence Event Log API endpoints (GET list + GET by ID).
  */
 class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
 
@@ -61,10 +60,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
     private DeviationRepository deviationRepository;
 
     @Autowired
-    private ActionRunRepository actionRunRepository;
-
-    @Autowired
-    private ActionRunContextRepository actionRunContextRepository;
+    private IntelligenceEventLogRepository intelligenceEventLogRepository;
 
     @Autowired
     private ActionDefinitionService actionDefinitionService;
@@ -150,7 +146,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
     class IntelligenceEvaluation {
 
         @Test
-        void dueToOverdue_evaluatesIntelligenceActions_createsActionRun() throws Exception {
+        void dueToOverdue_evaluatesIntelligenceActions_createsEventLog() throws Exception {
             String patientId = "patient-intel-overdue-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
             UUID protocolInstanceId = protocolInstance.getId();
@@ -192,30 +188,29 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     d.getStepInstance().getId().equals(stepId) &&
                             d.getDeviationType() == DeviationType.OVERDUE);
 
-            // Verify ActionRun was created by intelligence evaluation
+            // Verify IntelligenceEventLog was created by intelligence evaluation
             await().atMost(10, SECONDS).untilAsserted(() -> {
-                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-                assertThat(actionRuns).isNotEmpty();
+                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                assertThat(eventLogs).isNotEmpty();
             });
 
-            var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-            assertThat(actionRuns).hasSize(1);
+            var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+            assertThat(eventLogs).hasSize(1);
 
-            var actionRun = actionRuns.get(0);
-            assertThat(actionRun.getStatus()).isEqualTo(ActionRunStatus.PUBLISHED);
-            assertThat(actionRun.getIntelligenceEventId()).isNotNull();
+            var eventLog = eventLogs.get(0);
+            assertThat(eventLog.isPublished()).isTrue();
+            assertThat(eventLog.getPublishedAt()).isNotNull();
 
-            // Verify full ActionRun details via REST API (avoids LazyInitializationException)
-            mockMvc.perform(get("/v1/compliance/action-runs/{id}", actionRun.getId()))
+            // Verify full event log details via REST API
+            mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", eventLog.getId()))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.status").value("PUBLISHED"))
-                    .andExpect(jsonPath("$.intelligenceEventId").isNotEmpty())
+                    .andExpect(jsonPath("$.published").value(true))
+                    .andExpect(jsonPath("$.eventPayload").isNotEmpty())
                     .andExpect(jsonPath("$.protocolInstanceId").value(protocolInstanceId.toString()))
                     .andExpect(jsonPath("$.stepInstanceId").value(stepId.toString()))
-                    .andExpect(jsonPath("$.context").isNotEmpty())
-                    .andExpect(jsonPath("$.context.triggerReason").value("overdue"))
-                    .andExpect(jsonPath("$.context.stepActionId").value("overdue-escalation"))
-                    .andExpect(jsonPath("$.context.evaluationContext").isNotEmpty());
+                    .andExpect(jsonPath("$.triggerReason").value("overdue"))
+                    .andExpect(jsonPath("$.stepActionId").value("overdue-escalation"))
+                    .andExpect(jsonPath("$.evaluationContext").isNotEmpty());
 
             // Verify deviation.intelligenceEventId was set
             var updatedDeviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
@@ -223,11 +218,10 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .filter(d -> d.getStepInstance().getId().equals(stepId))
                     .findFirst().orElseThrow();
             assertThat(deviation.getIntelligenceEventId()).isNotNull();
-            assertThat(deviation.getIntelligenceEventId()).isEqualTo(actionRun.getIntelligenceEventId());
         }
 
         @Test
-        void overdueToMissed_evaluatesMissedAction_createsActionRun() throws Exception {
+        void overdueToMissed_evaluatesMissedAction_createsEventLog() throws Exception {
             String patientId = "patient-intel-missed-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
             UUID protocolInstanceId = protocolInstance.getId();
@@ -263,25 +257,21 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
 
             // The "missed-critical-alert" intelligence action matches deviationType == "missed"
             await().atMost(10, SECONDS).untilAsserted(() -> {
-                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-                assertThat(actionRuns).isNotEmpty();
+                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                assertThat(eventLogs).isNotEmpty();
             });
 
-            var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-            assertThat(actionRuns).hasSize(1);
+            var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+            assertThat(eventLogs).hasSize(1);
 
-            var actionRun = actionRuns.get(0);
-            assertThat(actionRun.getStatus()).isEqualTo(ActionRunStatus.PUBLISHED);
-            assertThat(actionRun.getIntelligenceEventId()).isNotNull();
-
-            var context = actionRunContextRepository.findByActionRunId(actionRun.getId());
-            assertThat(context).isPresent();
-            assertThat(context.get().getTriggerReason()).isEqualTo("missed");
-            assertThat(context.get().getStepActionId()).isEqualTo("missed-critical-alert");
+            var eventLog = eventLogs.get(0);
+            assertThat(eventLog.isPublished()).isTrue();
+            assertThat(eventLog.getTriggerReason()).isEqualTo("missed");
+            assertThat(eventLog.getStepActionId()).isEqualTo("missed-critical-alert");
         }
 
         @Test
-        void noMatchingIntelligenceAction_noActionRunCreated() throws Exception {
+        void noMatchingIntelligenceAction_noEventLogCreated() throws Exception {
             String patientId = "patient-intel-nomatch-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
 
@@ -315,18 +305,18 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             });
 
             // PENDING→DUE does not create a deviation, so no intelligence actions should fire
-            var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-            assertThat(actionRuns).isEmpty();
+            var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+            assertThat(eventLogs).isEmpty();
         }
     }
 
-    // ── ActionRun API Tests ──
+    // ── Intelligence Event Log API Tests ──
 
     @Nested
-    class ActionRunApi {
+    class IntelligenceEventLogApi {
 
         @Test
-        void getActionRunById_returnsCorrectData() throws Exception {
+        void getEventLogById_returnsCorrectData() throws Exception {
             String patientId = "patient-intel-api-get-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
             UUID protocolInstanceId = protocolInstance.getId();
@@ -355,27 +345,26 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             kafkaTemplate.send(schedulerTopic, trigger);
 
             await().atMost(30, SECONDS).untilAsserted(() -> {
-                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-                assertThat(actionRuns).isNotEmpty();
+                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                assertThat(eventLogs).isNotEmpty();
             });
 
-            var actionRun = actionRunRepository.findByStepInstanceId(stepId).get(0);
+            var eventLog = intelligenceEventLogRepository.findByStepInstanceId(stepId).get(0);
 
             // GET by ID
-            mockMvc.perform(get("/v1/compliance/action-runs/{id}", actionRun.getId()))
+            mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", eventLog.getId()))
                     .andExpect(status().isOk())
-                    .andExpect(jsonPath("$.id").value(actionRun.getId().toString()))
-                    .andExpect(jsonPath("$.status").value("PUBLISHED"))
-                    .andExpect(jsonPath("$.intelligenceEventId").isNotEmpty())
+                    .andExpect(jsonPath("$.id").value(eventLog.getId().toString()))
+                    .andExpect(jsonPath("$.published").value(true))
+                    .andExpect(jsonPath("$.eventPayload").isNotEmpty())
                     .andExpect(jsonPath("$.protocolInstanceId").value(protocolInstanceId.toString()))
                     .andExpect(jsonPath("$.stepInstanceId").value(stepId.toString()))
-                    .andExpect(jsonPath("$.context").isNotEmpty())
-                    .andExpect(jsonPath("$.context.triggerReason").value("overdue"))
-                    .andExpect(jsonPath("$.context.stepActionId").value("overdue-escalation"));
+                    .andExpect(jsonPath("$.triggerReason").value("overdue"))
+                    .andExpect(jsonPath("$.stepActionId").value("overdue-escalation"));
         }
 
         @Test
-        void listActionRuns_filterByProtocolInstanceId() throws Exception {
+        void listEventLogs_filterByProtocolInstanceId() throws Exception {
             String patientId = "patient-intel-api-list-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
             UUID protocolInstanceId = protocolInstance.getId();
@@ -403,22 +392,22 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             kafkaTemplate.send(schedulerTopic, trigger);
 
             await().atMost(30, SECONDS).untilAsserted(() -> {
-                var actionRuns = actionRunRepository.findByStepInstanceId(stepId);
-                assertThat(actionRuns).isNotEmpty();
+                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                assertThat(eventLogs).isNotEmpty();
             });
 
             // GET list filtered by protocolInstanceId
-            mockMvc.perform(get("/v1/compliance/action-runs")
+            mockMvc.perform(get("/v1/compliance/intelligence-events")
                             .param("protocolInstanceId", protocolInstanceId.toString()))
                     .andExpect(status().isOk())
                     .andExpect(jsonPath("$").isArray())
                     .andExpect(jsonPath("$[0].protocolInstanceId").value(protocolInstanceId.toString()))
-                    .andExpect(jsonPath("$[0].status").value("PUBLISHED"));
+                    .andExpect(jsonPath("$[0].published").value(true));
         }
 
         @Test
-        void getActionRunById_notFound_returns404() throws Exception {
-            mockMvc.perform(get("/v1/compliance/action-runs/{id}", UUID.randomUUID()))
+        void getEventLogById_notFound_returns404() throws Exception {
+            mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", UUID.randomUUID()))
                     .andExpect(status().isNotFound());
         }
     }

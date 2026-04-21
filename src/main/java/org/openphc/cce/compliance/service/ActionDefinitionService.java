@@ -6,9 +6,8 @@ import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
 import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
-import org.openphc.cce.compliance.domain.enums.IntelligenceTarget;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
-import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
+import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -26,14 +25,14 @@ public class ActionDefinitionService {
     private static final Logger log = LoggerFactory.getLogger(ActionDefinitionService.class);
 
     private final ActionDefinitionRepository actionDefinitionRepository;
-    private final ActionRunRepository actionRunRepository;
+    private final IntelligenceEventLogRepository intelligenceEventLogRepository;
     private final AuditService auditService;
 
     public ActionDefinitionService(ActionDefinitionRepository actionDefinitionRepository,
-                                   ActionRunRepository actionRunRepository,
+                                   IntelligenceEventLogRepository intelligenceEventLogRepository,
                                    AuditService auditService) {
         this.actionDefinitionRepository = actionDefinitionRepository;
-        this.actionRunRepository = actionRunRepository;
+        this.intelligenceEventLogRepository = intelligenceEventLogRepository;
         this.auditService = auditService;
     }
 
@@ -60,9 +59,8 @@ public class ActionDefinitionService {
         IntelligenceSeverity severity = extractExtensionEnum(definition,
                 "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
                 IntelligenceSeverity.class);
-        IntelligenceTarget target = extractExtensionEnum(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-target",
-                IntelligenceTarget.class);
+        String channel = extractExtensionString(definition,
+                "http://openphc.org/fhir/StructureDefinition/intelligence-channel");
 
         ActionDefinition actionDef = ActionDefinition.builder()
                 .canonicalUrl(url)
@@ -72,7 +70,7 @@ public class ActionDefinitionService {
                 .status(ActionDefinitionStatus.ACTIVE)
                 .actionType(actionType)
                 .severity(severity)
-                .target(target)
+                .intelligenceChannel(channel)
                 .definition(definition)
                 .build();
 
@@ -111,9 +109,8 @@ public class ActionDefinitionService {
         actionDef.setSeverity(extractExtensionEnum(definition,
                 "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
                 IntelligenceSeverity.class));
-        actionDef.setTarget(extractExtensionEnum(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-target",
-                IntelligenceTarget.class));
+        actionDef.setIntelligenceChannel(extractExtensionString(definition,
+                "http://openphc.org/fhir/StructureDefinition/intelligence-channel"));
         actionDef.setDefinition(definition);
 
         actionDef = actionDefinitionRepository.save(actionDef);
@@ -150,14 +147,14 @@ public class ActionDefinitionService {
     }
 
     /**
-     * Delete an ActionDefinition. Fails if any ActionRun references it.
+     * Delete an ActionDefinition. Fails if any intelligence event references it.
      */
     public void deleteActionDefinition(UUID id) {
         ActionDefinition actionDef = findByIdOrThrow(id);
 
-        if (actionRunRepository.existsByActionDefinitionId(id)) {
+        if (intelligenceEventLogRepository.existsByActionDefinitionId(id)) {
             throw new IllegalStateException(
-                    "Cannot delete action definition with existing action runs: " + id);
+                    "Cannot delete action definition with existing intelligence events: " + id);
         }
 
         actionDefinitionRepository.delete(actionDef);
@@ -248,6 +245,19 @@ public class ActionDefinitionService {
             throw new IllegalArgumentException("Required field missing or empty: " + field);
         }
         return value.asText();
+    }
+
+    private String extractExtensionString(JsonNode definition, String url) {
+        JsonNode extensions = definition.get("extension");
+        if (extensions == null || !extensions.isArray()) return null;
+
+        for (JsonNode ext : extensions) {
+            if (url.equals(ext.path("url").asText(null))) {
+                String value = ext.path("valueCode").asText(null);
+                if (value != null) return value;
+            }
+        }
+        return null;
     }
 
     private String textField(JsonNode node, String field) {

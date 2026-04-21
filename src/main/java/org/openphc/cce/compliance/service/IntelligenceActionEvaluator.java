@@ -6,10 +6,8 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.persistence.EntityNotFoundException;
 import org.openphc.cce.compliance.domain.entity.*;
-import org.openphc.cce.compliance.domain.enums.ActionRunStatus;
-import org.openphc.cce.compliance.domain.repository.ActionRunContextRepository;
-import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
+import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -36,8 +34,7 @@ public class IntelligenceActionEvaluator {
     private final ExpressionEvaluationService expressionEvaluationService;
     private final ActionDefinitionService actionDefinitionService;
     private final IntelligenceTriggerProducer intelligenceTriggerProducer;
-    private final ActionRunRepository actionRunRepository;
-    private final ActionRunContextRepository actionRunContextRepository;
+    private final IntelligenceEventLogRepository intelligenceEventLogRepository;
     private final DeviationRepository deviationRepository;
     private final ObjectMapper objectMapper;
     private final Counter actionsEvaluatedCounter;
@@ -49,8 +46,7 @@ public class IntelligenceActionEvaluator {
                                      ExpressionEvaluationService expressionEvaluationService,
                                      ActionDefinitionService actionDefinitionService,
                                      IntelligenceTriggerProducer intelligenceTriggerProducer,
-                                     ActionRunRepository actionRunRepository,
-                                     ActionRunContextRepository actionRunContextRepository,
+                                     IntelligenceEventLogRepository intelligenceEventLogRepository,
                                      DeviationRepository deviationRepository,
                                      ObjectMapper objectMapper,
                                      MeterRegistry meterRegistry,
@@ -59,8 +55,7 @@ public class IntelligenceActionEvaluator {
         this.expressionEvaluationService = expressionEvaluationService;
         this.actionDefinitionService = actionDefinitionService;
         this.intelligenceTriggerProducer = intelligenceTriggerProducer;
-        this.actionRunRepository = actionRunRepository;
-        this.actionRunContextRepository = actionRunContextRepository;
+        this.intelligenceEventLogRepository = intelligenceEventLogRepository;
         this.deviationRepository = deviationRepository;
         this.objectMapper = objectMapper;
         this.actionsEvaluatedCounter = meterRegistry.counter("cce.intelligence.actions.evaluated");
@@ -75,14 +70,14 @@ public class IntelligenceActionEvaluator {
      * └─ action (protocol step)        → match by step.actionId
      *    └─ action[] (intelligence actions)  → for each: check condition → resolve definition → record & publish
      */
-    public List<ActionRun> evaluateOnDeviation(StepInstance step, Deviation deviation) {
+    public List<IntelligenceEventLog> evaluateOnDeviation(StepInstance step, Deviation deviation) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
         PlanDefinition planDefinition = getCachedPlanDefinition(protocolDef);
 
         JsonNode context = objectMapper.valueToTree(buildDeviationContext(step, deviation));
         String triggerReason = deviation.getDeviationType().name().toLowerCase();
 
-        List<ActionRun> actionRuns = new ArrayList<>();
+        List<IntelligenceEventLog> eventLogs = new ArrayList<>();
 
         // Iterate over protocol steps (PlanDefinition.action) to find the matching step
         for (PlanDefinitionParser.ActionMetadata protocolStep : planDefinitionParser.extractActions(planDefinition)) {
@@ -90,19 +85,19 @@ public class IntelligenceActionEvaluator {
 
             // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
             for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
-                ActionRun actionRun = evaluateAction(intelligenceAction, step, deviation, context, triggerReason);
-                if (actionRun != null) {
-                    actionRuns.add(actionRun);
+                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, deviation, context, triggerReason);
+                if (eventLog != null) {
+                    eventLogs.add(eventLog);
                 }
             }
         }
 
-        if (!actionRuns.isEmpty()) {
+        if (!eventLogs.isEmpty()) {
             log.info("Evaluated intelligence actions for deviation: stepId={}, deviationType={}, fired={}",
-                    step.getId(), deviation.getDeviationType(), actionRuns.size());
+                    step.getId(), deviation.getDeviationType(), eventLogs.size());
         }
 
-        return actionRuns;
+        return eventLogs;
     }
 
     /**
@@ -112,13 +107,13 @@ public class IntelligenceActionEvaluator {
      * └─ action (protocol step)        → match by step.actionId
      *    └─ action[] (intelligence actions)  → for each: check condition → resolve definition → record & publish
      */
-    public List<ActionRun> evaluateOnCompletion(StepInstance step) {
+    public List<IntelligenceEventLog> evaluateOnCompletion(StepInstance step) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
         PlanDefinition planDefinition = getCachedPlanDefinition(protocolDef);
 
         JsonNode context = objectMapper.valueToTree(buildCompletionContext(step));
 
-        List<ActionRun> actionRuns = new ArrayList<>();
+        List<IntelligenceEventLog> eventLogs = new ArrayList<>();
 
         // Iterate over protocol steps (PlanDefinition.action) to find the matching step
         for (PlanDefinitionParser.ActionMetadata protocolStep : planDefinitionParser.extractActions(planDefinition)) {
@@ -126,19 +121,19 @@ public class IntelligenceActionEvaluator {
 
             // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
             for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
-                ActionRun actionRun = evaluateAction(intelligenceAction, step, null, context, "completion");
-                if (actionRun != null) {
-                    actionRuns.add(actionRun);
+                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, null, context, "completion");
+                if (eventLog != null) {
+                    eventLogs.add(eventLog);
                 }
             }
         }
 
-        if (!actionRuns.isEmpty()) {
+        if (!eventLogs.isEmpty()) {
             log.info("Evaluated intelligence actions for step completion: stepId={}, fired={}",
-                    step.getId(), actionRuns.size());
+                    step.getId(), eventLogs.size());
         }
 
-        return actionRuns;
+        return eventLogs;
     }
 
     // ── Parsed PlanDefinition cache ──
@@ -158,7 +153,7 @@ public class IntelligenceActionEvaluator {
 
     // ── Per intelligence action evaluation ──
 
-    private ActionRun evaluateAction(PlanDefinitionParser.IntelligenceActionInfo action,
+    private IntelligenceEventLog evaluateAction(PlanDefinitionParser.IntelligenceActionInfo action,
                                      StepInstance step, Deviation deviation,
                                      JsonNode context, String triggerReason) {
         if (!conditionMatches(action, context)) return null;
@@ -196,7 +191,7 @@ public class IntelligenceActionEvaluator {
         }
     }
 
-    private ActionRun recordAndPublish(PlanDefinitionParser.IntelligenceActionInfo action,
+    private IntelligenceEventLog recordAndPublish(PlanDefinitionParser.IntelligenceActionInfo action,
                                        StepInstance step, Deviation deviation,
                                        ActionDefinition definition, String triggerReason,
                                        JsonNode evaluationContext) {
@@ -206,44 +201,59 @@ public class IntelligenceActionEvaluator {
 
         MDC.put("intelligenceEventId", eventId.toString());
         try {
-            // Create ActionRun (TRIGGERED → PUBLISHED after event is sent)
-            ActionRun actionRun = ActionRun.builder()
-                    .actionDefinition(definition)
-                    .protocolInstance(protocol)
-                    .stepInstance(step)
-                    .status(ActionRunStatus.TRIGGERED)
-                    .intelligenceEventId(eventId)
-                    .build();
-            actionRun = actionRunRepository.save(actionRun);
+            // Resolve intelligence channel and severity (action-level overrides definition-level)
+            String intelligenceChannel = action.intelligenceChannel() != null
+                    ? action.intelligenceChannel()
+                    : definition.getIntelligenceChannel();
+            String severity = action.severity() != null
+                    ? action.severity()
+                    : (definition.getSeverity() != null ? definition.getSeverity().name() : null);
 
-            // Store evaluation context separately (why this action was triggered)
-            ActionRunContext runContext = ActionRunContext.builder()
-                    .actionRun(actionRun)
-                    .deviation(deviation)
-                    .triggerReason(triggerReason)
-                    .stepActionId(action.actionId())
-                    .evaluationExpression(action.conditionExpression())
-                    .evaluationContext(evaluationContext)
-                    .build();
-            actionRunContextRepository.save(runContext);
-
-            // Publish intelligence trigger event to Kafka
+            // Build the intelligence trigger event
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
                     .id(eventId)
                     .subject(protocol.getPatientId())
-                    .actionRunId(actionRun.getId())
-                    .protocolInstanceId(protocol.getId())
-                    .stepInstanceId(step.getId())
-                    .deviationType(deviation != null ? deviation.getDeviationType().name().toLowerCase() : null)
+                    .actionRunId(null) // Set after eventLog is saved
+                    .actionDefinitionId(definition.getId())
+                    .protocolDefinitionId(protocol.getProtocolDefinition().getId())
+                    .actionType(definition.getActionType().name())
+                    .severity(severity)
+                    .intelligenceChannel(intelligenceChannel)
                     .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
                     .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
+
+            // Create event log record (published=false initially)
+            IntelligenceEventLog eventLog = IntelligenceEventLog.builder()
+                    .eventPayload(objectMapper.valueToTree(event))
+                    .actionDefinitionId(definition.getId())
+                    .protocolInstanceId(protocol.getId())
+                    .stepInstanceId(step.getId())
+                    .deviationId(deviation != null ? deviation.getId() : null)
+                    .subject(protocol.getPatientId())
+                    .actionType(definition.getActionType().name())
+                    .intelligenceChannel(intelligenceChannel)
+                    .stepState(step.getState().name().toLowerCase())
+                    .triggerReason(triggerReason)
+                    .stepActionId(action.actionId())
+                    .evaluationExpression(action.conditionExpression())
+                    .evaluationContext(evaluationContext)
+                    .published(false)
+                    .build();
+            eventLog = intelligenceEventLogRepository.save(eventLog);
+
+            // Set actionRunId to the event log ID for cross-service correlation
+            event.setActionRunId(eventLog.getId());
+            eventLog.setEventPayload(objectMapper.valueToTree(event));
+
+            // Publish intelligence trigger event to Kafka
             intelligenceTriggerProducer.publish(event);
 
-            actionRun.setStatus(ActionRunStatus.PUBLISHED);
-            actionRun = actionRunRepository.save(actionRun);
+            eventLog.setPublished(true);
+            eventLog.setPublishedAt(OffsetDateTime.now(ZoneOffset.UTC));
+            eventLog = intelligenceEventLogRepository.save(eventLog);
 
             if (deviation != null && deviation.getIntelligenceEventId() == null) {
                 deviation.setIntelligenceEventId(eventId);
@@ -253,7 +263,7 @@ public class IntelligenceActionEvaluator {
             log.info("Intelligence action fired: actionId={}, definition={}, eventId={}",
                     action.actionId(), definition.getCanonical(), eventId);
 
-            return actionRun;
+            return eventLog;
         } finally {
             MDC.remove("intelligenceEventId");
         }

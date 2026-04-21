@@ -22,7 +22,7 @@ public class ActionDefinitionDto {
     private String status;
     private String actionType;
     private String severity;
-    private String target;
+    private String intelligenceChannel;
     private JsonNode definition;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;

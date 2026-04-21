@@ -595,17 +595,17 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 | Status | Condition |
 |---|---|
 | `404 Not Found` | ID does not exist |
-| `409 Conflict` | Action runs reference this action definition |
+| `409 Conflict` | Intelligence events reference this action definition |
 
 ---
 
-## 8. Action Runs
+## 8. Intelligence Events
 
 View intelligence action execution records.
 
-### 8.1 List Action Runs
+### 8.1 List Intelligence Events
 
-**`GET /v1/compliance/action-runs`** — List action runs with optional filters.
+**`GET /v1/compliance/intelligence-events`** — List intelligence event logs with optional filters.
 
 **Query Parameters:**
 
@@ -613,44 +613,61 @@ View intelligence action execution records.
 |---|---|---|---|---|
 | `protocolInstanceId` | UUID | No | — | Filter by protocol instance |
 | `actionDefinitionId` | UUID | No | — | Filter by action definition |
-| `stepInstanceId` | UUID | No | — | Filter by step instance |
-| `status` | String | No | — | Filter by status (`TRIGGERED`, `PUBLISHED`, `FAILED`, `CANCELLED`) |
-| `page` | int | No | 0 | Page number (0-based) |
-| `size` | int | No | 20 | Page size |
+| `published` | Boolean | No | — | Filter by publish status (`true` or `false`) |
 
-**Response:** `200 OK` — `Page<ActionRunDto>`
+**Response:** `200 OK` — `List<IntelligenceEventLogDto>`
 
 ---
 
-### 8.2 Get Action Run by ID
+### 8.2 Get Intelligence Event by ID
 
-**`GET /v1/compliance/action-runs/{id}`**
+**`GET /v1/compliance/intelligence-events/{id}`**
 
 **Path Parameters:**
 
 | Parameter | Type | Description |
 |---|---|---|
-| `id` | UUID | Action run ID |
+| `id` | UUID | Intelligence event log ID |
 
 **Response:** `200 OK`
 
 ```json
 {
   "id": "bb0e8400-e29b-41d4-a716-446655440020",
+  "eventPayload": {
+    "id": "550e8400-e29b-41d4-a716-446655440099",
+    "subject": "260225-0002-5501",
+    "actionRunId": "bb0e8400-e29b-41d4-a716-446655440020",
+    "actionDefinitionId": "aa0e8400-e29b-41d4-a716-446655440010",
+    "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
+    "actionType": "CommunicationRequest",
+    "severity": "HIGH",
+    "intelligenceChannel": "supervisor",
+    "stepState": "overdue",
+    "actionId": "anc-visit-2",
+    "protocolCanonical": "http://openphc.org/fhir/PlanDefinition/anc-high-risk|2.1",
+    "detectedAt": "2026-04-07T10:30:05Z"
+  },
   "actionDefinitionId": "aa0e8400-e29b-41d4-a716-446655440010",
   "protocolInstanceId": "660e8400-e29b-41d4-a716-446655440001",
   "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
-  "status": "PUBLISHED",
-  "intelligenceEventId": "itrig-550e8400-e29b-41d4-a716-446655440099",
-  "outputMetadata": {
-    "patientId": "260225-0002-5501",
+  "deviationId": "dd0e8400-e29b-41d4-a716-446655440003",
+  "subject": "260225-0002-5501",
+  "actionType": "CommunicationRequest",
+  "intelligenceChannel": "supervisor",
+  "stepState": "overdue",
+  "triggerReason": "overdue",
+  "stepActionId": "anc-visit-2-overdue-escalation",
+  "evaluationExpression": "{\"and\": [{\"==\": [{\"var\": \"stepState\"}, \"overdue\"]}, {\">\": [{\"var\": \"daysOverdue\"}, 3]}]}",
+  "evaluationContext": {
+    "stepState": "overdue",
+    "deviationType": "overdue",
     "actionId": "anc-visit-2",
-    "severity": "high",
-    "target": "supervisor",
     "daysOverdue": 5
   },
-  "createdAt": "2026-04-07T10:30:05Z",
-  "updatedAt": "2026-04-07T10:30:05Z"
+  "published": true,
+  "publishedAt": "2026-04-07T10:30:05Z",
+  "createdAt": "2026-04-07T10:30:05Z"
 }
 ```
 
@@ -682,29 +699,24 @@ View intelligence action execution records.
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |
 
-### ActionRunDto
+### IntelligenceEventLogDto
 
 | Field | Type | Nullable | Description |
 |---|---|---|---|
-| `id` | UUID | No | Unique identifier |
-| `actionDefinitionId` | UUID | No | FK to ActionDefinition |
-| `protocolInstanceId` | UUID | No | FK to ProtocolInstance |
-| `stepInstanceId` | UUID | Yes | FK to StepInstance |
-| `status` | String | No | `TRIGGERED`, `PUBLISHED`, `FAILED`, `CANCELLED` |
-| `intelligenceEventId` | UUID | Yes | UUID of published Kafka message |
-| `outputMetadata` | Map | Yes | Resolved action context: message template variables, severity, target, routing hints (JSONB) |
-| `createdAt` | OffsetDateTime | No | Record creation |
-| `updatedAt` | OffsetDateTime | No | Last update |
-
-### ActionRunContextDto
-
-| Field | Type | Nullable | Description |
-|---|---|---|---|
-| `id` | UUID | No | Unique identifier |
-| `actionRunId` | UUID | No | FK to ActionRun (1:1) |
-| `deviationId` | UUID | Yes | FK to Deviation. `NULL` for completion-triggered actions |
+| `id` | UUID | No | Unique identifier (maps to `actionRunId` in Kafka event) |
+| `eventPayload` | JsonNode | No | Complete `IntelligenceTriggerEvent` published to Kafka |
+| `actionDefinitionId` | UUID | No | ActionDefinition that was resolved |
+| `protocolInstanceId` | UUID | No | Patient's protocol instance |
+| `stepInstanceId` | UUID | Yes | Step that triggered the action |
+| `deviationId` | UUID | Yes | Deviation that triggered the action. `NULL` for completion-triggered |
+| `subject` | String | No | Patient UPID |
+| `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
+| `intelligenceChannel` | String | Yes | Intelligence channel |
+| `stepState` | String | Yes | Step state at evaluation time |
 | `triggerReason` | String | No | `overdue`, `missed`, `completion` |
 | `stepActionId` | String | Yes | PlanDefinition intelligence action ID that fired |
 | `evaluationExpression` | String | Yes | Condition expression evaluated (audit/debug) |
-| `evaluationContext` | Map | Yes | Runtime variables passed to evaluator (JSONB) |
+| `evaluationContext` | JsonNode | Yes | Runtime variables passed to evaluator (JSONB) |
+| `published` | boolean | No | Whether event was successfully published to Kafka |
+| `publishedAt` | OffsetDateTime | Yes | Kafka publish timestamp |
 | `createdAt` | OffsetDateTime | No | Record creation |

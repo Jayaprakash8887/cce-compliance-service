@@ -8,16 +8,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
 import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
-import org.openphc.cce.compliance.domain.enums.IntelligenceTarget;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
-import org.openphc.cce.compliance.domain.repository.ActionRunRepository;
+import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,7 +32,7 @@ class ActionDefinitionServiceTest {
     private ActionDefinitionRepository actionDefinitionRepository;
 
     @Mock
-    private ActionRunRepository actionRunRepository;
+    private IntelligenceEventLogRepository intelligenceEventLogRepository;
 
     @Mock
     private AuditService auditService;
@@ -44,7 +42,7 @@ class ActionDefinitionServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new ActionDefinitionService(actionDefinitionRepository, actionRunRepository, auditService);
+        service = new ActionDefinitionService(actionDefinitionRepository, intelligenceEventLogRepository, auditService);
     }
 
     // ── Create Tests ──
@@ -75,7 +73,7 @@ class ActionDefinitionServiceTest {
             assertEquals(ActionDefinitionStatus.ACTIVE, result.getStatus());
             assertEquals(ActionType.CommunicationRequest, result.getActionType());
             assertEquals(IntelligenceSeverity.HIGH, result.getSeverity());
-            assertEquals(IntelligenceTarget.SUPERVISOR, result.getTarget());
+            assertEquals("SUPERVISOR", result.getIntelligenceChannel());
             assertEquals(definition, result.getDefinition());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_CREATED"),
@@ -99,7 +97,7 @@ class ActionDefinitionServiceTest {
 
             assertEquals(ActionType.Task, result.getActionType());
             assertNull(result.getSeverity());
-            assertNull(result.getTarget());
+            assertNull(result.getIntelligenceChannel());
         }
 
         @Test
@@ -177,7 +175,7 @@ class ActionDefinitionServiceTest {
             assertEquals("updated-action", result.getName());
             assertEquals(ActionType.ServiceRequest, result.getActionType());
             assertEquals(IntelligenceSeverity.CRITICAL, result.getSeverity());
-            assertEquals(IntelligenceTarget.FACILITY, result.getTarget());
+            assertEquals("FACILITY", result.getIntelligenceChannel());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_UPDATED"),
                     eq("system"), eq("ActionDefinition"), eq(id.toString()), anyMap());
@@ -275,11 +273,11 @@ class ActionDefinitionServiceTest {
     class Delete {
 
         @Test
-        void noActionRuns_deletesSuccessfully() {
+        void noIntelligenceEvents_deletesSuccessfully() {
             UUID id = UUID.randomUUID();
             ActionDefinition actionDef = buildExistingActionDef(id);
             when(actionDefinitionRepository.findById(id)).thenReturn(Optional.of(actionDef));
-            when(actionRunRepository.existsByActionDefinitionId(id)).thenReturn(false);
+            when(intelligenceEventLogRepository.existsByActionDefinitionId(id)).thenReturn(false);
 
             service.deleteActionDefinition(id);
 
@@ -287,15 +285,15 @@ class ActionDefinitionServiceTest {
         }
 
         @Test
-        void withActionRuns_throwsIllegalState() {
+        void withIntelligenceEvents_throwsIllegalState() {
             UUID id = UUID.randomUUID();
             ActionDefinition actionDef = buildExistingActionDef(id);
             when(actionDefinitionRepository.findById(id)).thenReturn(Optional.of(actionDef));
-            when(actionRunRepository.existsByActionDefinitionId(id)).thenReturn(true);
+            when(intelligenceEventLogRepository.existsByActionDefinitionId(id)).thenReturn(true);
 
             IllegalStateException ex = assertThrows(IllegalStateException.class,
                     () -> service.deleteActionDefinition(id));
-            assertTrue(ex.getMessage().contains("existing action runs"));
+            assertTrue(ex.getMessage().contains("existing intelligence events"));
 
             verify(actionDefinitionRepository, never()).delete(any());
         }
@@ -425,7 +423,7 @@ class ActionDefinitionServiceTest {
     }
 
     private JsonNode buildDefinition(String url, String version, String name, String title,
-                                     String kind, String severity, String target) {
+                                     String kind, String severity, String channel) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("resourceType", "ActivityDefinition");
         node.put("url", url);
@@ -440,9 +438,9 @@ class ActionDefinitionServiceTest {
         sevExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
         sevExt.put("valueCode", severity);
 
-        ObjectNode tgtExt = extensions.addObject();
-        tgtExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-target");
-        tgtExt.put("valueCode", target);
+        ObjectNode chExt = extensions.addObject();
+        chExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-channel");
+        chExt.put("valueCode", channel);
 
         return node;
     }

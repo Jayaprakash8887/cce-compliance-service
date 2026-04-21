@@ -297,53 +297,48 @@ Published when an intelligence action fires — triggered by deviation detection
 
 ```json
 {
-  "id": "itrig-550e8400-e29b-41d4-a716-446655440099",
-  "type": "cce.compliance.deviation.overdue",
+  "id": "550e8400-e29b-41d4-a716-446655440099",
   "subject": "260225-0002-5501",
-  "protocolInstanceId": "660e8400-e29b-41d4-a716-446655440001",
-  "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
-  "deviationId": "880e8400-e29b-41d4-a716-446655440005",
-  "deviationType": "overdue",
+  "actionRunId": "990e8400-e29b-41d4-a716-446655440010",
+  "actionDefinitionId": "aad00001-0001-0001-0001-000000000001",
+  "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
+  "actionType": "CommunicationRequest",
+  "severity": "HIGH",
+  "intelligenceChannel": "supervisor",
   "stepState": "overdue",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-  "facilityId": "0002",
-  "detectedAt": "2026-03-25T00:00:05Z",
-  "metadata": {
-    "dueDate": "2026-03-20T00:00:00Z",
-    "overdueDate": "2026-03-25T00:00:00Z"
-  }
+  "detectedAt": "2026-03-25T00:00:05Z"
 }
 ```
 
 | Field | Type | Description |
 |---|---|---|
 | `id` | UUID | Unique event identifier |
-| `type` | String | `cce.compliance.deviation.<deviationType>` |
-| `subject` | String | Patient identifier |
-| `protocolInstanceId` | UUID | Protocol instance |
-| `stepInstanceId` | UUID | Step that deviated |
-| `deviationId` | UUID | Deviation record ID |
-| `deviationType` | String | `overdue` or `missed` |
-| `stepState` | String | Current step state |
+| `subject` | String | Patient identifier (UPID) |
+| `actionRunId` | UUID | Intelligence event log record ID tracking this execution |
+| `actionDefinitionId` | UUID | ActionDefinition that was resolved and triggered |
+| `protocolDefinitionId` | UUID | Protocol definition the step belongs to |
+| `actionType` | String | Action type from ActionDefinition (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`) |
+| `severity` | String | Severity from PlanDefinition override or ActionDefinition (e.g., `HIGH`, `MEDIUM`, `LOW`, `CRITICAL`) |
+| `intelligenceChannel` | String | Intelligence channel from PlanDefinition override or ActionDefinition (e.g., `supervisor`, `high_hospital_alert`) |
+| `stepState` | String | Current step state (lowercase) |
 | `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |
-| `facilityId` | String | Healthcare facility FOSA ID |
 | `detectedAt` | OffsetDateTime | Detection timestamp |
-| `metadata` | Map | Additional context |
 
-**Kafka Key:** `protocolInstanceId` (ensures all events for a protocol go to the same partition)
+**Kafka Key:** `actionRunId` (ensures unique partitioning per action execution)
 
 #### Intelligence Event Types
 
-| Type | Trigger |
-|---|---|
-| `cce.compliance.deviation.overdue` | Step transitioned DUE → OVERDUE |
-| `cce.compliance.deviation.missed` | Step transitioned OVERDUE → MISSED |
-| `cce.compliance.step.completed.late` | Step completed with `completionStatus=LATE` |
+| Trigger |
+|---|
+| Step transitioned DUE → OVERDUE |
+| Step transitioned OVERDUE → MISSED |
+| Step completed with `completionStatus=LATE` |
 
 
-> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `ActionRun` record tracks execution; an `ActionRunContext` record stores evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables). See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-action-evaluation) for the full pipeline.
+> **Intelligence event publishing lifecycle:** When a deviation is detected or a step completed, the `IntelligenceActionEvaluator` extracts intelligence actions from the step's PlanDefinition, evaluates each action's condition (JSONLogic/FHIRPath) against the step's runtime state, and publishes an `IntelligenceTriggerEvent` for each matching action. An `IntelligenceEventLog` record stores the complete event payload, evaluation context (trigger reason, deviation, step action ID, expression, and runtime variables), and publish status. See [Architecture Overview §6.3](architecture-overview.md#63-intelligence-action-evaluation) for the full pipeline.
 
 ---
 
@@ -410,8 +405,8 @@ public class IntelligenceTriggerProducer {
     private final Counter publishedCounter; // cce.events.intelligence.published
 
     public CompletableFuture<SendResult<String, Object>> publish(IntelligenceTriggerEvent event) {
-        // Key: protocolInstanceId (partition locality)
-        String key = event.getProtocolInstanceId().toString();
+        // Key: actionRunId (unique per action execution)
+        String key = event.getActionRunId().toString();
         return kafkaTemplate.send(topic, key, event)
             .whenComplete((result, ex) -> {
                 if (ex == null) {
@@ -440,7 +435,7 @@ public class IntelligenceTriggerProducer {
 | **At-least-once delivery** | `AckMode.RECORD` + `DefaultErrorHandler` + no auto-commit |
 | **Idempotency (consumer)** | `(cloudeventsId, source)` deduplication in event_log |
 | **Idempotency (producer)** | `enable.idempotence=true` on producer |
-| **Ordering (per partition)** | Key-based routing ensures ordering per patient/protocol |
+| **Ordering (per partition)** | Key-based routing ensures ordering per action execution |
 | **Transactional reads** | `isolation.level=read_committed` prevents reading uncommitted |
 | **Durability** | `acks=all` waits for all ISR replicas |
 

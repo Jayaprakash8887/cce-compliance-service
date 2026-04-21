@@ -11,14 +11,23 @@ import java.util.UUID;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ActionRunContextDto {
+public class IntelligenceEventLogDto {
 
     private UUID id;
-    private UUID actionRunId;
+    private JsonNode eventPayload;
+    private UUID actionDefinitionId;
+    private UUID protocolInstanceId;
+    private UUID stepInstanceId;
     private UUID deviationId;
+    private String subject;
+    private String actionType;
+    private String intelligenceChannel;
+    private String stepState;
     private String triggerReason;
     private String stepActionId;
     private String evaluationExpression;
     private JsonNode evaluationContext;
+    private boolean published;
+    private OffsetDateTime publishedAt;
     private OffsetDateTime createdAt;
 }

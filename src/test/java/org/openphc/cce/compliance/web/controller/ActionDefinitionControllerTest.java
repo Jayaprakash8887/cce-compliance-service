@@ -7,7 +7,6 @@ import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
 import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
-import org.openphc.cce.compliance.domain.enums.IntelligenceTarget;
 import org.openphc.cce.compliance.service.ActionDefinitionService;
 import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.GlobalExceptionHandler;
@@ -55,7 +54,7 @@ class ActionDefinitionControllerTest {
         def.setStatus(ActionDefinitionStatus.ACTIVE);
         def.setActionType(ActionType.CommunicationRequest);
         def.setSeverity(IntelligenceSeverity.HIGH);
-        def.setTarget(IntelligenceTarget.SUPERVISOR);
+        def.setIntelligenceChannel("SUPERVISOR");
         def.setDefinition(objectMapper.createObjectNode().put("resourceType", "ActivityDefinition"));
         def.setCreatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC));
         def.setUpdatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC));
@@ -85,7 +84,7 @@ class ActionDefinitionControllerTest {
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.actionType").value("CommunicationRequest"))
                 .andExpect(jsonPath("$.severity").value("HIGH"))
-                .andExpect(jsonPath("$.target").value("SUPERVISOR"));
+                .andExpect(jsonPath("$.intelligenceChannel").value("SUPERVISOR"));
 
         verify(actionDefinitionService).createActionDefinition(any());
     }
@@ -243,7 +242,7 @@ class ActionDefinitionControllerTest {
     // --- DELETE /{id} ---
 
     @Test
-    void delete_noActionRuns_returns204() throws Exception {
+    void delete_noIntelligenceEvents_returns204() throws Exception {
         doNothing().when(actionDefinitionService).deleteActionDefinition(ACTION_DEF_ID);
 
         mockMvc.perform(delete("/v1/compliance/action-definitions/{id}", ACTION_DEF_ID))
@@ -253,15 +252,15 @@ class ActionDefinitionControllerTest {
     }
 
     @Test
-    void delete_withActionRuns_returns409() throws Exception {
+    void delete_withIntelligenceEvents_returns409() throws Exception {
         doThrow(new IllegalStateException(
-                "Cannot delete action definition with existing action runs: " + ACTION_DEF_ID))
+                "Cannot delete action definition with existing intelligence events: " + ACTION_DEF_ID))
                 .when(actionDefinitionService).deleteActionDefinition(ACTION_DEF_ID);
 
         mockMvc.perform(delete("/v1/compliance/action-definitions/{id}", ACTION_DEF_ID))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value(
-                        "Cannot delete action definition with existing action runs: " + ACTION_DEF_ID));
+                        "Cannot delete action definition with existing intelligence events: " + ACTION_DEF_ID));
     }
 
     @Test

@@ -11,25 +11,45 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
-@Table(name = "action_run_context")
+@Table(name = "intelligence_event_log")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class ActionRunContext {
+public class IntelligenceEventLog {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private UUID id;
 
-    @OneToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "action_run_id", nullable = false, unique = true)
-    private ActionRun actionRun;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "event_payload", nullable = false, columnDefinition = "jsonb")
+    private JsonNode eventPayload;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "deviation_id")
-    private Deviation deviation;
+    @Column(name = "action_definition_id", nullable = false)
+    private UUID actionDefinitionId;
+
+    @Column(name = "protocol_instance_id", nullable = false)
+    private UUID protocolInstanceId;
+
+    @Column(name = "step_instance_id")
+    private UUID stepInstanceId;
+
+    @Column(name = "deviation_id")
+    private UUID deviationId;
+
+    @Column(nullable = false)
+    private String subject;
+
+    @Column(name = "action_type", nullable = false)
+    private String actionType;
+
+    @Column(name = "intelligence_channel", nullable = false)
+    private String intelligenceChannel;
+
+    @Column(name = "step_state", nullable = false)
+    private String stepState;
 
     @Column(name = "trigger_reason", nullable = false)
     private String triggerReason;
@@ -43,6 +63,15 @@ public class ActionRunContext {
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "evaluation_context", columnDefinition = "jsonb")
     private JsonNode evaluationContext;
+
+    @Column(nullable = false)
+    private boolean published;
+
+    @Column(name = "published_at")
+    private OffsetDateTime publishedAt;
+
+    @Column(name = "error_message", columnDefinition = "text")
+    private String errorMessage;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;

@@ -330,17 +330,15 @@ sequenceDiagram
                         Evaluator->>Evaluator: Log warning, skip action
                     else ActionDefinition found
                         ActionDefSvc-->>Evaluator: ActionDefinition
-                        Evaluator->>DB: INSERT ActionRun (status=TRIGGERED)
-                        DB-->>Evaluator: ActionRun
-
-                        Evaluator->>DB: INSERT ActionRunContext<br/>(deviation, triggerReason,<br/>stepActionId, evaluationExpression,<br/>evaluationContext)
+                        Evaluator->>DB: INSERT IntelligenceEventLog<br/>(published=false,<br/>eventPayload, triggerReason,<br/>stepActionId, evaluationExpression,<br/>evaluationContext)
+                        DB-->>Evaluator: IntelligenceEventLog
 
                         Evaluator->>Evaluator: Build IntelligenceTriggerEvent
                         Evaluator->>Producer: publish(event)
                         Producer->>Kafka: Send to cce.intelligence.triggers<br/>(key: protocolInstanceId)
                         Kafka-->>Producer: Ack
 
-                        Evaluator->>DB: UPDATE ActionRun<br/>(status=PUBLISHED,<br/>intelligenceEventId=UUID)
+                        Evaluator->>DB: UPDATE IntelligenceEventLog<br/>(published=true,<br/>publishedAt=now())
                         Evaluator->>DB: UPDATE deviation<br/>(intelligenceEventId=UUID)
                     end
                 end
@@ -350,7 +348,7 @@ sequenceDiagram
         end
     end
 
-    Evaluator-->>Trigger: List<ActionRun>
+    Evaluator-->>Trigger: List<IntelligenceEventLog>
 ```
 
 ### Intelligence Event Content Assembly

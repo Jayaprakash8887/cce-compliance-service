@@ -207,16 +207,18 @@ class CloudEventMessageTest {
     void serialize_intelligenceTrigger_allFields() throws Exception {
         UUID id = UUID.randomUUID();
         UUID arId = UUID.randomUUID();
-        UUID piId = UUID.randomUUID();
-        UUID siId = UUID.randomUUID();
+        UUID adId = UUID.randomUUID();
+        UUID pdId = UUID.randomUUID();
 
         IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
                 .id(id)
                 .subject("260225-0002-5501")
                 .actionRunId(arId)
-                .protocolInstanceId(piId)
-                .stepInstanceId(siId)
-                .deviationType("overdue")
+                .actionDefinitionId(adId)
+                .protocolDefinitionId(pdId)
+                .actionType("CommunicationRequest")
+                .severity("HIGH")
+                .intelligenceChannel("supervisor")
                 .stepState("overdue")
                 .actionId("viral-load-check")
                 .protocolCanonical("http://example.org/PlanDefinition/hiv-treatment|1.0")
@@ -229,14 +231,15 @@ class CloudEventMessageTest {
         assertEquals(id.toString(), node.get("id").asText());
         assertEquals("260225-0002-5501", node.get("subject").asText());
         assertEquals(arId.toString(), node.get("actionRunId").asText());
-        assertEquals(piId.toString(), node.get("protocolInstanceId").asText());
-        assertEquals(siId.toString(), node.get("stepInstanceId").asText());
-        assertEquals("overdue", node.get("deviationType").asText());
+        assertEquals(adId.toString(), node.get("actionDefinitionId").asText());
+        assertEquals(pdId.toString(), node.get("protocolDefinitionId").asText());
+        assertEquals("CommunicationRequest", node.get("actionType").asText());
+        assertEquals("HIGH", node.get("severity").asText());
+        assertEquals("supervisor", node.get("intelligenceChannel").asText());
         assertEquals("overdue", node.get("stepState").asText());
         assertEquals("viral-load-check", node.get("actionId").asText());
         assertEquals("http://example.org/PlanDefinition/hiv-treatment|1.0", node.get("protocolCanonical").asText());
         assertFalse(node.has("type"));
-        assertFalse(node.has("facilityId"));
         assertFalse(node.has("metadata"));
     }
 
@@ -246,9 +249,7 @@ class CloudEventMessageTest {
                 .id(UUID.randomUUID())
                 .subject("patient-100")
                 .actionRunId(UUID.randomUUID())
-                .protocolInstanceId(UUID.randomUUID())
-                .stepInstanceId(UUID.randomUUID())
-                .deviationType("missed")
+                .actionType("Task")
                 .stepState("missed")
                 .actionId("lab-check")
                 .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
@@ -259,6 +260,10 @@ class CloudEventMessageTest {
 
         // Null fields should be absent
         assertFalse(node.has("protocolCanonical"));
+        assertFalse(node.has("severity"));
+        assertFalse(node.has("intelligenceChannel"));
+        assertFalse(node.has("actionDefinitionId"));
+        assertFalse(node.has("protocolDefinitionId"));
         assertFalse(node.has("metadata"));
     }
 
@@ -267,11 +272,13 @@ class CloudEventMessageTest {
         String json = """
                 {
                   "id": "880e8400-e29b-41d4-a716-446655440099",
-                  "subject": "patient-rt",
+                  "subject": "260225-0002-5501",
                   "actionRunId": "990e8400-e29b-41d4-a716-446655440010",
-                  "protocolInstanceId": "660e8400-e29b-41d4-a716-446655440001",
-                  "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
-                  "deviationType": "overdue",
+                  "actionDefinitionId": "aad00001-0001-0001-0001-000000000001",
+                  "protocolDefinitionId": "660e8400-e29b-41d4-a716-446655440001",
+                  "actionType": "CommunicationRequest",
+                  "severity": "HIGH",
+                  "intelligenceChannel": "supervisor",
                   "stepState": "overdue",
                   "actionId": "bp-check",
                   "protocolCanonical": "http://example.org/pd|1.0",
@@ -282,11 +289,11 @@ class CloudEventMessageTest {
         IntelligenceTriggerEvent event = objectMapper.readValue(json, IntelligenceTriggerEvent.class);
 
         assertEquals(UUID.fromString("880e8400-e29b-41d4-a716-446655440099"), event.getId());
-        assertEquals("patient-rt", event.getSubject());
+        assertEquals("260225-0002-5501", event.getSubject());
         assertEquals(UUID.fromString("990e8400-e29b-41d4-a716-446655440010"), event.getActionRunId());
-        assertEquals(UUID.fromString("660e8400-e29b-41d4-a716-446655440001"), event.getProtocolInstanceId());
-        assertEquals(UUID.fromString("770e8400-e29b-41d4-a716-446655440002"), event.getStepInstanceId());
-        assertEquals("overdue", event.getDeviationType());
+        assertEquals("CommunicationRequest", event.getActionType());
+        assertEquals("HIGH", event.getSeverity());
+        assertEquals("supervisor", event.getIntelligenceChannel());
         assertEquals("overdue", event.getStepState());
         assertEquals("bp-check", event.getActionId());
         assertEquals("http://example.org/pd|1.0", event.getProtocolCanonical());

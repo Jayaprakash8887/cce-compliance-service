@@ -153,37 +153,31 @@ public class DtoMapper {
                 .status(entity.getStatus().name())
                 .actionType(entity.getActionType().name())
                 .severity(entity.getSeverity() != null ? entity.getSeverity().name() : null)
-                .target(entity.getTarget() != null ? entity.getTarget().name() : null)
+                .intelligenceChannel(entity.getIntelligenceChannel())
                 .definition(entity.getDefinition())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())
                 .build();
     }
 
-    public ActionRunDto toDto(ActionRun entity) {
-        return ActionRunDto.builder()
+    public IntelligenceEventLogDto toDto(IntelligenceEventLog entity) {
+        return IntelligenceEventLogDto.builder()
                 .id(entity.getId())
-                .actionDefinitionId(entity.getActionDefinition().getId())
-                .protocolInstanceId(entity.getProtocolInstance().getId())
-                .stepInstanceId(entity.getStepInstance() != null ? entity.getStepInstance().getId() : null)
-                .status(entity.getStatus().name())
-                .intelligenceEventId(entity.getIntelligenceEventId())
-                .outputMetadata(entity.getOutputMetadata())
-                .context(entity.getContext() != null ? toDto(entity.getContext()) : null)
-                .createdAt(entity.getCreatedAt())
-                .updatedAt(entity.getUpdatedAt())
-                .build();
-    }
-
-    public ActionRunContextDto toDto(ActionRunContext entity) {
-        return ActionRunContextDto.builder()
-                .id(entity.getId())
-                .actionRunId(entity.getActionRun().getId())
-                .deviationId(entity.getDeviation() != null ? entity.getDeviation().getId() : null)
+                .eventPayload(entity.getEventPayload())
+                .actionDefinitionId(entity.getActionDefinitionId())
+                .protocolInstanceId(entity.getProtocolInstanceId())
+                .stepInstanceId(entity.getStepInstanceId())
+                .deviationId(entity.getDeviationId())
+                .subject(entity.getSubject())
+                .actionType(entity.getActionType())
+                .intelligenceChannel(entity.getIntelligenceChannel())
+                .stepState(entity.getStepState())
                 .triggerReason(entity.getTriggerReason())
                 .stepActionId(entity.getStepActionId())
                 .evaluationExpression(entity.getEvaluationExpression())
                 .evaluationContext(entity.getEvaluationContext())
+                .published(entity.isPublished())
+                .publishedAt(entity.getPublishedAt())
                 .createdAt(entity.getCreatedAt())
                 .build();
     }
@@ -195,7 +189,7 @@ public class DtoMapper {
         return entities.stream().map(this::toDto).toList();
     }
 
-    public List<ActionRunDto> toDtoActionRunList(List<ActionRun> entities) {
+    public List<IntelligenceEventLogDto> toDtoIntelligenceEventLogList(List<IntelligenceEventLog> entities) {
         if (entities == null) {
             return Collections.emptyList();
         }
