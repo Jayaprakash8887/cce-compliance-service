@@ -158,6 +158,11 @@ public class ComplianceEngine {
         ProtocolInstance protocolInstance = protocolInstanceService.findById(protocolInstanceId);
         Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache = new HashMap<>();
 
+        // Link event_log to the matched protocol instance
+        eventLog.setProtocolInstanceId(protocolInstanceId);
+        eventLog.setProtocolDefinitionId(protocolInstance.getProtocolDefinition().getId());
+        eventLog.setActionId(actionId);
+
         StepInstance step = stepInstanceService.findActionableStep(protocolInstanceId, actionId);
         if (step == null) {
             step = createInitialStep(protocolInstance, actionId, actionCache);
@@ -254,6 +259,11 @@ public class ComplianceEngine {
         // Enroll patient (idempotent — returns existing if already enrolled)
         ProtocolInstance protocolInstance = protocolInstanceService.enrollPatient(
                 patientId, protocolDef, OffsetDateTime.now(ZoneOffset.UTC));
+
+        // Link event_log to the matched protocol instance
+        eventLog.setProtocolInstanceId(protocolInstance.getId());
+        eventLog.setProtocolDefinitionId(protocolDef.getId());
+        eventLog.setActionId(match.actionId());
 
         // Find or create an actionable step
         StepInstance step = stepInstanceService.findActionableStep(
