@@ -193,16 +193,20 @@ class ResourceInfoExtractorTest {
     }
 
     @Test
-    void extractCodes_missingSystemOrCode_skipped() {
+    void extractCodes_missingCode_fallsBackToDisplay() {
         JsonNode data = toJsonNode(Map.of(
                 "resourceType", "Observation",
                 "code", Map.of(
                         "coding", List.of(
-                                Map.of("display", "Blood Pressure") // no system or code
+                                Map.of("display", "Blood Pressure") // no system or code — falls back to display
                         )
                 )
         ));
-        assertTrue(extractor.extractCodes(data).isEmpty());
+        List<CodePathTriple> codes = extractor.extractCodes(data);
+        assertEquals(1, codes.size());
+        assertEquals("code", codes.get(0).path());
+        assertEquals("", codes.get(0).system());
+        assertEquals("Blood Pressure", codes.get(0).code());
     }
 
     @Test

@@ -67,7 +67,8 @@ public class PlanDefinitionParser {
                         String path = cf.getPath() != null ? cf.getPath() : "";
                         for (Coding coding : cf.getCode()) {
                             String system = coding.getSystem() != null ? coding.getSystem() : "";
-                            String code = coding.getCode() != null ? coding.getCode() : "";
+                            String code = coding.getCode() != null ? coding.getCode()
+                                    : (coding.getDisplay() != null ? coding.getDisplay() : "");
                             entries.add(buildTriggerIndex(resourceType, path, system, code, protocolDefinitionId, actionId));
                         }
                     }
