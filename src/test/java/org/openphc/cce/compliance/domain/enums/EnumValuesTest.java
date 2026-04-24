@@ -43,9 +43,10 @@ class EnumValuesTest {
 
     @Test
     void deviationType_hasCorrectValues() {
-        assertEquals(2, DeviationType.values().length);
+        assertEquals(3, DeviationType.values().length);
         assertNotNull(DeviationType.valueOf("OVERDUE"));
         assertNotNull(DeviationType.valueOf("MISSED"));
+        assertNotNull(DeviationType.valueOf("ORDER_VIOLATION"));
     }
 
     @Test
