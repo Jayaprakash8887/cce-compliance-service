@@ -107,6 +107,10 @@ public class ResourceInfoExtractor {
 
     private void addCodePathTriple(String path, JsonNode coding, List<CodePathTriple> result) {
         JsonNode code = coding.get("code");
+        if (code == null || !code.isTextual()) {
+            // Fallback: use "display" when "code" is absent (e.g., TRANSFER_ENCOUNTER)
+            code = coding.get("display");
+        }
         if (code != null && code.isTextual()) {
             JsonNode system = coding.get("system");
             String systemStr = (system != null && system.isTextual()) ? system.asText() : "";
