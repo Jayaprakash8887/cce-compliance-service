@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -110,6 +111,9 @@ public class StepInstanceService {
 
         log.info("Completed step: stepId={}, actionId={}, completionStatus={}",
                 step.getId(), step.getActionId(), step.getCompletionStatus());
+
+        // Detect order violations (must-have prerequisites still incomplete)
+        detectOrderViolations(step);
 
         // Progressive step instantiation
         createDependentSteps(step);
@@ -204,6 +208,65 @@ public class StepInstanceService {
 
         return deviationService.recordDeviation(protocolInstance, step, deviationType,
                 metadata.isEmpty() ? null : metadata);
+    }
+
+    /**
+     * Detect order violations: when a step completes, check if any immediate
+     * predecessor steps (with requiredBehavior="must") are still in
+     * non-terminal incomplete states (PENDING, DUE, OVERDUE).
+     * A predecessor of action X is any action whose relatedActions list contains X.
+     */
+    private void detectOrderViolations(StepInstance completedStep) {
+        ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
+
+        var definition = protocolInstance.getProtocolDefinition().getDefinition();
+        var planDefinition = planDefinitionParser.parse(definition.toString());
+        var actions = planDefinitionParser.extractActions(planDefinition);
+
+        String completedActionId = completedStep.getActionId();
+
+        // Find immediate predecessors: actions whose relatedActions contain this action's id
+        // and that have requiredBehavior="must"
+        List<String> mustPredecessorIds = actions.stream()
+                .filter(a -> "must".equals(a.requiredBehavior()))
+                .filter(a -> a.relatedActions().stream()
+                        .anyMatch(ra -> completedActionId.equals(ra.actionId())))
+                .map(PlanDefinitionParser.ActionMetadata::id)
+                .toList();
+
+        if (mustPredecessorIds.isEmpty()) {
+            return;
+        }
+
+        // Check if any must-predecessor steps are still in actionable (incomplete) states
+        List<StepInstance> siblings = stepInstanceRepository
+                .findByProtocolInstanceId(protocolInstance.getId());
+
+        List<String> incompletePrerequisites = new ArrayList<>();
+        for (String predecessorId : mustPredecessorIds) {
+            boolean hasIncomplete = siblings.stream()
+                    .filter(s -> predecessorId.equals(s.getActionId()))
+                    .anyMatch(s -> ACTIONABLE_STATES.contains(s.getState()));
+            if (hasIncomplete) {
+                incompletePrerequisites.add(predecessorId);
+            }
+        }
+
+        if (!incompletePrerequisites.isEmpty()) {
+            Map<String, Object> metadata = new LinkedHashMap<>();
+            metadata.put("incompletePrerequisites", incompletePrerequisites);
+            metadata.put("completedActionId", completedActionId);
+
+            Deviation deviation = deviationService.recordDeviation(
+                    protocolInstance, completedStep,
+                    DeviationType.ORDER_VIOLATION, metadata);
+
+            log.warn("Order violation detected: step {} (actionId={}) completed while "
+                            + "prerequisite steps {} are still incomplete",
+                    completedStep.getId(), completedActionId, incompletePrerequisites);
+
+            intelligenceActionEvaluator.evaluateOnDeviation(completedStep, deviation);
+        }
     }
 
     /**

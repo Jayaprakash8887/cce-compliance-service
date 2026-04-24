@@ -659,6 +659,209 @@ class StepInstanceServiceTest {
     }
 
     @Nested
+    class OrderViolationDetection {
+
+        @Test
+        void completingStep_withIncompleteMustPredecessor_createsOrderViolation() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            // Predecessor step (vitals-recording) still PENDING
+            StepInstance predecessorStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("vitals-recording")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(1))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(2))
+                    .build();
+
+            // Successor step (chief-complaints) being completed
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("chief-complaints")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(predecessorStep, completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            // vitals-recording has relatedAction pointing to chief-complaints
+            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
+                    new PlanDefinitionParser.ActionMetadata("vitals-recording", "Vitals",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedActionInfo("chief-complaints", "after-end",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of()),
+                    new PlanDefinitionParser.ActionMetadata("chief-complaints", "Chief Complaints",
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.ORDER_VIOLATION), any()))
+                    .thenReturn(deviation);
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+
+            verify(deviationService).recordDeviation(
+                    eq(protocolInstance), eq(completedStep), eq(DeviationType.ORDER_VIOLATION),
+                    argThat(metadata -> {
+                        @SuppressWarnings("unchecked")
+                        List<String> incomplete = (List<String>) metadata.get("incompletePrerequisites");
+                        return incomplete != null && incomplete.contains("vitals-recording");
+                    }));
+            verify(intelligenceActionEvaluator).evaluateOnDeviation(completedStep, deviation);
+        }
+
+        @Test
+        void completingStep_withCompletedMustPredecessor_noOrderViolation() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            // Predecessor step already COMPLETED
+            StepInstance predecessorStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("vitals-recording")
+                    .repeatIndex(0)
+                    .state(StepState.COMPLETED)
+                    .requiredBehavior("must")
+                    .build();
+
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("chief-complaints")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(predecessorStep, completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
+                    new PlanDefinitionParser.ActionMetadata("vitals-recording", "Vitals",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedActionInfo("chief-complaints", "after-end",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of()),
+                    new PlanDefinitionParser.ActionMetadata("chief-complaints", "Chief Complaints",
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+
+            verify(deviationService, never()).recordDeviation(
+                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+        }
+
+        @Test
+        void completingStep_withIncompleteCouldPredecessor_noOrderViolation() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            // Predecessor step is optional (could) and still PENDING — not a violation
+            StepInstance predecessorStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("history-assessment")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("could")
+                    .build();
+
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("lab-order")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(predecessorStep, completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            // history-assessment (could) → lab-order
+            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
+                    new PlanDefinitionParser.ActionMetadata("history-assessment", "History",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedActionInfo("lab-order", "after-end",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "could", List.of()),
+                    new PlanDefinitionParser.ActionMetadata("lab-order", "Lab Order",
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+
+            verify(deviationService, never()).recordDeviation(
+                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+        }
+
+        @Test
+        void completingFirstStep_noPredecessors_noOrderViolation() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            // First step in chain — no predecessors
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("visit-encounter")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("must")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(completedStep));
+
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            // visit-encounter has relatedAction but no one points TO it
+            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
+                    new PlanDefinitionParser.ActionMetadata("visit-encounter", "Visit",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedActionInfo("vitals-recording", "after-start",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of()),
+                    new PlanDefinitionParser.ActionMetadata("vitals-recording", "Vitals",
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+
+            verify(deviationService, never()).recordDeviation(
+                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+        }
+    }
+
+    @Nested
     class ReadOperations {
 
         @Test
