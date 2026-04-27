@@ -502,7 +502,7 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
   "status": "ACTIVE",
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
-  "target": "SUPERVISOR",
+  "intelligenceChannel": "supervisor",
   "definition": { ... },
   "createdAt": "2026-04-07T10:30:00Z",
   "updatedAt": "2026-04-07T10:30:00Z"
@@ -694,7 +694,7 @@ View intelligence action execution records.
 | `status` | String | No | `ACTIVE` or `RETIRED` |
 | `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | String | Yes | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `target` | String | Yes | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` |
+| `intelligenceChannel` | String | Yes | Routing channel (e.g., `supervisor`, `patient`, `high_hospital_alert`) |
 | `definition` | Map | No | Full ActivityDefinition as JSONB |
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |

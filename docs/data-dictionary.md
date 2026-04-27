@@ -132,7 +132,7 @@ erDiagram
         varchar status
         varchar action_type
         varchar severity
-        varchar target
+        varchar intelligence_channel
         jsonb definition
         timestamptz created_at
         timestamptz updated_at
@@ -327,7 +327,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | Primary Key | `deviation_pkey` | `id` |
 | Foreign Key | `deviation_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Foreign Key | `deviation_step_instance_id_fkey` | `step_instance_id` → `step_instance(id)` |
-| Check | — | `deviation_type IN ('OVERDUE', 'MISSED')` |
+| Check | — | `deviation_type IN ('OVERDUE', 'MISSED', 'ORDER_VIOLATION')` |
 | B-tree Index | `idx_deviation_protocol` | `protocol_instance_id` |
 | B-tree Index | `idx_deviation_type` | `deviation_type` |
 
@@ -479,7 +479,7 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. See [ActionDefinitionStatus](#actiondefinitionstatus). |
 | `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionType](#actiontype). |
 | `severity` | `VARCHAR` | Yes | — | Default severity level. See [IntelligenceSeverity](#intelligenceseverity). Can be overridden by PlanDefinition extension. |
-| `target` | `VARCHAR` | Yes | — | Default intelligence target. See [IntelligenceTarget](#intelligencetarget). Can be overridden by PlanDefinition extension. |
+| `intelligence_channel` | `VARCHAR` | Yes | — | Default intelligence channel for routing (e.g., `supervisor`, `patient`, `high_hospital_alert`). Free-form string — can be overridden by PlanDefinition extension. |
 | `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 ActivityDefinition resource JSON. Contains message template, routing config, and action-specific properties. See [JSONB: action_definition](#action_definition--definition). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
@@ -493,7 +493,6 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | Check | — | `status IN ('ACTIVE', 'RETIRED')` |
 | Check | — | `action_type IN ('CommunicationRequest', 'Task', 'ServiceRequest')` |
 | Check | — | `severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')` or NULL |
-| Check | — | `target IN ('PATIENT', 'ASSIGNED_WORKER', 'SUPERVISOR', 'FACILITY')` or NULL |
 | Partial B-tree | `idx_action_definition_status` | `status WHERE status = 'ACTIVE'` — Active definitions for resolution. |
 | B-tree Index | `idx_action_definition_canonical` | `canonical_url` — Lookup by canonical URL. |
 
@@ -519,7 +518,7 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 | `deviation_id` | `UUID` | Yes | — | The deviation that triggered the action. `NULL` for completion-triggered actions. |
 | `subject` | `VARCHAR` | **NOT NULL** | — | Patient identifier (UPID). Denormalized for direct queries. |
 | `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`). |
-| `intelligence_channel` | `VARCHAR` | Yes | — | Intelligence channel from PlanDefinition override or ActionDefinition. |
+| `intelligence_channel` | `VARCHAR` | **NOT NULL** | — | Intelligence channel from PlanDefinition override or ActionDefinition. |
 | `step_state` | `VARCHAR` | Yes | — | Step state at time of evaluation (e.g., `overdue`, `missed`, `completed`). |
 | `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this action was evaluated: `overdue`, `missed`, `completion`. |
 | `step_action_id` | `VARCHAR` | Yes | — | The PlanDefinition intelligence action ID that fired (e.g., `bp-high-alert`). |
@@ -590,6 +589,7 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 |-------|---------|
 | `OVERDUE` | Scheduler transitions step `DUE` → `OVERDUE`. |
 | `MISSED` | Scheduler transitions step `OVERDUE` → `MISSED`. |
+| `ORDER_VIOLATION` | Step completed out of sequence (violates `relatedAction` ordering). |
 
 
 ### ProcessingStatus
@@ -636,14 +636,9 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 | `HIGH` | Urgent. Prompt action required. |
 | `CRITICAL` | Emergency. Immediate intervention needed. |
 
-### IntelligenceTarget
+### Intelligence Channel
 
-| Value | Description |
-|-------|-------------|
-| `PATIENT` | Intelligence output directed to the patient. |
-| `ASSIGNED_WORKER` | Directed to the assigned community health worker. |
-| `SUPERVISOR` | Directed to the supervisor. |
-| `FACILITY` | Directed to the healthcare facility. |
+The `intelligence_channel` field on `action_definition` and `intelligence_event_log` is a **free-form string** (not a constrained enum). It represents the routing channel for the Intelligence Service to deliver the action (e.g., `supervisor`, `patient`, `high_hospital_alert`, `facility`). Values are extracted from the PlanDefinition extension `http://openphc.org/fhir/StructureDefinition/intelligence-channel` at evaluation time, falling back to the `ActionDefinition.intelligenceChannel` default.
 
 ---
 

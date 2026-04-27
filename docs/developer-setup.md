@@ -101,8 +101,7 @@ Configured via `cce.kafka.topics.*` in `application.yml`:
 |---|---|---|
 | `cce.kafka.topics.inbound-events` | `cce.events.inbound` | Inbound clinical events |
 | `cce.kafka.topics.scheduler-triggers` | `cce.scheduler.triggers` | Scheduler timer triggers |
-| `cce.kafka.topics.intelligence-triggers` | `cce.intelligence.triggers` | Outbound deviation events |
-| `cce.kafka.topics.protocol-control` | `cce.protocol.control` | Protocol lifecycle (reserved) |
+| `cce.kafka.topics.intelligence-triggers` | `cce.intelligence.triggers` | Outbound intelligence trigger events |
 
 ### 3.3 JPA & Hibernate
 
@@ -152,13 +151,16 @@ cce-compliance-service/
 │       │   ├── kafka/           # Kafka consumers, models, config
 │       │   │   ├── config/      # Consumer/Producer factories, topic bindings
 │       │   │   ├── consumer/    # InboundEventConsumer, SchedulerTriggerConsumer
-│       │   │   └── model/       # CloudEventMessage, SchedulerTriggerMessage, IntelligenceTriggerEvent
+│       │   │   ├── model/       # CloudEventMessage, SchedulerTriggerMessage, IntelligenceTriggerEvent
+│       │   │   └── producer/    # IntelligenceTriggerProducer
 │       │   ├── service/         # Business logic (ComplianceEngine + supporting services)
 │       │   └── web/             # REST controllers, DTOs, exception handler
 │       └── resources/
 │           ├── application.yml
 │           └── db/migration/
-│               └── V1__initial_schema.sql
+│               ├── V1__initial_schema.sql
+│               ├── V2__intelligence_tables.sql
+│               └── V3__add_order_violation_deviation_type.sql
 ├── Dockerfile                          # Multi-stage Docker build
 ├── .gitignore
 ├── build.gradle                        # Gradle build configuration
@@ -191,7 +193,9 @@ Migrations are applied automatically on application startup. To run manually:
 
 | Version | Description | Script |
 |---|---|---|
-| V1 | Initial schema | `V1__initial_schema.sql` |
+| V1 | Initial schema (7 tables) | `V1__initial_schema.sql` |
+| V2 | Intelligence tables (action_definition, intelligence_event_log) | `V2__intelligence_tables.sql` |
+| V3 | Add ORDER_VIOLATION deviation type | `V3__add_order_violation_deviation_type.sql` |
 
 ## 6. Docker Build
 
@@ -261,10 +265,10 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 ### 8.3 Running Tests
 
 ```bash
-# Unit tests (254 tests)
+# Unit tests (351 tests)
 ./gradlew test
 
-# Integration tests (24 tests — EmbeddedKafka + H2)
+# Integration tests (39 tests — EmbeddedKafka + H2)
 ./gradlew integrationTest
 
 # Specific test class
