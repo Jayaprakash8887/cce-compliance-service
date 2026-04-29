@@ -47,7 +47,7 @@ class IntelligenceTriggerProducerTest {
     @Test
     void publish_success_incrementsCounterAndResolvesFuture() throws Exception {
         IntelligenceTriggerEvent event = buildEvent();
-        String expectedKey = event.getActionRunId().toString();
+        String expectedKey = event.getIntelligenceEventId().toString();
 
         RecordMetadata metadata = new RecordMetadata(
                 new TopicPartition("cce.intelligence.triggers", 3), 0, 42, 0L, 0, 0);
@@ -79,9 +79,9 @@ class IntelligenceTriggerProducerTest {
     }
 
     @Test
-    void publish_usesActionRunIdAsKey() {
+    void publish_usesIntelligenceEventIdAsKey() {
         IntelligenceTriggerEvent event = buildEvent();
-        String expectedKey = event.getActionRunId().toString();
+        String expectedKey = event.getIntelligenceEventId().toString();
 
         CompletableFuture<SendResult<String, Object>> future = new CompletableFuture<>();
         future.completeExceptionally(new RuntimeException("test failure"));
@@ -123,7 +123,7 @@ class IntelligenceTriggerProducerTest {
     void publish_multipleSuccessfulEvents_counterIncrementsCorrectly() {
         for (int i = 0; i < 3; i++) {
             IntelligenceTriggerEvent event = buildEvent();
-            String key = event.getActionRunId().toString();
+            String key = event.getIntelligenceEventId().toString();
 
             RecordMetadata metadata = new RecordMetadata(
                     new TopicPartition("cce.intelligence.triggers", 0), 0, i, 0L, 0, 0);
@@ -145,7 +145,7 @@ class IntelligenceTriggerProducerTest {
         return IntelligenceTriggerEvent.builder()
                 .id(UUID.randomUUID())
                 .subject("260225-0002-5501")
-                .actionRunId(UUID.randomUUID())
+                .intelligenceEventId(UUID.randomUUID())
                 .actionDefinitionId(UUID.randomUUID())
                 .protocolDefinitionId(UUID.randomUUID())
                 .actionType("CommunicationRequest")

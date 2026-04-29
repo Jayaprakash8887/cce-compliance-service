@@ -510,7 +510,7 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
-| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. Maps to `actionRunId` in `IntelligenceTriggerEvent` for backward compatibility. |
+| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. Maps to `intelligenceEventId` in `IntelligenceTriggerEvent`. |
 | `event_payload` | `JSONB` | **NOT NULL** | — | Complete `IntelligenceTriggerEvent` published to Kafka. See [JSONB: intelligence_event_log event_payload](#intelligence_event_log--event_payload). |
 | `action_definition_id` | `UUID` | **NOT NULL** | — | ActionDefinition that was resolved and triggered. Plain UUID (no FK constraint). |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | The patient's protocol journey. Plain UUID (no FK constraint). |
@@ -792,7 +792,7 @@ The `event_payload` column stores the complete `IntelligenceTriggerEvent` publis
 {
   "id": "550e8400-e29b-41d4-a716-446655440099",
   "subject": "260225-0002-5501",
-  "actionRunId": "770e8400-e29b-41d4-a716-446655440000",
+  "intelligenceEventId": "770e8400-e29b-41d4-a716-446655440000",
   "actionDefinitionId": "aad00001-0001-0001-0001-000000000001",
   "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
   "actionType": "CommunicationRequest",
@@ -805,7 +805,7 @@ The `event_payload` column stores the complete `IntelligenceTriggerEvent` publis
 }
 ```
 
-> **Note:** The `actionRunId` field in the event payload maps to the `intelligence_event_log.id` (the row's primary key). This field name is kept for backward compatibility with the Intelligence Service consumer.
+> **Note:** The `intelligenceEventId` field in the event payload maps to the `intelligence_event_log.id` (the row's primary key).
 
 ### intelligence_event_log — `evaluation_context`
 

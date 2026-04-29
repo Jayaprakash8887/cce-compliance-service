@@ -20,7 +20,7 @@ public class IntelligenceTriggerEvent {
 
     private UUID id;
     private String subject;
-    private UUID actionRunId;
+    private UUID intelligenceEventId;
     private UUID actionDefinitionId;
     private UUID protocolDefinitionId;
     private String actionType;
