@@ -213,7 +213,7 @@ public class IntelligenceActionEvaluator {
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
                     .id(eventId)
                     .subject(protocol.getPatientId())
-                    .actionRunId(null) // Set after eventLog is saved
+                    .intelligenceEventId(null) // Set after eventLog is saved
                     .actionDefinitionId(definition.getId())
                     .protocolDefinitionId(protocol.getProtocolDefinition().getId())
                     .actionType(definition.getActionType().name())
@@ -244,8 +244,8 @@ public class IntelligenceActionEvaluator {
                     .build();
             eventLog = intelligenceEventLogRepository.save(eventLog);
 
-            // Set actionRunId to the event log ID for cross-service correlation
-            event.setActionRunId(eventLog.getId());
+            // Set intelligenceEventId to the event log ID for cross-service correlation
+            event.setIntelligenceEventId(eventLog.getId());
             eventLog.setEventPayload(objectMapper.valueToTree(event));
 
             // Publish intelligence trigger event to Kafka

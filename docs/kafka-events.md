@@ -299,7 +299,7 @@ Published when an intelligence action fires — triggered by deviation detection
 {
   "id": "550e8400-e29b-41d4-a716-446655440099",
   "subject": "260225-0002-5501",
-  "actionRunId": "990e8400-e29b-41d4-a716-446655440010",
+  "intelligenceEventId": "990e8400-e29b-41d4-a716-446655440010",
   "actionDefinitionId": "aad00001-0001-0001-0001-000000000001",
   "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
   "actionType": "CommunicationRequest",
@@ -316,7 +316,7 @@ Published when an intelligence action fires — triggered by deviation detection
 |---|---|---|
 | `id` | UUID | Unique event identifier |
 | `subject` | String | Patient identifier (UPID) |
-| `actionRunId` | UUID | Intelligence event log record ID tracking this execution |
+| `intelligenceEventId` | UUID | Intelligence event log record ID tracking this execution |
 | `actionDefinitionId` | UUID | ActionDefinition that was resolved and triggered |
 | `protocolDefinitionId` | UUID | Protocol definition the step belongs to |
 | `actionType` | String | Action type from ActionDefinition (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`) |
@@ -327,7 +327,7 @@ Published when an intelligence action fires — triggered by deviation detection
 | `protocolCanonical` | String | Protocol `url\|version` |
 | `detectedAt` | OffsetDateTime | Detection timestamp |
 
-**Kafka Key:** `actionRunId` (ensures unique partitioning per action execution)
+**Kafka Key:** `intelligenceEventId` (ensures unique partitioning per action execution)
 
 #### Intelligence Event Types
 
@@ -405,8 +405,8 @@ public class IntelligenceTriggerProducer {
     private final Counter publishedCounter; // cce.events.intelligence.published
 
     public CompletableFuture<SendResult<String, Object>> publish(IntelligenceTriggerEvent event) {
-        // Key: actionRunId (unique per action execution)
-        String key = event.getActionRunId().toString();
+        // Key: intelligenceEventId (unique per action execution)
+        String key = event.getIntelligenceEventId().toString();
         return kafkaTemplate.send(topic, key, event)
             .whenComplete((result, ex) -> {
                 if (ex == null) {

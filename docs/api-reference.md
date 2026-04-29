@@ -637,7 +637,7 @@ View intelligence action execution records.
   "eventPayload": {
     "id": "550e8400-e29b-41d4-a716-446655440099",
     "subject": "260225-0002-5501",
-    "actionRunId": "bb0e8400-e29b-41d4-a716-446655440020",
+    "intelligenceEventId": "bb0e8400-e29b-41d4-a716-446655440020",
     "actionDefinitionId": "aa0e8400-e29b-41d4-a716-446655440010",
     "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
     "actionType": "CommunicationRequest",
@@ -703,7 +703,7 @@ View intelligence action execution records.
 
 | Field | Type | Nullable | Description |
 |---|---|---|---|
-| `id` | UUID | No | Unique identifier (maps to `actionRunId` in Kafka event) |
+| `id` | UUID | No | Unique identifier (maps to `intelligenceEventId` in Kafka event) |
 | `eventPayload` | JsonNode | No | Complete `IntelligenceTriggerEvent` published to Kafka |
 | `actionDefinitionId` | UUID | No | ActionDefinition that was resolved |
 | `protocolInstanceId` | UUID | No | Patient's protocol instance |
