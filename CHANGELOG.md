@@ -11,17 +11,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Intelligence Pipeline
 - `IntelligenceActionEvaluator` — core engine evaluating PlanDefinition intelligence actions on deviation detection and step completion
-- Intelligence action extraction from nested `PlanDefinition.action.action[]` with condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and target extensions
+- Intelligence action extraction from nested `PlanDefinition.action.action[]` with condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and intelligence channel extensions
 - `IntelligenceTriggerProducer` — publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` Kafka topic (fire-and-forget, keyed by protocolInstanceId)
 - `IntelligenceEventLog` entity recording each intelligence action execution with evaluation context and Kafka event payload
 - `ActionDefinition` entity for FHIR `ActivityDefinition` resources — CRUD operations via `ActionDefinitionService`
 - Flyway V2 migration: `action_definition`, `intelligence_event_log` tables with indexes
+- Flyway V3 migration: `ORDER_VIOLATION` added to `deviation_type` CHECK constraint
+- `ORDER_VIOLATION` deviation type for detecting out-of-sequence step completions
 
 #### New Enums
 - `ActionDefinitionStatus` (ACTIVE, RETIRED)
 - `ActionType` (CommunicationRequest, Task, ServiceRequest)
 - `IntelligenceSeverity` (LOW, MEDIUM, HIGH, CRITICAL)
-- `IntelligenceTarget` (PATIENT, ASSIGNED_WORKER, SUPERVISOR, FACILITY)
 
 #### REST API
 - `ActionDefinitionController` — 6 endpoints: POST create, GET list (filter by status), GET by ID, PUT update, POST retire, DELETE
@@ -47,7 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PlanDefinitionParser.ActionMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
 
 ### Testing
-- 352 unit tests (was 254 in v1.0.0) — 98 new tests for intelligence pipeline
+- 351 unit tests (was 254 in v1.0.0) — 97 new tests for intelligence pipeline
 - 39 integration tests (was 24 in v1.0.0) — 15 new: `ActionDefinitionApiIntegrationTest` (9), `IntelligencePipelineIntegrationTest` (6)
 
 ---

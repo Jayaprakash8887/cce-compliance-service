@@ -191,15 +191,15 @@ org.openphc.cce.compliance
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
 │   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog)
-│   ├── enums/                                 # 11 value-based enums
-│   └── repository/                            # 10 Spring Data JPA repositories
+│   ├── enums/                                 # 10 value-based enums
+│   └── repository/                            # 9 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
 │   ├── config/                                # Consumer/Producer factories, topic bindings
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
 │   └── producer/                              # IntelligenceTriggerProducer
-├── service/                                   # 11 business logic services + supporting records
+├── service/                                   # 12 business logic services + supporting records
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
 
@@ -587,7 +587,7 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
           "valueCode": "high"
         },
         {
-          "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+          "url": "http://openphc.org/fhir/StructureDefinition/intelligence-channel",
           "valueCode": "supervisor"
         }
       ]
@@ -605,7 +605,7 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 | `canonicalUrl` + `version` | Unique identifier, referenced by `definitionCanonical` in PlanDefinition intelligence actions |
 | `actionType` | FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (from PlanDefinition extension) |
-| `target` | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` (from PlanDefinition extension) |
+| `intelligenceChannel` | Free-form routing identifier (e.g., `supervisor`, `patient`, `high_hospital_alert`) extracted from PlanDefinition extension |
 | `definition` | Full ActivityDefinition JSON (message template, routing config) |
 
 #### Intelligence Event Logging

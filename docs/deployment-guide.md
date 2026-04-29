@@ -1,7 +1,7 @@
 # Deployment Guide
 
 > **CCE Compliance Service** — Production deployment reference  
-> **Version:** 1.0.0 | **Java:** 21 LTS | **Spring Boot:** 3.4.2
+> **Version:** 1.1.0 | **Java:** 21 LTS | **Spring Boot:** 3.4.2
 
 ---
 
@@ -228,6 +228,7 @@ Flyway manages all schema migrations automatically on application startup.
 - Migrations are located at `classpath:db/migration`
 - `V1__initial_schema.sql` creates the initial 7 tables with indexes and constraints
 - `V2__intelligence_tables.sql` adds `action_definition`, `intelligence_event_log` tables (9 total)
+- `V3__add_order_violation_deviation_type.sql` adds `ORDER_VIOLATION` to the deviation_type CHECK constraint
 - `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
 - **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
 

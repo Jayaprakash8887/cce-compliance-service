@@ -10,18 +10,20 @@
 
 Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recording, and publishing of intelligence actions defined within FHIR `PlanDefinition` protocols. When a step deviation is detected (OVERDUE/MISSED) or a step is completed, nested intelligence actions are evaluated against runtime context using JSONLogic/FHIRPath conditions. Matching actions resolve to `ActivityDefinition`-backed action definitions, create an `IntelligenceEventLog` record, and publish trigger events to Kafka for downstream processing by the CCE Intelligence Service.
 
+Additionally, this release adds `ORDER_VIOLATION` as a new deviation type (V3 migration) to detect steps completed out of sequence.
+
 ---
 
 ## Feature Summary
 
 ### Intelligence Action Evaluation
 - Nested `PlanDefinition.action.action[]` intelligence actions extracted during protocol loading
-- Each intelligence action has a condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and target extensions
+- Each intelligence action has a condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and intelligence channel extensions
 - `IntelligenceActionEvaluator` evaluates actions at two trigger points:
   - **Deviation detection** — when a step transitions to OVERDUE or MISSED
   - **Step completion** — when a step is completed (for actions like "notify on late completion")
 - Context variables available to conditions: `stepState`, `deviationType`, `daysOverdue`, `daysPastMissedDate`, `actionId`, `repeatIndex`, `completionStatus`, `completedAt`
-- Bounded PlanDefinition parse cache eliminates redundant FHIR parsing per protocol
+- Bounded PlanDefinition parse cache (`ConcurrentHashMap`) eliminates redundant FHIR parsing per protocol
 
 ### Action Definitions (FHIR ActivityDefinition)
 - CRUD operations for `ActivityDefinition` resources stored as `ActionDefinition` entities
@@ -30,7 +32,7 @@ Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recordin
 - Referenced by intelligence actions via `definitionCanonical` (format: `url|version`)
 - Action types: `CommunicationRequest`, `Task`, `ServiceRequest` (from FHIR `ActivityDefinition.kind`)
 - Severity levels: LOW, MEDIUM, HIGH, CRITICAL
-- Target routing: PATIENT, ASSIGNED_WORKER, SUPERVISOR, FACILITY
+- Intelligence channel: free-form routing identifier (e.g., `supervisor`, `patient`, `high_hospital_alert`)
 
 ### Intelligence Event Logging
 - `IntelligenceEventLog` entity records each intelligence action execution in a single flat row
@@ -43,6 +45,10 @@ Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recordin
 - Kafka key: `protocolInstanceId` (partition locality for per-patient ordering)
 - Fire-and-forget model — publishing failures are logged but don't fail the main transaction
 - Event payload includes: protocolInstanceId, stepInstanceId, deviationId, deviationType, stepState, actionId, protocolCanonical
+
+### Order Violation Detection
+- New `ORDER_VIOLATION` deviation type (V3 migration)
+- Detects when protocol steps are completed out of defined sequence (`relatedAction` ordering)
 
 ### REST API Additions
 - **Action Definitions** — 6 endpoints at `/v1/compliance/action-definitions`:
@@ -61,7 +67,7 @@ Release 1.1.0 adds the Intelligence Pipeline — end-to-end evaluation, recordin
 - MDC `intelligenceEventId` context during intelligence event publishing
 - Structured log messages for intelligence pipeline steps
 
-### Performance Optimizations
+### Performance
 - Bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects in `IntelligenceActionEvaluator`
 
 ---
@@ -87,11 +93,12 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 
 ## Database Schema Changes
 
-2 new tables added via Flyway V2 migration (`V2__intelligence_tables.sql`):
-- `action_definition` — FHIR ActivityDefinition storage with canonical uniqueness
-- `intelligence_event_log` — Intelligence action execution and evaluation context (flat, no FKs)
+3 Flyway migrations:
+- `V1__initial_schema.sql` — Initial 7 tables (protocol_definition, protocol_instance, step_instance, deviation, trigger_index, event_log, audit_log)
+- `V2__intelligence_tables.sql` — 2 new tables: `action_definition`, `intelligence_event_log` (9 total)
+- `V3__add_order_violation_deviation_type.sql` — Adds `ORDER_VIOLATION` to deviation_type CHECK constraint
 
-Total tables: 9 (was 7 in v1.0.0)
+Total tables: 9
 
 ---
 
@@ -116,7 +123,7 @@ Total tables: 9 (was 7 in v1.0.0)
 
 ## Test Coverage
 
-- **352 unit tests** covering all services, controllers, mappers, and intelligence pipeline
+- **351 unit tests** covering all services, controllers, mappers, and intelligence pipeline
 - **39 integration tests** covering end-to-end workflows with EmbeddedKafka + H2
 - JaCoCo coverage reports via `./gradlew test jacocoTestReport`
 
