@@ -502,7 +502,7 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
   "status": "ACTIVE",
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
-  "intelligenceChannel": "supervisor",
+  "intelligenceDestination": "supervisor",
   "definition": { ... },
   "createdAt": "2026-04-07T10:30:00Z",
   "updatedAt": "2026-04-07T10:30:00Z"
@@ -642,7 +642,7 @@ View intelligence action execution records.
     "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
     "actionType": "CommunicationRequest",
     "severity": "HIGH",
-    "intelligenceChannel": "supervisor",
+    "intelligenceDestination": "supervisor",
     "stepState": "overdue",
     "actionId": "anc-visit-2",
     "protocolCanonical": "http://openphc.org/fhir/PlanDefinition/anc-high-risk|2.1",
@@ -654,7 +654,7 @@ View intelligence action execution records.
   "deviationId": "dd0e8400-e29b-41d4-a716-446655440003",
   "subject": "260225-0002-5501",
   "actionType": "CommunicationRequest",
-  "intelligenceChannel": "supervisor",
+  "intelligenceDestination": "supervisor",
   "stepState": "overdue",
   "triggerReason": "overdue",
   "stepActionId": "anc-visit-2-overdue-escalation",
@@ -694,7 +694,7 @@ View intelligence action execution records.
 | `status` | String | No | `ACTIVE` or `RETIRED` |
 | `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | String | Yes | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `intelligenceChannel` | String | Yes | Routing channel (e.g., `supervisor`, `patient`, `high_hospital_alert`) |
+| `intelligenceDestination` | String | Yes | Routing destination (e.g., `supervisor`, `patient`, `high_hospital_alert`) |
 | `definition` | Map | No | Full ActivityDefinition as JSONB |
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |
@@ -711,7 +711,7 @@ View intelligence action execution records.
 | `deviationId` | UUID | Yes | Deviation that triggered the action. `NULL` for completion-triggered |
 | `subject` | String | No | Patient UPID |
 | `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
-| `intelligenceChannel` | String | Yes | Intelligence channel |
+| `intelligenceDestination` | String | Yes | Intelligence destination |
 | `stepState` | String | Yes | Step state at evaluation time |
 | `triggerReason` | String | No | `overdue`, `missed`, `completion` |
 | `stepActionId` | String | Yes | PlanDefinition intelligence action ID that fired |

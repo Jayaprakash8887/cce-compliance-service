@@ -59,8 +59,8 @@ public class ActionDefinitionService {
         IntelligenceSeverity severity = extractExtensionEnum(definition,
                 "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
                 IntelligenceSeverity.class);
-        String channel = extractExtensionString(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-channel");
+        String destination = extractExtensionString(definition,
+                "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
 
         ActionDefinition actionDef = ActionDefinition.builder()
                 .canonicalUrl(url)
@@ -70,7 +70,7 @@ public class ActionDefinitionService {
                 .status(ActionDefinitionStatus.ACTIVE)
                 .actionType(actionType)
                 .severity(severity)
-                .intelligenceChannel(channel)
+                .intelligenceDestination(destination)
                 .definition(definition)
                 .build();
 
@@ -109,8 +109,8 @@ public class ActionDefinitionService {
         actionDef.setSeverity(extractExtensionEnum(definition,
                 "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
                 IntelligenceSeverity.class));
-        actionDef.setIntelligenceChannel(extractExtensionString(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-channel"));
+        actionDef.setIntelligenceDestination(extractExtensionString(definition,
+                "http://openphc.org/fhir/StructureDefinition/intelligence-destination"));
         actionDef.setDefinition(definition);
 
         actionDef = actionDefinitionRepository.save(actionDef);

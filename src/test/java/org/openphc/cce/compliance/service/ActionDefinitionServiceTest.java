@@ -73,7 +73,7 @@ class ActionDefinitionServiceTest {
             assertEquals(ActionDefinitionStatus.ACTIVE, result.getStatus());
             assertEquals(ActionType.CommunicationRequest, result.getActionType());
             assertEquals(IntelligenceSeverity.HIGH, result.getSeverity());
-            assertEquals("SUPERVISOR", result.getIntelligenceChannel());
+            assertEquals("SUPERVISOR", result.getIntelligenceDestination());
             assertEquals(definition, result.getDefinition());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_CREATED"),
@@ -97,7 +97,7 @@ class ActionDefinitionServiceTest {
 
             assertEquals(ActionType.Task, result.getActionType());
             assertNull(result.getSeverity());
-            assertNull(result.getIntelligenceChannel());
+            assertNull(result.getIntelligenceDestination());
         }
 
         @Test
@@ -175,7 +175,7 @@ class ActionDefinitionServiceTest {
             assertEquals("updated-action", result.getName());
             assertEquals(ActionType.ServiceRequest, result.getActionType());
             assertEquals(IntelligenceSeverity.CRITICAL, result.getSeverity());
-            assertEquals("FACILITY", result.getIntelligenceChannel());
+            assertEquals("FACILITY", result.getIntelligenceDestination());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_UPDATED"),
                     eq("system"), eq("ActionDefinition"), eq(id.toString()), anyMap());
@@ -439,7 +439,7 @@ class ActionDefinitionServiceTest {
         sevExt.put("valueCode", severity);
 
         ObjectNode chExt = extensions.addObject();
-        chExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-channel");
+        chExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
         chExt.put("valueCode", channel);
 
         return node;

@@ -201,10 +201,10 @@ public class IntelligenceActionEvaluator {
 
         MDC.put("intelligenceEventId", eventId.toString());
         try {
-            // Resolve intelligence channel and severity (action-level overrides definition-level)
-            String intelligenceChannel = action.intelligenceChannel() != null
-                    ? action.intelligenceChannel()
-                    : definition.getIntelligenceChannel();
+            // Resolve intelligence destination and severity (action-level overrides definition-level)
+            String intelligenceDestination = action.intelligenceDestination() != null
+                    ? action.intelligenceDestination()
+                    : definition.getIntelligenceDestination();
             String severity = action.severity() != null
                     ? action.severity()
                     : (definition.getSeverity() != null ? definition.getSeverity().name() : null);
@@ -218,7 +218,7 @@ public class IntelligenceActionEvaluator {
                     .protocolDefinitionId(protocol.getProtocolDefinition().getId())
                     .actionType(definition.getActionType().name())
                     .severity(severity)
-                    .intelligenceChannel(intelligenceChannel)
+                    .intelligenceDestination(intelligenceDestination)
                     .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
@@ -234,7 +234,7 @@ public class IntelligenceActionEvaluator {
                     .deviationId(deviation != null ? deviation.getId() : null)
                     .subject(protocol.getPatientId())
                     .actionType(definition.getActionType().name())
-                    .intelligenceChannel(intelligenceChannel)
+                    .intelligenceDestination(intelligenceDestination)
                     .stepState(step.getState().name().toLowerCase())
                     .triggerReason(triggerReason)
                     .stepActionId(action.actionId())

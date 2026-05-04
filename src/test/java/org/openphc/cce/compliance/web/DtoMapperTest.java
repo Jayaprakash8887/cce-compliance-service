@@ -315,7 +315,7 @@ class DtoMapperTest {
                 .status(ActionDefinitionStatus.ACTIVE)
                 .actionType(ActionType.CommunicationRequest)
                 .severity(IntelligenceSeverity.HIGH)
-                .intelligenceChannel("SUPERVISOR")
+                .intelligenceDestination("SUPERVISOR")
                 .definition(definition)
                 .createdAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC))
                 .updatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC))
@@ -332,7 +332,7 @@ class DtoMapperTest {
         assertEquals("ACTIVE", dto.getStatus());
         assertEquals("CommunicationRequest", dto.getActionType());
         assertEquals("HIGH", dto.getSeverity());
-        assertEquals("SUPERVISOR", dto.getIntelligenceChannel());
+        assertEquals("SUPERVISOR", dto.getIntelligenceDestination());
         assertSame(definition, dto.getDefinition());
         assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
         assertEquals(entity.getUpdatedAt(), dto.getUpdatedAt());
@@ -356,7 +356,7 @@ class DtoMapperTest {
         assertNull(dto.getName());
         assertNull(dto.getTitle());
         assertNull(dto.getSeverity());
-        assertNull(dto.getIntelligenceChannel());
+        assertNull(dto.getIntelligenceDestination());
     }
 
     @Test
@@ -379,7 +379,7 @@ class DtoMapperTest {
                 .deviationId(deviationId)
                 .subject("patient-1")
                 .actionType("CommunicationRequest")
-                .intelligenceChannel("sms")
+                .intelligenceDestination("sms")
                 .stepState("overdue")
                 .triggerReason("overdue")
                 .stepActionId("bp-check")
@@ -400,7 +400,7 @@ class DtoMapperTest {
         assertEquals(deviationId, dto.getDeviationId());
         assertEquals("patient-1", dto.getSubject());
         assertEquals("CommunicationRequest", dto.getActionType());
-        assertEquals("sms", dto.getIntelligenceChannel());
+        assertEquals("sms", dto.getIntelligenceDestination());
         assertEquals("overdue", dto.getStepState());
         assertEquals("overdue", dto.getTriggerReason());
         assertEquals("bp-check", dto.getStepActionId());
@@ -422,7 +422,7 @@ class DtoMapperTest {
                 .protocolInstanceId(UUID.randomUUID())
                 .subject("patient-1")
                 .actionType("Task")
-                .intelligenceChannel("email")
+                .intelligenceDestination("email")
                 .stepState("completed")
                 .triggerReason("completion")
                 .published(false)
@@ -476,7 +476,7 @@ class DtoMapperTest {
                 .protocolInstanceId(UUID.randomUUID())
                 .subject("patient-1")
                 .actionType("Task")
-                .intelligenceChannel("email")
+                .intelligenceDestination("email")
                 .stepState("completed")
                 .triggerReason("completion")
                 .published(true)

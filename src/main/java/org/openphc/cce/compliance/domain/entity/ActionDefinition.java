@@ -47,8 +47,8 @@ public class ActionDefinition {
     @Enumerated(EnumType.STRING)
     private IntelligenceSeverity severity;
 
-    @Column(name = "intelligence_channel")
-    private String intelligenceChannel;
+    @Column(name = "intelligence_destination")
+    private String intelligenceDestination;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")

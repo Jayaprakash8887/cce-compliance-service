@@ -150,7 +150,7 @@ class IntelligenceTriggerProducerTest {
                 .protocolDefinitionId(UUID.randomUUID())
                 .actionType("CommunicationRequest")
                 .severity("HIGH")
-                .intelligenceChannel("supervisor")
+                .intelligenceDestination("supervisor")
                 .stepState("overdue")
                 .actionId("blood-pressure-check")
                 .protocolCanonical("http://openphc.org/PlanDefinition/anc-high-risk|1.0.0")

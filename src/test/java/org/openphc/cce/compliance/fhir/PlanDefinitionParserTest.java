@@ -315,14 +315,14 @@ class PlanDefinitionParserTest {
         assertEquals("{\">\": [{\"var\": \"systolic\"}, 140]}", action1.conditionExpression());
         assertEquals("http://openphc.org/ActivityDefinition/high-bp-alert|1.0.0", action1.definitionCanonical());
         assertEquals("HIGH", action1.severity());
-        assertEquals("ASSIGNED_WORKER", action1.intelligenceChannel());
+        assertEquals("ASSIGNED_WORKER", action1.intelligenceDestination());
 
         PlanDefinitionParser.IntelligenceActionInfo action2 = bpAction.intelligenceActions().get(1);
         assertEquals("bp-critical-escalation", action2.actionId());
         assertEquals("text/fhirpath", action2.conditionLanguage());
         assertEquals("http://openphc.org/ActivityDefinition/bp-critical-escalation|1.0.0", action2.definitionCanonical());
         assertEquals("CRITICAL", action2.severity());
-        assertEquals("SUPERVISOR", action2.intelligenceChannel());
+        assertEquals("SUPERVISOR", action2.intelligenceDestination());
     }
 
     @Test
@@ -376,7 +376,7 @@ class PlanDefinitionParserTest {
         assertEquals("no-extensions-action", action.actionId());
         assertEquals("http://openphc.org/ActivityDefinition/no-ext-action|1.0.0", action.definitionCanonical());
         assertNull(action.severity());
-        assertNull(action.intelligenceChannel());
+        assertNull(action.intelligenceDestination());
     }
 
     @Test

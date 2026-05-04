@@ -14,7 +14,7 @@
       "valueCode": "HIGH"
     },
     {
-      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-channel",
+      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
       "valueCode": "ASSIGNED_WORKER"
     }
   ]

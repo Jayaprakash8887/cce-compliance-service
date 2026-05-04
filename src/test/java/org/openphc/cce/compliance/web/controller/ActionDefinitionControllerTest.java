@@ -54,7 +54,7 @@ class ActionDefinitionControllerTest {
         def.setStatus(ActionDefinitionStatus.ACTIVE);
         def.setActionType(ActionType.CommunicationRequest);
         def.setSeverity(IntelligenceSeverity.HIGH);
-        def.setIntelligenceChannel("SUPERVISOR");
+        def.setIntelligenceDestination("SUPERVISOR");
         def.setDefinition(objectMapper.createObjectNode().put("resourceType", "ActivityDefinition"));
         def.setCreatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC));
         def.setUpdatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC));
@@ -84,7 +84,7 @@ class ActionDefinitionControllerTest {
                 .andExpect(jsonPath("$.status").value("ACTIVE"))
                 .andExpect(jsonPath("$.actionType").value("CommunicationRequest"))
                 .andExpect(jsonPath("$.severity").value("HIGH"))
-                .andExpect(jsonPath("$.intelligenceChannel").value("SUPERVISOR"));
+                .andExpect(jsonPath("$.intelligenceDestination").value("SUPERVISOR"));
 
         verify(actionDefinitionService).createActionDefinition(any());
     }

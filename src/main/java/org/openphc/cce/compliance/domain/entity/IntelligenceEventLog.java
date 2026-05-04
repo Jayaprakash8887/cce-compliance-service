@@ -45,8 +45,8 @@ public class IntelligenceEventLog {
     @Column(name = "action_type", nullable = false)
     private String actionType;
 
-    @Column(name = "intelligence_channel", nullable = false)
-    private String intelligenceChannel;
+    @Column(name = "intelligence_destination", nullable = false)
+    private String intelligenceDestination;
 
     @Column(name = "step_state", nullable = false)
     private String stepState;

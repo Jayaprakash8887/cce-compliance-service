@@ -8,7 +8,7 @@ import java.util.UUID;
 
 /**
  * Published to cce.intelligence.triggers when an intelligence action fires.
- * Consumed by the CCE Intelligence Service for intelligence channel routing and delivery.
+ * Consumed by the CCE Intelligence Service for intelligence destination routing and delivery.
  */
 @Getter
 @Setter
@@ -25,7 +25,7 @@ public class IntelligenceTriggerEvent {
     private UUID protocolDefinitionId;
     private String actionType;
     private String severity;
-    private String intelligenceChannel;
+    private String intelligenceDestination;
     private String stepState;
     private String actionId;
     private String protocolCanonical;

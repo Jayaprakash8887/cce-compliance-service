@@ -231,8 +231,8 @@ public class PlanDefinitionParser {
             // Extract severity and target extensions
             String severity = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
-            String intelligenceChannel = extractCodeExtension(intelligenceAction,
-                    "http://openphc.org/fhir/StructureDefinition/intelligence-channel");
+            String intelligenceDestination = extractCodeExtension(intelligenceAction,
+                    "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
 
             actions.add(new IntelligenceActionInfo(
                     intelligenceAction.getId(),
@@ -240,7 +240,7 @@ public class PlanDefinitionParser {
                     condExpression,
                     definitionCanonical,
                     severity,
-                    intelligenceChannel
+                    intelligenceDestination
             ));
         }
 
@@ -355,6 +355,6 @@ public class PlanDefinitionParser {
             String conditionExpression,
             String definitionCanonical,
             String severity,
-            String intelligenceChannel
+            String intelligenceDestination
     ) {}
 }
