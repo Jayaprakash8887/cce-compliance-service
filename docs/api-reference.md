@@ -501,8 +501,6 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
   "title": "ANC Escalation Notification",
   "status": "ACTIVE",
   "actionType": "CommunicationRequest",
-  "severity": "HIGH",
-  "intelligenceDestination": "openMRS",
   "definition": { ... },
   "createdAt": "2026-04-07T10:30:00Z",
   "updatedAt": "2026-04-07T10:30:00Z"
@@ -693,8 +691,6 @@ View intelligence action execution records.
 | `title` | String | Yes | Human-readable title |
 | `status` | String | No | `ACTIVE` or `RETIRED` |
 | `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
-| `severity` | String | Yes | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `intelligenceDestination` | String | Yes | Routing destination (e.g., `openMRS`, `SPICE`, `E-Buzima`) |
 | `definition` | Map | No | Full ActivityDefinition as JSONB |
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |
