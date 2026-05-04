@@ -502,7 +502,7 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
   "status": "ACTIVE",
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
-  "intelligenceDestination": "supervisor",
+  "intelligenceDestination": "openMRS",
   "definition": { ... },
   "createdAt": "2026-04-07T10:30:00Z",
   "updatedAt": "2026-04-07T10:30:00Z"
@@ -642,7 +642,7 @@ View intelligence action execution records.
     "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
     "actionType": "CommunicationRequest",
     "severity": "HIGH",
-    "intelligenceDestination": "supervisor",
+    "intelligenceDestination": "openMRS",
     "stepState": "overdue",
     "actionId": "anc-visit-2",
     "protocolCanonical": "http://openphc.org/fhir/PlanDefinition/anc-high-risk|2.1",
@@ -654,7 +654,7 @@ View intelligence action execution records.
   "deviationId": "dd0e8400-e29b-41d4-a716-446655440003",
   "subject": "260225-0002-5501",
   "actionType": "CommunicationRequest",
-  "intelligenceDestination": "supervisor",
+  "intelligenceDestination": "openMRS",
   "stepState": "overdue",
   "triggerReason": "overdue",
   "stepActionId": "anc-visit-2-overdue-escalation",
@@ -694,7 +694,7 @@ View intelligence action execution records.
 | `status` | String | No | `ACTIVE` or `RETIRED` |
 | `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | String | Yes | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| `intelligenceDestination` | String | Yes | Routing destination (e.g., `supervisor`, `patient`, `high_hospital_alert`) |
+| `intelligenceDestination` | String | Yes | Routing destination (e.g., `openMRS`, `SPICE`, `E-Buzima`) |
 | `definition` | Map | No | Full ActivityDefinition as JSONB |
 | `createdAt` | OffsetDateTime | No | Record creation |
 | `updatedAt` | OffsetDateTime | No | Last update |

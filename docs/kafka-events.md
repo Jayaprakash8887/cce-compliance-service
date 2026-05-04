@@ -304,7 +304,7 @@ Published when an intelligence action fires — triggered by deviation detection
   "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
-  "intelligenceDestination": "supervisor",
+  "intelligenceDestination": "openMRS",
   "stepState": "overdue",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
@@ -321,7 +321,7 @@ Published when an intelligence action fires — triggered by deviation detection
 | `protocolDefinitionId` | UUID | Protocol definition the step belongs to |
 | `actionType` | String | Action type from ActionDefinition (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`) |
 | `severity` | String | Severity from PlanDefinition override or ActionDefinition (e.g., `HIGH`, `MEDIUM`, `LOW`, `CRITICAL`) |
-| `intelligenceDestination` | String | Intelligence destination from PlanDefinition override or ActionDefinition (e.g., `supervisor`, `high_hospital_alert`) |
+| `intelligenceDestination` | String | Intelligence destination from PlanDefinition override or ActionDefinition (e.g., `openMRS`, `SPICE`, `E-Buzima`) |
 | `stepState` | String | Current step state (lowercase) |
 | `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |

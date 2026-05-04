@@ -479,7 +479,7 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. See [ActionDefinitionStatus](#actiondefinitionstatus). |
 | `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionType](#actiontype). |
 | `severity` | `VARCHAR` | Yes | — | Default severity level. See [IntelligenceSeverity](#intelligenceseverity). Can be overridden by PlanDefinition extension. |
-| `intelligence_destination` | `VARCHAR` | Yes | — | Default intelligence destination for routing (e.g., `supervisor`, `patient`, `high_hospital_alert`). Free-form string — can be overridden by PlanDefinition extension. |
+| `intelligence_destination` | `VARCHAR` | Yes | — | Default intelligence destination for routing (e.g., `openMRS`, `SPICE`, `E-Buzima`). Free-form string — can be overridden by PlanDefinition extension. |
 | `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 ActivityDefinition resource JSON. Contains message template, routing config, and action-specific properties. See [JSONB: action_definition](#action_definition--definition). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
@@ -638,7 +638,7 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 
 ### Intelligence Destination
 
-The `intelligence_destination` field on `action_definition` and `intelligence_event_log` is a **free-form string** (not a constrained enum). It represents the routing destination for the Intelligence Service to deliver the action (e.g., `supervisor`, `patient`, `high_hospital_alert`, `facility`). Values are extracted from the PlanDefinition extension `http://openphc.org/fhir/StructureDefinition/intelligence-destination` at evaluation time, falling back to the `ActionDefinition.intelligenceDestination` default.
+The `intelligence_destination` field on `action_definition` and `intelligence_event_log` is a **free-form string** (not a constrained enum). It represents the routing destination for the Intelligence Service to deliver the action (e.g., `openMRS`, `SPICE`, `E-Buzima`). Values are extracted from the PlanDefinition extension `http://openphc.org/fhir/StructureDefinition/intelligence-destination` at evaluation time, falling back to the `ActionDefinition.intelligenceDestination` default.
 
 ---
 
@@ -797,7 +797,7 @@ The `event_payload` column stores the complete `IntelligenceTriggerEvent` publis
   "protocolDefinitionId": "ppd00001-0001-0001-0001-000000000001",
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
-  "intelligenceDestination": "supervisor",
+  "intelligenceDestination": "openMRS",
   "stepState": "overdue",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",

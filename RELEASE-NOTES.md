@@ -32,7 +32,7 @@ Additionally, this release adds `ORDER_VIOLATION` as a new deviation type (V3 mi
 - Referenced by intelligence actions via `definitionCanonical` (format: `url|version`)
 - Action types: `CommunicationRequest`, `Task`, `ServiceRequest` (from FHIR `ActivityDefinition.kind`)
 - Severity levels: LOW, MEDIUM, HIGH, CRITICAL
-- Intelligence channel: free-form routing identifier (e.g., `supervisor`, `patient`, `high_hospital_alert`)
+- Intelligence destination: free-form routing identifier (e.g., `openMRS`, `SPICE`, `E-Buzima`)
 
 ### Intelligence Event Logging
 - `IntelligenceEventLog` entity records each intelligence action execution in a single flat row

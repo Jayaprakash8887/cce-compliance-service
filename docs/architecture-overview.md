@@ -588,7 +588,7 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
         },
         {
           "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
-          "valueCode": "supervisor"
+          "valueCode": "openMRS"
         }
       ]
     }
@@ -605,7 +605,7 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 | `canonicalUrl` + `version` | Unique identifier, referenced by `definitionCanonical` in PlanDefinition intelligence actions |
 | `actionType` | FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `severity` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (from PlanDefinition extension) |
-| `intelligenceDestination` | Free-form routing identifier (e.g., `supervisor`, `patient`, `high_hospital_alert`) extracted from PlanDefinition extension |
+| `intelligenceDestination` | Free-form routing identifier (e.g., `openMRS`, `SPICE`, `E-Buzima`) extracted from PlanDefinition extension |
 | `definition` | Full ActivityDefinition JSON (message template, routing config) |
 
 #### Intelligence Event Logging
