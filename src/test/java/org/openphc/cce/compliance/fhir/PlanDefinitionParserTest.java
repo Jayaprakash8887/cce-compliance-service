@@ -365,18 +365,17 @@ class PlanDefinitionParserTest {
     }
 
     @Test
-    void extractActions_intelligenceActionWithoutExtensions_nullSeverityAndTarget() throws IOException {
+    void extractActions_intelligenceActionWithExtensions_extractsSeverityAndDestination() throws IOException {
         String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
         PlanDefinition pd = parser.parse(actionsJson);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // no-extensions-action has no severity/target extensions
         PlanDefinitionParser.ActionMetadata partial = actions.get(2);
         PlanDefinitionParser.IntelligenceActionInfo action = partial.intelligenceActions().get(0);
         assertEquals("no-extensions-action", action.actionId());
         assertEquals("http://openphc.org/ActivityDefinition/no-ext-action|1.0.0", action.definitionCanonical());
-        assertNull(action.severity());
-        assertNull(action.intelligenceDestination());
+        assertEquals("LOW", action.severity());
+        assertEquals("SPICE", action.intelligenceDestination());
     }
 
     @Test
@@ -389,6 +388,65 @@ class PlanDefinitionParserTest {
             assertTrue(action.intelligenceActions().isEmpty(),
                     "Action " + action.id() + " should have empty intelligence actions");
         }
+    }
+
+    @Test
+    void extractActions_intelligenceActionMissingSeverity_throwsIllegalArgument() {
+        // Build minimal PlanDefinition with intelligence action missing severity extension
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-missing-severity",
+                  "url": "http://test.org/PlanDefinition/missing-severity",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "step-1",
+                    "trigger": [{"type": "named-event", "name": "test"}],
+                    "action": [{
+                      "id": "intel-action-1",
+                      "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
+                      "definitionCanonical": "ActivityDefinition/test|1.0",
+                      "extension": [
+                        {"url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination", "valueCode": "openMRS"}
+                      ]
+                    }]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> parser.extractActions(pd));
+        assertTrue(ex.getMessage().contains("intelligence-severity"));
+    }
+
+    @Test
+    void extractActions_intelligenceActionMissingDestination_throwsIllegalArgument() {
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-missing-dest",
+                  "url": "http://test.org/PlanDefinition/missing-dest",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "step-1",
+                    "trigger": [{"type": "named-event", "name": "test"}],
+                    "action": [{
+                      "id": "intel-action-1",
+                      "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
+                      "definitionCanonical": "ActivityDefinition/test|1.0",
+                      "extension": [
+                        {"url": "http://openphc.org/fhir/StructureDefinition/intelligence-severity", "valueCode": "HIGH"}
+                      ]
+                    }]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> parser.extractActions(pd));
+        assertTrue(ex.getMessage().contains("intelligence-destination"));
     }
 
     private String loadFixture(String resourcePath) throws IOException {

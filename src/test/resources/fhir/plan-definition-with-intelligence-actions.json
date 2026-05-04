@@ -143,7 +143,17 @@
               }
             }
           ],
-          "definitionCanonical": "http://openphc.org/ActivityDefinition/no-ext-action|1.0.0"
+          "definitionCanonical": "http://openphc.org/ActivityDefinition/no-ext-action|1.0.0",
+          "extension": [
+            {
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
+              "valueCode": "LOW"
+            },
+            {
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
+              "valueCode": "SPICE"
+            }
+          ]
         }
       ]
     }
