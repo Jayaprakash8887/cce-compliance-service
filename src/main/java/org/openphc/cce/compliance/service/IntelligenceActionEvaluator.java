@@ -201,13 +201,9 @@ public class IntelligenceActionEvaluator {
 
         MDC.put("intelligenceEventId", eventId.toString());
         try {
-            // Resolve intelligence destination and severity (action-level overrides definition-level)
-            String intelligenceDestination = action.intelligenceDestination() != null
-                    ? action.intelligenceDestination()
-                    : definition.getIntelligenceDestination();
-            String severity = action.severity() != null
-                    ? action.severity()
-                    : (definition.getSeverity() != null ? definition.getSeverity().name() : null);
+            // Severity and destination are always present (required at PlanDefinition parse time)
+            String intelligenceDestination = action.intelligenceDestination();
+            String severity = action.severity();
 
             // Build the intelligence trigger event
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()

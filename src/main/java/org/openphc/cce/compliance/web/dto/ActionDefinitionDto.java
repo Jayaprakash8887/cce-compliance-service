@@ -21,8 +21,6 @@ public class ActionDefinitionDto {
     private String title;
     private String status;
     private String actionType;
-    private String severity;
-    private String intelligenceDestination;
     private JsonNode definition;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;

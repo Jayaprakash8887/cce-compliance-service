@@ -7,7 +7,6 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
-import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -43,12 +42,6 @@ public class ActionDefinition {
     @Enumerated(EnumType.STRING)
     @Column(name = "action_type", nullable = false)
     private ActionType actionType;
-
-    @Enumerated(EnumType.STRING)
-    private IntelligenceSeverity severity;
-
-    @Column(name = "intelligence_destination")
-    private String intelligenceDestination;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")

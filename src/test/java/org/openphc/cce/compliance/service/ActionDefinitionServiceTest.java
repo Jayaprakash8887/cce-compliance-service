@@ -13,7 +13,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
-import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 
@@ -72,8 +71,6 @@ class ActionDefinitionServiceTest {
             assertEquals("Test Action", result.getTitle());
             assertEquals(ActionDefinitionStatus.ACTIVE, result.getStatus());
             assertEquals(ActionType.CommunicationRequest, result.getActionType());
-            assertEquals(IntelligenceSeverity.HIGH, result.getSeverity());
-            assertEquals("SUPERVISOR", result.getIntelligenceDestination());
             assertEquals(definition, result.getDefinition());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_CREATED"),
@@ -81,7 +78,7 @@ class ActionDefinitionServiceTest {
         }
 
         @Test
-        void validDefinition_withoutExtensions_nullSeverityAndTarget() {
+        void validDefinition_withoutExtensions_noSeverityOrDestinationOnEntity() {
             JsonNode definition = buildDefinitionNoExtensions(
                     "http://openphc.org/ActivityDefinition/simple", "1.0", "Task");
 
@@ -96,8 +93,6 @@ class ActionDefinitionServiceTest {
             ActionDefinition result = service.createActionDefinition(definition);
 
             assertEquals(ActionType.Task, result.getActionType());
-            assertNull(result.getSeverity());
-            assertNull(result.getIntelligenceDestination());
         }
 
         @Test
@@ -174,8 +169,6 @@ class ActionDefinitionServiceTest {
             assertEquals("2.0", result.getVersion());
             assertEquals("updated-action", result.getName());
             assertEquals(ActionType.ServiceRequest, result.getActionType());
-            assertEquals(IntelligenceSeverity.CRITICAL, result.getSeverity());
-            assertEquals("FACILITY", result.getIntelligenceDestination());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_UPDATED"),
                     eq("system"), eq("ActionDefinition"), eq(id.toString()), anyMap());

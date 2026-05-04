@@ -5,7 +5,6 @@ import jakarta.persistence.EntityNotFoundException;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ActionType;
-import org.openphc.cce.compliance.domain.enums.IntelligenceSeverity;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.slf4j.Logger;
@@ -38,7 +37,7 @@ public class ActionDefinitionService {
 
     /**
      * Create an ActionDefinition from a FHIR ActivityDefinition JSON.
-     * Extracts url, version, name, title, kind (→ actionType), and CCE extensions for severity/target.
+     * Extracts url, version, name, title, kind (→ actionType).
      *
      * @param definition the FHIR ActivityDefinition JSON
      * @return the persisted ActionDefinition
@@ -56,11 +55,6 @@ public class ActionDefinitionService {
         String name = textField(definition, "name");
         String title = textField(definition, "title");
         ActionType actionType = extractActionType(definition);
-        IntelligenceSeverity severity = extractExtensionEnum(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
-                IntelligenceSeverity.class);
-        String destination = extractExtensionString(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
 
         ActionDefinition actionDef = ActionDefinition.builder()
                 .canonicalUrl(url)
@@ -69,8 +63,6 @@ public class ActionDefinitionService {
                 .title(title)
                 .status(ActionDefinitionStatus.ACTIVE)
                 .actionType(actionType)
-                .severity(severity)
-                .intelligenceDestination(destination)
                 .definition(definition)
                 .build();
 
@@ -106,11 +98,6 @@ public class ActionDefinitionService {
         actionDef.setName(textField(definition, "name"));
         actionDef.setTitle(textField(definition, "title"));
         actionDef.setActionType(extractActionType(definition));
-        actionDef.setSeverity(extractExtensionEnum(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-severity",
-                IntelligenceSeverity.class));
-        actionDef.setIntelligenceDestination(extractExtensionString(definition,
-                "http://openphc.org/fhir/StructureDefinition/intelligence-destination"));
         actionDef.setDefinition(definition);
 
         actionDef = actionDefinitionRepository.save(actionDef);
@@ -219,45 +206,12 @@ public class ActionDefinitionService {
         }
     }
 
-    private <E extends Enum<E>> E extractExtensionEnum(JsonNode definition, String url, Class<E> enumClass) {
-        JsonNode extensions = definition.get("extension");
-        if (extensions == null || !extensions.isArray()) return null;
-
-        for (JsonNode ext : extensions) {
-            if (url.equals(ext.path("url").asText(null))) {
-                String value = ext.path("valueCode").asText(null);
-                if (value != null) {
-                    try {
-                        return Enum.valueOf(enumClass, value);
-                    } catch (IllegalArgumentException e) {
-                        log.warn("Unknown extension value '{}' for {} in {}", value, url, enumClass.getSimpleName());
-                        return null;
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
     private String requireTextField(JsonNode node, String field) {
         JsonNode value = node.get(field);
         if (value == null || !value.isTextual() || value.asText().isBlank()) {
             throw new IllegalArgumentException("Required field missing or empty: " + field);
         }
         return value.asText();
-    }
-
-    private String extractExtensionString(JsonNode definition, String url) {
-        JsonNode extensions = definition.get("extension");
-        if (extensions == null || !extensions.isArray()) return null;
-
-        for (JsonNode ext : extensions) {
-            if (url.equals(ext.path("url").asText(null))) {
-                String value = ext.path("valueCode").asText(null);
-                if (value != null) return value;
-            }
-        }
-        return null;
     }
 
     private String textField(JsonNode node, String field) {

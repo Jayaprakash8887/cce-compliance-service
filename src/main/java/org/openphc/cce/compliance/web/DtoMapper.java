@@ -152,8 +152,6 @@ public class DtoMapper {
                 .title(entity.getTitle())
                 .status(entity.getStatus().name())
                 .actionType(entity.getActionType().name())
-                .severity(entity.getSeverity() != null ? entity.getSeverity().name() : null)
-                .intelligenceDestination(entity.getIntelligenceDestination())
                 .definition(entity.getDefinition())
                 .createdAt(entity.getCreatedAt())
                 .updatedAt(entity.getUpdatedAt())

@@ -314,8 +314,6 @@ class DtoMapperTest {
                 .title("Escalation Alert")
                 .status(ActionDefinitionStatus.ACTIVE)
                 .actionType(ActionType.CommunicationRequest)
-                .severity(IntelligenceSeverity.HIGH)
-                .intelligenceDestination("SUPERVISOR")
                 .definition(definition)
                 .createdAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC))
                 .updatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC))
@@ -331,8 +329,6 @@ class DtoMapperTest {
         assertEquals("Escalation Alert", dto.getTitle());
         assertEquals("ACTIVE", dto.getStatus());
         assertEquals("CommunicationRequest", dto.getActionType());
-        assertEquals("HIGH", dto.getSeverity());
-        assertEquals("SUPERVISOR", dto.getIntelligenceDestination());
         assertSame(definition, dto.getDefinition());
         assertEquals(entity.getCreatedAt(), dto.getCreatedAt());
         assertEquals(entity.getUpdatedAt(), dto.getUpdatedAt());
@@ -355,8 +351,6 @@ class DtoMapperTest {
 
         assertNull(dto.getName());
         assertNull(dto.getTitle());
-        assertNull(dto.getSeverity());
-        assertNull(dto.getIntelligenceDestination());
     }
 
     @Test

@@ -228,11 +228,23 @@ public class PlanDefinitionParser {
             // Skip intelligence actions without a definitionCanonical
             if (definitionCanonical == null) continue;
 
-            // Extract severity and target extensions
+            // Extract required severity and destination extensions
             String severity = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
             String intelligenceDestination = extractCodeExtension(intelligenceAction,
                     "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
+
+            // Reject intelligence actions missing required extensions
+            if (severity == null) {
+                throw new IllegalArgumentException(
+                        "Intelligence action '" + intelligenceAction.getId()
+                                + "' is missing required extension: intelligence-severity");
+            }
+            if (intelligenceDestination == null) {
+                throw new IllegalArgumentException(
+                        "Intelligence action '" + intelligenceAction.getId()
+                                + "' is missing required extension: intelligence-destination");
+            }
 
             actions.add(new IntelligenceActionInfo(
                     intelligenceAction.getId(),
