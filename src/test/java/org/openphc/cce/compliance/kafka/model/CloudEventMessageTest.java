@@ -218,7 +218,7 @@ class CloudEventMessageTest {
                 .protocolDefinitionId(pdId)
                 .actionType("CommunicationRequest")
                 .severity("HIGH")
-                .intelligenceChannel("supervisor")
+                .intelligenceDestination("supervisor")
                 .stepState("overdue")
                 .actionId("viral-load-check")
                 .protocolCanonical("http://example.org/PlanDefinition/hiv-treatment|1.0")
@@ -235,7 +235,7 @@ class CloudEventMessageTest {
         assertEquals(pdId.toString(), node.get("protocolDefinitionId").asText());
         assertEquals("CommunicationRequest", node.get("actionType").asText());
         assertEquals("HIGH", node.get("severity").asText());
-        assertEquals("supervisor", node.get("intelligenceChannel").asText());
+        assertEquals("supervisor", node.get("intelligenceDestination").asText());
         assertEquals("overdue", node.get("stepState").asText());
         assertEquals("viral-load-check", node.get("actionId").asText());
         assertEquals("http://example.org/PlanDefinition/hiv-treatment|1.0", node.get("protocolCanonical").asText());
@@ -261,7 +261,7 @@ class CloudEventMessageTest {
         // Null fields should be absent
         assertFalse(node.has("protocolCanonical"));
         assertFalse(node.has("severity"));
-        assertFalse(node.has("intelligenceChannel"));
+        assertFalse(node.has("intelligenceDestination"));
         assertFalse(node.has("actionDefinitionId"));
         assertFalse(node.has("protocolDefinitionId"));
         assertFalse(node.has("metadata"));
@@ -278,7 +278,7 @@ class CloudEventMessageTest {
                   "protocolDefinitionId": "660e8400-e29b-41d4-a716-446655440001",
                   "actionType": "CommunicationRequest",
                   "severity": "HIGH",
-                  "intelligenceChannel": "supervisor",
+                  "intelligenceDestination": "supervisor",
                   "stepState": "overdue",
                   "actionId": "bp-check",
                   "protocolCanonical": "http://example.org/pd|1.0",
@@ -293,7 +293,7 @@ class CloudEventMessageTest {
         assertEquals(UUID.fromString("990e8400-e29b-41d4-a716-446655440010"), event.getIntelligenceEventId());
         assertEquals("CommunicationRequest", event.getActionType());
         assertEquals("HIGH", event.getSeverity());
-        assertEquals("supervisor", event.getIntelligenceChannel());
+        assertEquals("supervisor", event.getIntelligenceDestination());
         assertEquals("overdue", event.getStepState());
         assertEquals("bp-check", event.getActionId());
         assertEquals("http://example.org/pd|1.0", event.getProtocolCanonical());

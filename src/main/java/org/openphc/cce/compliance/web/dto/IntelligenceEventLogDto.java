@@ -21,7 +21,7 @@ public class IntelligenceEventLogDto {
     private UUID deviationId;
     private String subject;
     private String actionType;
-    private String intelligenceChannel;
+    private String intelligenceDestination;
     private String stepState;
     private String triggerReason;
     private String stepActionId;

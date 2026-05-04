@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Intelligence Pipeline
 - `IntelligenceActionEvaluator` — core engine evaluating PlanDefinition intelligence actions on deviation detection and step completion
-- Intelligence action extraction from nested `PlanDefinition.action.action[]` with condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and intelligence channel extensions
+- Intelligence action extraction from nested `PlanDefinition.action.action[]` with condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and intelligence destination extensions
 - `IntelligenceTriggerProducer` — publishes `IntelligenceTriggerEvent` to `cce.intelligence.triggers` Kafka topic (fire-and-forget, keyed by protocolInstanceId)
 - `IntelligenceEventLog` entity recording each intelligence action execution with evaluation context and Kafka event payload
 - `ActionDefinition` entity for FHIR `ActivityDefinition` resources — CRUD operations via `ActionDefinitionService`

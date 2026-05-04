@@ -18,7 +18,7 @@ Additionally, this release adds `ORDER_VIOLATION` as a new deviation type (V3 mi
 
 ### Intelligence Action Evaluation
 - Nested `PlanDefinition.action.action[]` intelligence actions extracted during protocol loading
-- Each intelligence action has a condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and intelligence channel extensions
+- Each intelligence action has a condition (JSONLogic/FHIRPath), `definitionCanonical`, severity, and intelligence destination extensions
 - `IntelligenceActionEvaluator` evaluates actions at two trigger points:
   - **Deviation detection** — when a step transitions to OVERDUE or MISSED
   - **Step completion** — when a step is completed (for actions like "notify on late completion")
@@ -32,7 +32,7 @@ Additionally, this release adds `ORDER_VIOLATION` as a new deviation type (V3 mi
 - Referenced by intelligence actions via `definitionCanonical` (format: `url|version`)
 - Action types: `CommunicationRequest`, `Task`, `ServiceRequest` (from FHIR `ActivityDefinition.kind`)
 - Severity levels: LOW, MEDIUM, HIGH, CRITICAL
-- Intelligence channel: free-form routing identifier (e.g., `supervisor`, `patient`, `high_hospital_alert`)
+- Intelligence destination: free-form routing identifier (e.g., `openMRS`, `SPICE`, `E-Buzima`)
 
 ### Intelligence Event Logging
 - `IntelligenceEventLog` entity records each intelligence action execution in a single flat row

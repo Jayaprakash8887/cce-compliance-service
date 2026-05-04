@@ -359,7 +359,7 @@ flowchart TD
         STEP["StepInstance<br/>(state, actionId, dueDate, completedAt)"]
         DEV["Deviation<br/>(deviationType, detectedAt, metadata)"]
         PI["ProtocolInstance<br/>(patientId, protocolCanonical, facilityId)"]
-        RULE["IntelligenceActionInfo<br/>(actionId, definitionCanonical, severity, intelligenceChannel)"]
+        RULE["IntelligenceActionInfo<br/>(actionId, definitionCanonical, severity, intelligenceDestination)"]
         ACTDEF["ActionDefinition<br/>(actionType, title)"]
     end
 

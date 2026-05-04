@@ -201,13 +201,9 @@ public class IntelligenceActionEvaluator {
 
         MDC.put("intelligenceEventId", eventId.toString());
         try {
-            // Resolve intelligence channel and severity (action-level overrides definition-level)
-            String intelligenceChannel = action.intelligenceChannel() != null
-                    ? action.intelligenceChannel()
-                    : definition.getIntelligenceChannel();
-            String severity = action.severity() != null
-                    ? action.severity()
-                    : (definition.getSeverity() != null ? definition.getSeverity().name() : null);
+            // Severity and destination are always present (required at PlanDefinition parse time)
+            String intelligenceDestination = action.intelligenceDestination();
+            String severity = action.severity();
 
             // Build the intelligence trigger event
             IntelligenceTriggerEvent event = IntelligenceTriggerEvent.builder()
@@ -218,7 +214,7 @@ public class IntelligenceActionEvaluator {
                     .protocolDefinitionId(protocol.getProtocolDefinition().getId())
                     .actionType(definition.getActionType().name())
                     .severity(severity)
-                    .intelligenceChannel(intelligenceChannel)
+                    .intelligenceDestination(intelligenceDestination)
                     .stepState(step.getState().name().toLowerCase())
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
@@ -234,7 +230,7 @@ public class IntelligenceActionEvaluator {
                     .deviationId(deviation != null ? deviation.getId() : null)
                     .subject(protocol.getPatientId())
                     .actionType(definition.getActionType().name())
-                    .intelligenceChannel(intelligenceChannel)
+                    .intelligenceDestination(intelligenceDestination)
                     .stepState(step.getState().name().toLowerCase())
                     .triggerReason(triggerReason)
                     .stepActionId(action.actionId())

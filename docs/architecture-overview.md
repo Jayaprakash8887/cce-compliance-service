@@ -561,7 +561,7 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 - `id` — unique identifier (mapped to `stepActionId` in `intelligence_event_log`)
 - `condition[kind=applicability]` — JSONLogic/FHIRPath expression evaluated against step runtime state
 - `definitionCanonical` — reference to an `ActivityDefinition` that defines the action to take
-- `extension` — severity and target metadata
+- `extension` — **required** severity and destination metadata (rejected at parse time if missing)
 
 #### PlanDefinition Intelligence Action Structure
 
@@ -587,8 +587,8 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
           "valueCode": "high"
         },
         {
-          "url": "http://openphc.org/fhir/StructureDefinition/intelligence-channel",
-          "valueCode": "supervisor"
+          "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
+          "valueCode": "openMRS"
         }
       ]
     }
@@ -604,9 +604,9 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 |---|---|
 | `canonicalUrl` + `version` | Unique identifier, referenced by `definitionCanonical` in PlanDefinition intelligence actions |
 | `actionType` | FHIR `ActivityDefinition.kind`: `CommunicationRequest`, `Task`, `ServiceRequest` |
-| `severity` | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` (from PlanDefinition extension) |
-| `intelligenceChannel` | Free-form routing identifier (e.g., `supervisor`, `patient`, `high_hospital_alert`) extracted from PlanDefinition extension |
 | `definition` | Full ActivityDefinition JSON (message template, routing config) |
+
+> **Note:** `severity` and `intelligenceDestination` are **required** on the PlanDefinition intelligence action extensions (`intelligence-severity`, `intelligence-destination`). They are not stored on `action_definition`. PlanDefinitions missing these extensions are rejected at parse time.
 
 #### Intelligence Event Logging
 
