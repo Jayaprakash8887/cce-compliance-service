@@ -2,7 +2,7 @@ name: Java CI and ECR Push
 
 on:
   push:
-    branches: [ "demo" ]
+    branches: [ "release-1.0.0" ]
   workflow_dispatch:
 
 permissions:
