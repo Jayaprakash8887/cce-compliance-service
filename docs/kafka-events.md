@@ -439,6 +439,7 @@ public class IntelligenceTriggerProducer {
 | **Transactional reads** | `isolation.level=read_committed` prevents reading uncommitted |
 | **Durability** | `acks=all` waits for all ISR replicas |
 
+
 ## 9. Error Recovery Flow
 
 ```mermaid
