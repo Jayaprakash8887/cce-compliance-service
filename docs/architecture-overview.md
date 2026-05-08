@@ -237,7 +237,7 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 | Field | Extraction Paths |
 |---|---|
 | `resourceType` | `data.resourceType` (e.g., `"Observation"`, `"Encounter"`) |
-| `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.status` |
+| `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.identifier[*]` (system+value), `data.status` |
 
 ## 5. Two-Tier Matching Algorithm
 
