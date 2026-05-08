@@ -149,6 +149,7 @@ The Compliance Service publishes `IntelligenceTriggerEvent` messages to `cce.int
 | `protocolCanonical` | Protocol `url\|version` | Protocol definition canonical |
 | `facilityId` | Facility where the event occurred | CloudEvent extension attribute |
 | `metadata` | Additional context (due dates, timing, severity) | Step and deviation runtime state |
+| `eventPayload` | Original FHIR resource payload from the inbound CloudEvent | CloudEvent `data` (null for scheduler-driven deviations) |
 
 See [Kafka Events §5.3](kafka-events.md#53-intelligencetriggerevent-outbound--cceintelligencetriggers) for the full message schema.
 
@@ -237,7 +238,7 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 | Field | Extraction Paths |
 |---|---|
 | `resourceType` | `data.resourceType` (e.g., `"Observation"`, `"Encounter"`) |
-| `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.status` |
+| `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.identifier[*]` (system+value), `data.status` |
 
 ## 5. Two-Tier Matching Algorithm
 

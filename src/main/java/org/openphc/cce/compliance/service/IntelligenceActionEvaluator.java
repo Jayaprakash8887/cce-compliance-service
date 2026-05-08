@@ -71,6 +71,10 @@ public class IntelligenceActionEvaluator {
      *    └─ action[] (intelligence actions)  → for each: check condition → resolve definition → record & publish
      */
     public List<IntelligenceEventLog> evaluateOnDeviation(StepInstance step, Deviation deviation) {
+        return evaluateOnDeviation(step, deviation, null);
+    }
+
+    public List<IntelligenceEventLog> evaluateOnDeviation(StepInstance step, Deviation deviation, JsonNode eventPayload) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
         PlanDefinition planDefinition = getCachedPlanDefinition(protocolDef);
 
@@ -85,7 +89,7 @@ public class IntelligenceActionEvaluator {
 
             // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
             for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
-                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, deviation, context, triggerReason);
+                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, deviation, context, triggerReason, eventPayload);
                 if (eventLog != null) {
                     eventLogs.add(eventLog);
                 }
@@ -108,6 +112,10 @@ public class IntelligenceActionEvaluator {
      *    └─ action[] (intelligence actions)  → for each: check condition → resolve definition → record & publish
      */
     public List<IntelligenceEventLog> evaluateOnCompletion(StepInstance step) {
+        return evaluateOnCompletion(step, null);
+    }
+
+    public List<IntelligenceEventLog> evaluateOnCompletion(StepInstance step, JsonNode eventPayload) {
         ProtocolDefinition protocolDef = step.getProtocolInstance().getProtocolDefinition();
         PlanDefinition planDefinition = getCachedPlanDefinition(protocolDef);
 
@@ -121,7 +129,7 @@ public class IntelligenceActionEvaluator {
 
             // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
             for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
-                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, null, context, "completion");
+                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, null, context, "completion", eventPayload);
                 if (eventLog != null) {
                     eventLogs.add(eventLog);
                 }
@@ -155,13 +163,13 @@ public class IntelligenceActionEvaluator {
 
     private IntelligenceEventLog evaluateAction(PlanDefinitionParser.IntelligenceActionInfo action,
                                      StepInstance step, Deviation deviation,
-                                     JsonNode context, String triggerReason) {
+                                     JsonNode context, String triggerReason, JsonNode eventPayload) {
         if (!conditionMatches(action, context)) return null;
 
         ActionDefinition definition = resolveActionDefinition(action);
         if (definition == null) return null;
 
-        return recordAndPublish(action, step, deviation, definition, triggerReason, context);
+        return recordAndPublish(action, step, deviation, definition, triggerReason, context, eventPayload);
     }
 
     private boolean conditionMatches(PlanDefinitionParser.IntelligenceActionInfo action,
@@ -194,7 +202,7 @@ public class IntelligenceActionEvaluator {
     private IntelligenceEventLog recordAndPublish(PlanDefinitionParser.IntelligenceActionInfo action,
                                        StepInstance step, Deviation deviation,
                                        ActionDefinition definition, String triggerReason,
-                                       JsonNode evaluationContext) {
+                                       JsonNode evaluationContext, JsonNode eventPayload) {
         actionsFiredCounter.increment();
         UUID eventId = UUID.randomUUID();
         ProtocolInstance protocol = step.getProtocolInstance();
@@ -219,6 +227,7 @@ public class IntelligenceActionEvaluator {
                     .actionId(step.getActionId())
                     .protocolCanonical(protocol.getProtocolCanonical())
                     .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .eventPayload(eventPayload)
                     .build();
 
             // Create event log record (published=false initially)

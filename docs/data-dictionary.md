@@ -342,7 +342,7 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
 | `resource_type` | `VARCHAR` | **NOT NULL** | — | FHIR resource type from the trigger's `DataRequirement.type` (e.g., `Encounter`, `Observation`). |
-| `path` | `VARCHAR` | **NOT NULL** | — | The `codeFilter.path` this row was decomposed from (e.g., `type`, `status`, `class`, `serviceType`). |
+| `path` | `VARCHAR` | **NOT NULL** | — | The `codeFilter.path` this row was decomposed from (e.g., `type`, `status`, `class`, `serviceType`, `identifier`). |
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
@@ -796,11 +796,12 @@ The `event_payload` column stores the complete `IntelligenceTriggerEvent` publis
   "stepState": "overdue",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-  "detectedAt": "2026-03-25T00:00:05Z"
+  "detectedAt": "2026-03-25T00:00:05Z",
+  "eventPayload": { "resourceType": "ServiceRequest", "id": "498871", "..." : "..." }
 }
 ```
 
-> **Note:** The `intelligenceEventId` field in the event payload maps to the `intelligence_event_log.id` (the row's primary key).
+> **Note:** The `intelligenceEventId` field in the event payload maps to the `intelligence_event_log.id` (the row's primary key). The `eventPayload` field contains the original FHIR resource from the inbound CloudEvent — present for event-driven completions, `null` for scheduler-driven deviations.
 
 ### intelligence_event_log — `evaluation_context`
 

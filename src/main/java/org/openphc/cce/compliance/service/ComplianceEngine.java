@@ -171,7 +171,7 @@ public class ComplianceEngine {
         stepInstanceService.completeStep(step, eventLog.getId(), event.getSource());
 
         // Evaluate intelligence actions after step completion
-        intelligenceActionEvaluator.evaluateOnCompletion(step);
+        intelligenceActionEvaluator.evaluateOnCompletion(step, event.getData());
 
         eventLogService.updateStatus(eventLog, ProcessingStatus.MATCHED);
         eventsMatchedCounter.increment();
@@ -276,7 +276,7 @@ public class ComplianceEngine {
         stepInstanceService.completeStep(step, eventLog.getId(), event.getSource());
 
         // Evaluate intelligence actions after step completion
-        intelligenceActionEvaluator.evaluateOnCompletion(step);
+        intelligenceActionEvaluator.evaluateOnCompletion(step, event.getData());
 
         auditService.audit("COMPLIANCE", "EVENT_MATCHED", "system",
                 "EventLog", eventLog.getId().toString(),
