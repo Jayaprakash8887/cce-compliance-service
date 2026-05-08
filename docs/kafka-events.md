@@ -308,7 +308,8 @@ Published when an intelligence action fires — triggered by deviation detection
   "stepState": "overdue",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-  "detectedAt": "2026-03-25T00:00:05Z"
+  "detectedAt": "2026-03-25T00:00:05Z",
+  "eventPayload": { "resourceType": "ServiceRequest", "id": "498871", "..." : "..." }
 }
 ```
 
@@ -326,6 +327,7 @@ Published when an intelligence action fires — triggered by deviation detection
 | `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |
 | `detectedAt` | OffsetDateTime | Detection timestamp |
+| `eventPayload` | JsonNode | Original FHIR resource payload from the inbound CloudEvent. Present for event-driven completions; `null` for scheduler-driven deviations (OVERDUE/MISSED). |
 
 **Kafka Key:** `intelligenceEventId` (ensures unique partitioning per action execution)
 
