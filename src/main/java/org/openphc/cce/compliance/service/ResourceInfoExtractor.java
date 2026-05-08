@@ -50,6 +50,9 @@ public class ResourceInfoExtractor {
         extractCodingsFromArrayPath(data, "type", result);
         extractCodingsFromArrayPath(data, "category", result);
 
+        // Identifier array: identifier[] has {system, value} pairs
+        extractIdentifiers(data, "identifier", result);
+
         // Plain string field: status (e.g. "in-progress", "active", "finished", "completed")
         extractStringField(data, "status", result);
 
@@ -102,6 +105,23 @@ public class ResourceInfoExtractor {
         JsonNode node = data.get(path);
         if (node != null && node.isTextual()) {
             result.add(new CodePathTriple(path, "", node.asText()));
+        }
+    }
+
+    /**
+     * Extract identifiers from an Identifier array (e.g., identifier[]).
+     * FHIR Identifier has {system, value} — maps to CodePathTriple(path, system, value).
+     */
+    private void extractIdentifiers(JsonNode data, String path, List<CodePathTriple> result) {
+        JsonNode node = data.get(path);
+        if (node == null || !node.isArray()) return;
+        for (JsonNode identifier : node) {
+            if (!identifier.isObject()) continue;
+            JsonNode value = identifier.get("value");
+            if (value == null || !value.isTextual()) continue;
+            JsonNode system = identifier.get("system");
+            String systemStr = (system != null && system.isTextual()) ? system.asText() : "";
+            result.add(new CodePathTriple(path, systemStr, value.asText()));
         }
     }
 
