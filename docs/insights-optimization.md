@@ -27,6 +27,18 @@ At production scale (millions of events, hundreds of thousands of steps), these 
 | Step analytics & compliance | 5 | `step_instance`, `protocol_instance` | PERCENTILE_CONT, conditional aggregates |
 | Deviation analytics | 7 | `deviation`, `step_instance`, `protocol_instance` | Multi-table JOINs, HAVING clauses |
 | Facility-scoped queries | 5+ | `protocol_instance ↔ event_log` | JOIN to resolve facility_id |
+| Intelligence delivery analytics | — | `intelligence_delivery`, `destination_adaptor_mapping`, `receiver_adaptor` | Not yet implemented; will require 3-table JOINs |
+
+### 1.2 Cross-Service Optimization Plan
+
+Optimizations are distributed across all four upstream services. Each service owns its own `docs/insights-optimization.md`:
+
+| Service | New Tables | Column Changes | Doc |
+|---------|------------|----------------|-----|
+| **Compliance** (this doc) | `compliance_summary`, `step_completion_stats`, `deviation_summary` | `facility_id` on `protocol_instance`, `practitioner_ref`/`practitioner_display` on `event_log` | `cce-compliance-service/docs/insights-optimization.md` |
+| **Collector** | `ingestion_summary_daily`, `event_volume_daily` | `matched` on `inbound_event` | `cce-collector-service/docs/insights-optimization.md` |
+| **Scheduler** | `transition_log`, `step_state_snapshot` | — | `cce-scheduler-service/docs/insights-optimization.md` |
+| **Intelligence** | `delivery_summary_daily`, `adaptor_health_snapshot` | `facility_id` on `intelligence_delivery` | `cce-intelligence-service/docs/insights-optimization.md` |
 
 ---
 
