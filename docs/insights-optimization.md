@@ -239,6 +239,179 @@ CREATE INDEX idx_event_log_practitioner ON event_log (practitioner_ref) WHERE pr
 
 ---
 
+### 2.6 Dead Column Removal
+
+**Problem:** Three columns across three entities are declared in the JPA model but never populated anywhere in the codebase:
+
+| Table | Column | Type | Finding |
+|-------|--------|------|--------|
+| `event_log` | `matched_step_instance_id` | `UUID` | Never set — `setMatchedStepInstanceId()` has zero call sites |
+| `audit_log` | `ip_address` | `VARCHAR(45)` | Never set — `setIpAddress()` has zero call sites |
+| `intelligence_event_log` | `error_message` | `TEXT` | Never set — `setErrorMessage()` has zero call sites |
+
+**Solution:** Remove columns from the database and corresponding fields from the JPA entities.
+
+**Schema changes:**
+
+```sql
+ALTER TABLE event_log DROP COLUMN IF EXISTS matched_step_instance_id;
+ALTER TABLE audit_log DROP COLUMN IF EXISTS ip_address;
+ALTER TABLE intelligence_event_log DROP COLUMN IF EXISTS error_message;
+```
+
+**Code changes:** Remove the fields, getters, setters, and any DTO mapping references for all three columns.
+
+**Risk:** None — the columns are never read or written. Removal is a pure cleanup.
+
+---
+
+### 2.7 event_log Normalization — step_instance FK & Write-Only Column Removal
+
+**Problem:** After matching, `ComplianceEngine` sets three columns on `event_log` — `protocol_instance_id`, `protocol_definition_id`, and `action_id` — but these are **write-only**: they are persisted but never read back by any repository query or business logic. They exist solely for traceability, but the same information is fully derivable through the matched step instance:
+
+```
+event_log → step_instance → protocol_instance → protocol_definition_id
+                          → action_id
+```
+
+Meanwhile, there is no FK from `event_log` to `step_instance`, making it impossible to efficiently navigate from an event to the step it matched.
+
+**Solution (Phase 1):**
+
+1. **Add `step_instance_id` FK** to `event_log` — a proper foreign key to the matched step, set during `completeStep()` in `ComplianceEngine`
+2. **Drop 3 write-only columns** — `protocol_instance_id`, `protocol_definition_id`, `action_id` from `event_log` (derivable via `step_instance_id → step_instance → protocol_instance`)
+3. **Add reverse-lookup index** on `step_instance` for event matching
+
+**Schema changes:**
+
+```sql
+-- Add step_instance_id FK (nullable — not all events match a step)
+ALTER TABLE event_log ADD COLUMN step_instance_id UUID REFERENCES step_instance(id);
+CREATE INDEX idx_event_log_step_instance ON event_log (step_instance_id) WHERE step_instance_id IS NOT NULL;
+
+-- Backfill from existing data (protocol_instance_id + action_id → step_instance)
+UPDATE event_log el
+SET step_instance_id = si.id
+FROM step_instance si
+WHERE si.protocol_instance_id = el.protocol_instance_id
+  AND si.action_id = el.action_id
+  AND si.state = 'COMPLETED'
+  AND el.processing_status = 'MATCHED'
+  AND el.step_instance_id IS NULL;
+
+-- Drop write-only columns after backfill
+ALTER TABLE event_log DROP COLUMN protocol_instance_id;
+ALTER TABLE event_log DROP COLUMN protocol_definition_id;
+ALTER TABLE event_log DROP COLUMN action_id;
+```
+
+**Code changes:**
+
+- `EventLog.java`: Add `stepInstanceId` field (UUID, nullable). Remove `protocolInstanceId`, `protocolDefinitionId`, `actionId` fields.
+- `ComplianceEngine.processMatch()`: Replace `eventLog.setProtocolInstanceId()` / `.setProtocolDefinitionId()` / `.setActionId()` with `eventLog.setStepInstanceId(step.getId())`
+- `DtoMapper`: Update `EventLogDto` mapping to derive `protocolInstanceId`, `protocolDefinitionId`, `actionId` from `stepInstance` relationship (lazy load or JOIN fetch)
+- `PatientTrackingController`: No change — DTO still exposes same fields
+
+**Insights Service impact:** Queries that currently JOIN `event_log.protocol_instance_id` to `protocol_instance` can instead JOIN `event_log.step_instance_id` to `step_instance` (which has its own `protocol_instance_id`). Net effect: same or fewer JOINs.
+
+---
+
+### 2.8 step_instance Enhancement — Add protocol_definition_id
+
+**Problem:** Many Insights queries need `protocol_definition_id` alongside step-level data, but `step_instance` only has `protocol_instance_id`. This forces a JOIN through `protocol_instance` just to get the protocol definition:
+
+```sql
+SELECT si.*, pi.protocol_definition_id
+FROM step_instance si
+JOIN protocol_instance pi ON pi.id = si.protocol_instance_id
+WHERE pi.protocol_definition_id = ?
+```
+
+**Solution:** Denormalize `protocol_definition_id` onto `step_instance`. This is a stable FK that never changes after enrollment, so there is no update anomaly risk.
+
+**Schema changes:**
+
+```sql
+ALTER TABLE step_instance ADD COLUMN protocol_definition_id UUID;
+CREATE INDEX idx_step_instance_protocol_def ON step_instance (protocol_definition_id);
+
+-- Backfill from protocol_instance
+UPDATE step_instance si
+SET protocol_definition_id = pi.protocol_definition_id
+FROM protocol_instance pi
+WHERE pi.id = si.protocol_instance_id;
+
+ALTER TABLE step_instance ALTER COLUMN protocol_definition_id SET NOT NULL;
+```
+
+**Code changes:**
+
+- `StepInstance.java`: Add `protocolDefinitionId` field (UUID, NOT NULL)
+- `StepInstanceService.createStep()`: Set `protocolDefinitionId` from the `ProtocolInstance` during step creation
+
+**Insights Service impact:** Eliminates the `protocol_instance` JOIN for 12+ queries that only need `protocol_definition_id`. Direct filter:
+
+```sql
+SELECT * FROM step_instance WHERE protocol_definition_id = ?
+```
+
+---
+
+### 2.9 event_log Normalization Phase 2 — inbound_event FK (Deferred)
+
+**Problem:** 6 of the 16 columns on `event_log` duplicate data already present in the Collector Service's `inbound_event` table:
+
+| event_log column | inbound_event column | Duplicated? |
+|-----------------|---------------------|-------------|
+| `cloudeventsid` | `cloudevents_id` | Yes — identical CloudEvents ID |
+| `source` | `source` | Yes |
+| `source_event_id` | `source_event_id` | Yes |
+| `subject` | `subject` | Yes |
+| `type` | `type` | Yes |
+| `event_time` | `event_time` | Yes |
+
+Additionally, `event_log.data` (JSONB, ~2–5 KB per row) stores the extracted FHIR resource, while `inbound_event.raw_payload` stores the full CloudEvent envelope (which *contains* the same FHIR resource in `data`). After §2.5 materializes `practitioner_ref` and `practitioner_display`, and `resource_type` is derivable from step matching, zero Insights queries would need to touch `event_log.data`.
+
+**Solution:** Add an `inbound_event_id` FK to `event_log`, enabling the 6 duplicated columns and `data` JSONB to be dropped. Queries needing envelope metadata JOIN through the FK.
+
+**Prerequisite:** The Collector Service must publish the `inbound_event.id` (UUID) as a CloudEvents extension attribute in the Kafka message so the Compliance Service can capture it. See **Collector Service §2.4**.
+
+**Schema changes (deferred until Collector publishes ID):**
+
+```sql
+-- Add FK to inbound_event
+ALTER TABLE event_log ADD COLUMN inbound_event_id UUID;
+CREATE INDEX idx_event_log_inbound_event ON event_log (inbound_event_id) WHERE inbound_event_id IS NOT NULL;
+
+-- Backfill from matching cloudeventsid + source
+UPDATE event_log el
+SET inbound_event_id = ie.id
+FROM inbound_event ie
+WHERE ie.cloudevents_id = el.cloudeventsid
+  AND ie.source = el.source
+  AND el.inbound_event_id IS NULL;
+
+-- Phase 2b: drop duplicated columns (only after all queries are migrated)
+ALTER TABLE event_log DROP COLUMN source_event_id;
+ALTER TABLE event_log DROP COLUMN subject;
+ALTER TABLE event_log DROP COLUMN type;
+ALTER TABLE event_log DROP COLUMN event_time;
+ALTER TABLE event_log DROP COLUMN data;
+-- Keep cloudeventsid + source for idempotency check (existsByCloudeventsIdAndSource)
+```
+
+> **Note:** `cloudeventsid` and `source` are retained because they form the idempotency unique constraint checked on every inbound event. Dropping them would require changing the idempotency check to use `inbound_event_id` instead, which has a circular dependency (the compliance service needs to check idempotency *before* it knows the `inbound_event_id`).
+
+**Phasing:**
+
+| Phase | Action | Depends On |
+|-------|--------|------------|
+| Phase 2a | Add `inbound_event_id` column + backfill | Collector publishes `inboundeventid` extension (§2.4) |
+| Phase 2b | Drop `source_event_id`, `subject`, `type`, `event_time` | Insights queries migrated to JOIN `inbound_event` |
+| Phase 2c | Drop `data` JSONB | §2.5 `practitioner_ref`/`practitioner_display` materialized + Insights queries verified |
+
+---
+
 ## 3. Consistency Guarantees
 
 All pre-computed tables are updated **synchronously within the same transaction** as the source operation (step creation, step completion, deviation creation). This guarantees:
@@ -283,6 +456,13 @@ GROUP BY pi.id, pi.patient_id, pi.facility_id, pi.protocol_definition_id;
 | New `compliance_summary` table | Table | New entity | Step create/complete, scheduler transitions |
 | New `step_completion_stats` table | Table | New entity | Step create/complete |
 | New `deviation_summary` table | Table | New entity | Deviation create, step complete |
+| Drop `matched_step_instance_id` from `event_log` | Drop column | `EventLog` | — |
+| Drop `ip_address` from `audit_log` | Drop column | `AuditLog` | — |
+| Drop `error_message` from `intelligence_event_log` | Drop column | `IntelligenceEventLog` | — |
+| Add `step_instance_id` FK to `event_log` | Column + FK | `EventLog` | Step completion |
+| Drop `protocol_instance_id`, `protocol_definition_id`, `action_id` from `event_log` | Drop columns | `EventLog` | — (derivable via `step_instance_id`) |
+| Add `protocol_definition_id` to `step_instance` | Column | `StepInstance` | Step creation |
+| Add `inbound_event_id` FK to `event_log` (deferred) | Column + FK | `EventLog` | Event processing (requires Collector §2.4) |
 
 ### 4.1 Estimated Query Reduction for Insights Service
 
@@ -304,3 +484,9 @@ GROUP BY pi.id, pi.patient_id, pi.facility_id, pi.protocol_definition_id;
 | V12 | `V12__create_compliance_summary.sql` | Create table + backfill from existing data |
 | V13 | `V13__create_step_completion_stats.sql` | Create table + backfill |
 | V14 | `V14__create_deviation_summary.sql` | Create table + backfill |
+| V15 | `V15__drop_dead_columns.sql` | Drop `event_log.matched_step_instance_id`, `audit_log.ip_address`, `intelligence_event_log.error_message` |
+| V16 | `V16__add_step_instance_fk_to_event_log.sql` | Add `step_instance_id` FK + partial index + backfill |
+| V17 | `V17__drop_write_only_event_log_columns.sql` | Drop `protocol_instance_id`, `protocol_definition_id`, `action_id` from `event_log` |
+| V18 | `V18__add_protocol_definition_id_to_step_instance.sql` | Add column + index + backfill + NOT NULL |
+| V19 *(deferred)* | `V19__add_inbound_event_id_to_event_log.sql` | Add FK + partial index + backfill (requires Collector §2.4) |
+| V20 *(deferred)* | `V20__drop_duplicated_event_log_columns.sql` | Drop `source_event_id`, `subject`, `type`, `event_time`, `data` |
