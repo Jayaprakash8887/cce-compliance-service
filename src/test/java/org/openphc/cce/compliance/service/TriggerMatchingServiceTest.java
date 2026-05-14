@@ -148,6 +148,34 @@ class TriggerMatchingServiceTest {
 
             assertEquals(2, matches.size());
         }
+
+        @Test
+        void samePathDifferentSystems_passesDistinctTriples() {
+            // RMNCH pattern: two codeFilters on path "identifier" with different systems
+            // e.g., encounter-type=ANC AND visit-count=1
+            when(triggerIndexRepository.findStructuralMatches(eq("Encounter"), anyList()))
+                    .thenReturn(List.of());
+
+            List<CodePathTriple> codes = List.of(
+                    new CodePathTriple("identifier", "http://mdtlabs.com/encounter-type", "ANC"),
+                    new CodePathTriple("identifier", "http://mdtlabs.com/visit-count", "1"),
+                    new CodePathTriple("identifier", "http://mdtlabs.com/type", "assessment"),
+                    new CodePathTriple("identifier", "http://mdtlabs.com/village-id", "312")
+            );
+            service.findStructuralMatches("Encounter", codes);
+
+            @SuppressWarnings("unchecked")
+            ArgumentCaptor<List<String>> triplesCaptor = ArgumentCaptor.forClass(List.class);
+            verify(triggerIndexRepository).findStructuralMatches(eq("Encounter"), triplesCaptor.capture());
+
+            List<String> triples = triplesCaptor.getValue();
+            assertEquals(5, triples.size()); // 4 identifiers + 1 empty F1 triple
+            assertTrue(triples.contains("||"));
+            assertTrue(triples.contains("identifier|http://mdtlabs.com/encounter-type|ANC"));
+            assertTrue(triples.contains("identifier|http://mdtlabs.com/visit-count|1"));
+            assertTrue(triples.contains("identifier|http://mdtlabs.com/type|assessment"));
+            assertTrue(triples.contains("identifier|http://mdtlabs.com/village-id|312"));
+        }
     }
 
     // ── Condition-only triggers ──

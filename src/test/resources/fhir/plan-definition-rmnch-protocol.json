@@ -1,0 +1,522 @@
+{
+  "resourceType": "PlanDefinition",
+  "id": "rmnch-protocol",
+  "url": "http://mdtlabs.com/PlanDefinition/rmnch-protocol",
+  "version": "1.0.0",
+  "name": "RMNCHProtocol",
+  "title": "RMNCH — Reproductive, Maternal, Newborn & Child Health Protocol",
+  "status": "active",
+  "date": "2026-05-14",
+  "description": "Tracks RMNCH workflow from household member registration through family planning, antenatal care, pregnancy outcome, and postnatal care. Registration enrolls the patient and creates three optional pending tracks: (a) Family Planning, (b) Pregnancy Profile → mandatory ANC chain, (c) Pregnancy Outcome → PNC. ANC visits 1–3 become mandatory only when Pregnancy Profile is completed. Referrals (ServiceRequest) are informational side-events — not tracked as protocol steps.",
+  "action": [
+    {
+      "id": "registration",
+      "title": "Patient Registration",
+      "description": "Enrollment trigger — matches any RelatedPerson resource (household member registration). On completion, creates pending steps for family planning, pregnancy profile, and pregnancy outcome.",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "registration-trigger",
+          "data": [
+            {
+              "type": "RelatedPerson"
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "must",
+      "relatedAction": [
+        {
+          "actionId": "family-planning",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        },
+        {
+          "actionId": "pregnancy-profile",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        },
+        {
+          "actionId": "pregnancy-outcome",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 1,
+          "periodUnit": "d"
+        }
+      }
+    },
+    {
+      "id": "family-planning",
+      "title": "Family Planning",
+      "description": "Family planning assessment. Optional — may or may not occur after registration.",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "family-planning-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "FAMILY_PLANNING"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "could",
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 365,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 30
+        }
+      ]
+    },
+    {
+      "id": "pregnancy-profile",
+      "title": "Pregnancy Profile",
+      "description": "Pregnancy registration. Optional from registration — not every enrolled woman becomes pregnant. When completed, triggers the mandatory ANC visit chain (visits 1 → 2 → 3).",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "pregnancy-profile-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "PWPROFILE"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "could",
+      "relatedAction": [
+        {
+          "actionId": "anc-visit-1",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 280,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 14
+        }
+      ]
+    },
+    {
+      "id": "anc-visit-1",
+      "title": "ANC Visit 1",
+      "description": "First antenatal care visit. Mandatory after pregnancy profile. Two codeFilters on the same 'identifier' path enforce AND semantics: encounter-type=ANC AND visit-count=1.",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "anc-visit-1-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "ANC"
+                    }
+                  ]
+                },
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/visit-count",
+                      "code": "1"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "must",
+      "relatedAction": [
+        {
+          "actionId": "anc-visit-2",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 30,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        },
+        {
+          "actionId": "anc-referral",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 90,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 7
+        }
+      ]
+    },
+    {
+      "id": "anc-visit-2",
+      "title": "ANC Visit 2",
+      "description": "Second antenatal care visit. Mandatory after ANC Visit 1.",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "anc-visit-2-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "ANC"
+                    }
+                  ]
+                },
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/visit-count",
+                      "code": "2"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "must",
+      "relatedAction": [
+        {
+          "actionId": "anc-visit-3",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 30,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        },
+        {
+          "actionId": "anc-referral",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 60,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 7
+        }
+      ]
+    },
+    {
+      "id": "anc-visit-3",
+      "title": "ANC Visit 3",
+      "description": "Third antenatal care visit. Mandatory after ANC Visit 2. Terminal in the ANC chain — pregnancy outcome is tracked independently (pending from registration).",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "anc-visit-3-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "ANC"
+                    }
+                  ]
+                },
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/visit-count",
+                      "code": "3"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "must",
+      "relatedAction": [
+        {
+          "actionId": "anc-referral",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 60,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 7
+        }
+      ]
+    },
+    {
+      "id": "anc-referral",
+      "title": "ANC Referral",
+      "description": "Optional referral after any ANC visit. Created as PENDING when each ANC visit completes. Matches ServiceRequest with category=RMNCH AND encounter-type=ANC. If no referral arrives, the step is SKIPPED (could behavior).",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "anc-referral-trigger",
+          "data": [
+            {
+              "type": "ServiceRequest",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/category",
+                      "code": "RMNCH"
+                    }
+                  ]
+                },
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "ANC"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "could",
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 28,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 7
+        }
+      ]
+    },
+    {
+      "id": "pregnancy-outcome",
+      "title": "Pregnancy Outcome",
+      "description": "Pregnancy outcome recording (delivery). Pending from registration — available regardless of whether the ANC chain was completed, skipped, or never started. When completed, triggers PNC.",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "pregnancy-outcome-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "PREGNANCYOUTCOME"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "could",
+      "relatedAction": [
+        {
+          "actionId": "pnc",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 280,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 14
+        }
+      ]
+    },
+    {
+      "id": "pnc",
+      "title": "Postnatal Care (PNC)",
+      "description": "Postnatal care visit for the mother. Mandatory after pregnancy outcome. Matches Encounter with encounter-type PNC_MOTHER.",
+      "trigger": [
+        {
+          "type": "named-event",
+          "name": "pnc-trigger",
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "path": "identifier",
+                  "code": [
+                    {
+                      "system": "http://mdtlabs.com/encounter-type",
+                      "code": "PNC_MOTHER"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "requiredBehavior": "must",
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "frequency": 1,
+          "period": 42,
+          "periodUnit": "d"
+        }
+      },
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 7
+        }
+      ]
+    }
+  ]
+}
