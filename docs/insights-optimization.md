@@ -10,11 +10,11 @@
 
 The CCE Insights Service (read-only analytics) executes 43 SQL queries against tables owned by the Compliance, Collector, and Scheduler services. Several of these queries involve:
 
-- **Expensive JOINs** — `facility_id` exists only on `event_log`, forcing 5+ queries to JOIN `protocol_instance → event_log` just to filter/group by facility
-- **Full-table aggregations** — `GROUP BY` on millions of `event_log` and `step_instance` rows for dashboard metrics that change infrequently
-- **Complex JSONB extraction** — practitioner references extracted via 5-path `COALESCE` from `event_log.data` on every query
+- **Expensive JOINs** — `facility_id` exists only on `compliance_event_log`, forcing 5+ queries to JOIN `protocol_instance → compliance_event_log` just to filter/group by facility
+- **Full-table aggregations** — `GROUP BY` on millions of `compliance_event_log` and `step_instance` rows for dashboard metrics that change infrequently
+- **Complex JSONB extraction** — practitioner references extracted via 5-path `COALESCE` from `compliance_event_log.data` on every query
 - **Percentile calculations** — `PERCENTILE_CONT(0.5)` on `step_instance` for median completion times (requires full sort)
-- **Anti-joins** — pipeline loss detection uses `NOT EXISTS` subquery correlating `inbound_event` with `event_log` (O(n²) worst-case)
+- **Anti-joins** — pipeline loss detection uses `NOT EXISTS` subquery correlating `inbound_event` with `compliance_event_log` (O(n²) worst-case)
 
 At production scale (millions of events, hundreds of thousands of steps), these queries become the primary bottleneck for dashboard responsiveness, even with the Insights Service's 3-tier Caffeine cache.
 
@@ -22,11 +22,11 @@ At production scale (millions of events, hundreds of thousands of steps), these 
 
 | Category | Queries | Primary Tables | Bottleneck |
 |----------|---------|----------------|------------|
-| Event volume & processing | 13 | `event_log` | Full-table GROUP BY on millions of rows |
+| Event volume & processing | 13 | `compliance_event_log` | Full-table GROUP BY on millions of rows |
 | Ingestion analytics | 18 | `inbound_event` | Anti-join pipeline loss, self-join overlap detection |
 | Step analytics & compliance | 5 | `step_instance`, `protocol_instance` | PERCENTILE_CONT, conditional aggregates |
 | Deviation analytics | 7 | `deviation`, `step_instance`, `protocol_instance` | Multi-table JOINs, HAVING clauses |
-| Facility-scoped queries | 5+ | `protocol_instance ↔ event_log` | JOIN to resolve facility_id |
+| Facility-scoped queries | 5+ | `protocol_instance ↔ compliance_event_log` | JOIN to resolve facility_id |
 | Intelligence delivery analytics | — | `intelligence_delivery`, `destination_adaptor_mapping`, `receiver_adaptor` | Not yet implemented; will require 3-table JOINs |
 
 ### 1.2 Cross-Service Optimization Plan
@@ -35,7 +35,7 @@ Optimizations are distributed across all four upstream services. Each service ow
 
 | Service | New Tables | Column Changes | Doc |
 |---------|------------|----------------|-----|
-| **Compliance** (this doc) | `compliance_summary`, `step_completion_stats`, `deviation_summary` | `facility_id` on `protocol_instance`, `practitioner_ref`/`practitioner_display` on `event_log` | `cce-compliance-service/docs/insights-optimization.md` |
+| **Compliance** (this doc) | `compliance_summary`, `step_completion_stats`, `deviation_summary` | Rename `event_log` → `compliance_event_log`, `facility_id` on `protocol_instance`, `practitioner_ref`/`practitioner_display` on `compliance_event_log`, `step_instance_id` FK on `compliance_event_log`, `protocol_definition_id` on `step_instance`, dead column removal | `cce-compliance-service/docs/insights-optimization.md` |
 | **Collector** | `ingestion_summary_daily`, `event_volume_daily` | `matched` on `inbound_event` | `cce-collector-service/docs/insights-optimization.md` |
 | **Scheduler** | `transition_log`, `step_state_snapshot` | — | `cce-scheduler-service/docs/insights-optimization.md` |
 | **Intelligence** | `delivery_summary_daily`, `adaptor_health_snapshot` | `facility_id` on `intelligence_delivery` | `cce-intelligence-service/docs/insights-optimization.md` |
@@ -46,7 +46,7 @@ Optimizations are distributed across all four upstream services. Each service ow
 
 ### 2.1 Denormalize `facility_id` onto `protocol_instance`
 
-**Problem:** `facility_id` is only stored on `event_log`. The Insights Service must JOIN `protocol_instance` with `event_log` in 5+ queries just to group or filter by facility (facility compliance summary, facility ranking, active patients by facility, facility event counts, facility-patient mapping).
+**Problem:** `facility_id` is only stored on `compliance_event_log`. The Insights Service must JOIN `protocol_instance` with `compliance_event_log` in 5+ queries just to group or filter by facility (facility compliance summary, facility ranking, active patients by facility, facility event counts, facility-patient mapping).
 
 **Solution:** Add `facility_id VARCHAR(100)` column to `protocol_instance`. Populate at enrollment time from the inbound CloudEvent's `facilityid` extension attribute.
 
@@ -57,11 +57,11 @@ Optimizations are distributed across all four upstream services. Each service ow
 ALTER TABLE protocol_instance ADD COLUMN facility_id VARCHAR(100);
 CREATE INDEX idx_protocol_instance_facility ON protocol_instance (facility_id);
 
--- Backfill from event_log (one-time)
+-- Backfill from compliance_event_log (one-time)
 UPDATE protocol_instance pi
 SET facility_id = (
     SELECT el.facility_id
-    FROM event_log el
+    FROM compliance_event_log el
     WHERE el.protocol_instance_id = pi.id
       AND el.facility_id IS NOT NULL
     ORDER BY el.received_at ASC
@@ -72,7 +72,7 @@ SET facility_id = (
 **Code change:** In `ComplianceEngine.processMatch()` and `processExplicitMatch()`, set `protocolInstance.setFacilityId(event.getFacilityid())` at enrollment time.
 
 **Impact on Insights Service:**  
-- Eliminates JOIN to `event_log` in facility compliance, facility ranking, active patients, and facility event count queries
+- Eliminates JOIN to `compliance_event_log` in facility compliance, facility ranking, active patients, and facility event count queries
 - Reduces query complexity from 3-table JOIN to direct `WHERE facility_id = ?`
 
 ---
@@ -215,18 +215,18 @@ CREATE INDEX idx_deviation_summary_total ON deviation_summary (total_deviations)
 
 ---
 
-### 2.5 Denormalize `practitioner_ref` on `event_log`
+### 2.5 Denormalize `practitioner_ref` on `compliance_event_log`
 
-**Problem:** The Insights Service extracts practitioner references from `event_log.data` JSONB using a 5-path `COALESCE` across Encounter, Observation, Condition, MedicationRequest, and Procedure FHIR resources. This is evaluated for every row on each query.
+**Problem:** The Insights Service extracts practitioner references from `compliance_event_log.data` JSONB using a 5-path `COALESCE` across Encounter, Observation, Condition, MedicationRequest, and Procedure FHIR resources. This is evaluated for every row on each query.
 
-**Solution:** Extract and store `practitioner_ref` and `practitioner_display` as materialized columns on `event_log` at event processing time.
+**Solution:** Extract and store `practitioner_ref` and `practitioner_display` as materialized columns on `compliance_event_log` at event processing time.
 
 **Schema change:**
 
 ```sql
-ALTER TABLE event_log ADD COLUMN practitioner_ref VARCHAR(200);
-ALTER TABLE event_log ADD COLUMN practitioner_display VARCHAR(200);
-CREATE INDEX idx_event_log_practitioner ON event_log (practitioner_ref) WHERE practitioner_ref IS NOT NULL;
+ALTER TABLE compliance_event_log ADD COLUMN practitioner_ref VARCHAR(200);
+ALTER TABLE compliance_event_log ADD COLUMN practitioner_display VARCHAR(200);
+CREATE INDEX idx_cel_practitioner ON compliance_event_log (practitioner_ref) WHERE practitioner_ref IS NOT NULL;
 ```
 
 **Code change:** In `ComplianceEngine`, after extracting the FHIR resource type, also extract the practitioner reference using the same 5-path COALESCE logic and set it on the `EventLog` entity before persisting.
@@ -235,7 +235,7 @@ CREATE INDEX idx_event_log_practitioner ON event_log (practitioner_ref) WHERE pr
 
 | Current Query | Replacement |
 |---------------|-------------|
-| 5-path JSONB COALESCE + GROUP BY + HAVING (40 lines) | `SELECT practitioner_ref, practitioner_display, ... FROM event_log WHERE practitioner_ref IS NOT NULL GROUP BY ...` |
+| 5-path JSONB COALESCE + GROUP BY + HAVING (40 lines) | `SELECT practitioner_ref, practitioner_display, ... FROM compliance_event_log WHERE practitioner_ref IS NOT NULL GROUP BY ...` |
 
 ---
 
@@ -245,7 +245,7 @@ CREATE INDEX idx_event_log_practitioner ON event_log (practitioner_ref) WHERE pr
 
 | Table | Column | Type | Finding |
 |-------|--------|------|--------|
-| `event_log` | `matched_step_instance_id` | `UUID` | Never set — `setMatchedStepInstanceId()` has zero call sites |
+| `compliance_event_log` | `matched_step_instance_id` | `UUID` | Never set — `setMatchedStepInstanceId()` has zero call sites |
 | `audit_log` | `ip_address` | `VARCHAR(45)` | Never set — `setIpAddress()` has zero call sites |
 | `intelligence_event_log` | `error_message` | `TEXT` | Never set — `setErrorMessage()` has zero call sites |
 
@@ -254,7 +254,7 @@ CREATE INDEX idx_event_log_practitioner ON event_log (practitioner_ref) WHERE pr
 **Schema changes:**
 
 ```sql
-ALTER TABLE event_log DROP COLUMN IF EXISTS matched_step_instance_id;
+ALTER TABLE compliance_event_log DROP COLUMN IF EXISTS matched_step_instance_id;
 ALTER TABLE audit_log DROP COLUMN IF EXISTS ip_address;
 ALTER TABLE intelligence_event_log DROP COLUMN IF EXISTS error_message;
 ```
@@ -265,32 +265,32 @@ ALTER TABLE intelligence_event_log DROP COLUMN IF EXISTS error_message;
 
 ---
 
-### 2.7 event_log Normalization — step_instance FK & Write-Only Column Removal
+### 2.7 compliance_event_log Normalization — step_instance FK & Write-Only Column Removal
 
-**Problem:** After matching, `ComplianceEngine` sets three columns on `event_log` — `protocol_instance_id`, `protocol_definition_id`, and `action_id` — but these are **write-only**: they are persisted but never read back by any repository query or business logic. They exist solely for traceability, but the same information is fully derivable through the matched step instance:
+**Problem:** After matching, `ComplianceEngine` sets three columns on `compliance_event_log` — `protocol_instance_id`, `protocol_definition_id`, and `action_id` — but these are **write-only**: they are persisted but never read back by any repository query or business logic. They exist solely for traceability, but the same information is fully derivable through the matched step instance:
 
 ```
-event_log → step_instance → protocol_instance → protocol_definition_id
+compliance_event_log → step_instance → protocol_instance → protocol_definition_id
                           → action_id
 ```
 
-Meanwhile, there is no FK from `event_log` to `step_instance`, making it impossible to efficiently navigate from an event to the step it matched.
+Meanwhile, there is no FK from `compliance_event_log` to `step_instance`, making it impossible to efficiently navigate from an event to the step it matched.
 
 **Solution (Phase 1):**
 
-1. **Add `step_instance_id` FK** to `event_log` — a proper foreign key to the matched step, set during `completeStep()` in `ComplianceEngine`
-2. **Drop 3 write-only columns** — `protocol_instance_id`, `protocol_definition_id`, `action_id` from `event_log` (derivable via `step_instance_id → step_instance → protocol_instance`)
+1. **Add `step_instance_id` FK** to `compliance_event_log` — a proper foreign key to the matched step, set during `completeStep()` in `ComplianceEngine`
+2. **Drop 3 write-only columns** — `protocol_instance_id`, `protocol_definition_id`, `action_id` from `compliance_event_log` (derivable via `step_instance_id → step_instance → protocol_instance`)
 3. **Add reverse-lookup index** on `step_instance` for event matching
 
 **Schema changes:**
 
 ```sql
 -- Add step_instance_id FK (nullable — not all events match a step)
-ALTER TABLE event_log ADD COLUMN step_instance_id UUID REFERENCES step_instance(id);
-CREATE INDEX idx_event_log_step_instance ON event_log (step_instance_id) WHERE step_instance_id IS NOT NULL;
+ALTER TABLE compliance_event_log ADD COLUMN step_instance_id UUID REFERENCES step_instance(id);
+CREATE INDEX idx_cel_step_instance ON compliance_event_log (step_instance_id) WHERE step_instance_id IS NOT NULL;
 
 -- Backfill from existing data (protocol_instance_id + action_id → step_instance)
-UPDATE event_log el
+UPDATE compliance_event_log el
 SET step_instance_id = si.id
 FROM step_instance si
 WHERE si.protocol_instance_id = el.protocol_instance_id
@@ -300,9 +300,9 @@ WHERE si.protocol_instance_id = el.protocol_instance_id
   AND el.step_instance_id IS NULL;
 
 -- Drop write-only columns after backfill
-ALTER TABLE event_log DROP COLUMN protocol_instance_id;
-ALTER TABLE event_log DROP COLUMN protocol_definition_id;
-ALTER TABLE event_log DROP COLUMN action_id;
+ALTER TABLE compliance_event_log DROP COLUMN protocol_instance_id;
+ALTER TABLE compliance_event_log DROP COLUMN protocol_definition_id;
+ALTER TABLE compliance_event_log DROP COLUMN action_id;
 ```
 
 **Code changes:**
@@ -312,7 +312,7 @@ ALTER TABLE event_log DROP COLUMN action_id;
 - `DtoMapper`: Update `EventLogDto` mapping to derive `protocolInstanceId`, `protocolDefinitionId`, `actionId` from `stepInstance` relationship (lazy load or JOIN fetch)
 - `PatientTrackingController`: No change — DTO still exposes same fields
 
-**Insights Service impact:** Queries that currently JOIN `event_log.protocol_instance_id` to `protocol_instance` can instead JOIN `event_log.step_instance_id` to `step_instance` (which has its own `protocol_instance_id`). Net effect: same or fewer JOINs.
+**Insights Service impact:** Queries that currently JOIN `compliance_event_log.protocol_instance_id` to `protocol_instance` can instead JOIN `compliance_event_log.step_instance_id` to `step_instance` (which has its own `protocol_instance_id`). Net effect: same or fewer JOINs.
 
 ---
 
@@ -357,11 +357,11 @@ SELECT * FROM step_instance WHERE protocol_definition_id = ?
 
 ---
 
-### 2.9 event_log Normalization Phase 2 — inbound_event FK (Deferred)
+### 2.9 compliance_event_log Normalization Phase 2 — inbound_event FK (Deferred)
 
-**Problem:** 6 of the 16 columns on `event_log` duplicate data already present in the Collector Service's `inbound_event` table:
+**Problem:** 6 of the 16 columns on `compliance_event_log` duplicate data already present in the Collector Service's `inbound_event` table:
 
-| event_log column | inbound_event column | Duplicated? |
+| compliance_event_log column | inbound_event column | Duplicated? |
 |-----------------|---------------------|-------------|
 | `cloudeventsid` | `cloudevents_id` | Yes — identical CloudEvents ID |
 | `source` | `source` | Yes |
@@ -370,9 +370,9 @@ SELECT * FROM step_instance WHERE protocol_definition_id = ?
 | `type` | `type` | Yes |
 | `event_time` | `event_time` | Yes |
 
-Additionally, `event_log.data` (JSONB, ~2–5 KB per row) stores the extracted FHIR resource, while `inbound_event.raw_payload` stores the full CloudEvent envelope (which *contains* the same FHIR resource in `data`). After §2.5 materializes `practitioner_ref` and `practitioner_display`, and `resource_type` is derivable from step matching, zero Insights queries would need to touch `event_log.data`.
+Additionally, `compliance_event_log.data` (JSONB, ~2–5 KB per row) stores the extracted FHIR resource, while `inbound_event.raw_payload` stores the full CloudEvent envelope (which *contains* the same FHIR resource in `data`). After §2.5 materializes `practitioner_ref` and `practitioner_display`, and `resource_type` is derivable from step matching, zero Insights queries would need to touch `compliance_event_log.data`.
 
-**Solution:** Add an `inbound_event_id` FK to `event_log`, enabling the 6 duplicated columns and `data` JSONB to be dropped. Queries needing envelope metadata JOIN through the FK.
+**Solution:** Add an `inbound_event_id` FK to `compliance_event_log`, enabling the 6 duplicated columns and `data` JSONB to be dropped. Queries needing envelope metadata JOIN through the FK.
 
 **Prerequisite:** The Collector Service must publish the `inbound_event.id` (UUID) as a CloudEvents extension attribute in the Kafka message so the Compliance Service can capture it. See **Collector Service §2.4**.
 
@@ -380,11 +380,11 @@ Additionally, `event_log.data` (JSONB, ~2–5 KB per row) stores the extracted F
 
 ```sql
 -- Add FK to inbound_event
-ALTER TABLE event_log ADD COLUMN inbound_event_id UUID;
-CREATE INDEX idx_event_log_inbound_event ON event_log (inbound_event_id) WHERE inbound_event_id IS NOT NULL;
+ALTER TABLE compliance_event_log ADD COLUMN inbound_event_id UUID;
+CREATE INDEX idx_cel_inbound_event ON compliance_event_log (inbound_event_id) WHERE inbound_event_id IS NOT NULL;
 
 -- Backfill from matching cloudeventsid + source
-UPDATE event_log el
+UPDATE compliance_event_log el
 SET inbound_event_id = ie.id
 FROM inbound_event ie
 WHERE ie.cloudevents_id = el.cloudeventsid
@@ -392,11 +392,11 @@ WHERE ie.cloudevents_id = el.cloudeventsid
   AND el.inbound_event_id IS NULL;
 
 -- Phase 2b: drop duplicated columns (only after all queries are migrated)
-ALTER TABLE event_log DROP COLUMN source_event_id;
-ALTER TABLE event_log DROP COLUMN subject;
-ALTER TABLE event_log DROP COLUMN type;
-ALTER TABLE event_log DROP COLUMN event_time;
-ALTER TABLE event_log DROP COLUMN data;
+ALTER TABLE compliance_event_log DROP COLUMN source_event_id;
+ALTER TABLE compliance_event_log DROP COLUMN subject;
+ALTER TABLE compliance_event_log DROP COLUMN type;
+ALTER TABLE compliance_event_log DROP COLUMN event_time;
+ALTER TABLE compliance_event_log DROP COLUMN data;
 -- Keep cloudeventsid + source for idempotency check (existsByCloudeventsIdAndSource)
 ```
 
@@ -409,6 +409,31 @@ ALTER TABLE event_log DROP COLUMN data;
 | Phase 2a | Add `inbound_event_id` column + backfill | Collector publishes `inboundeventid` extension (§2.4) |
 | Phase 2b | Drop `source_event_id`, `subject`, `type`, `event_time` | Insights queries migrated to JOIN `inbound_event` |
 | Phase 2c | Drop `data` JSONB | §2.5 `practitioner_ref`/`practitioner_display` materialized + Insights queries verified |
+
+---
+
+### 2.10 Rename `event_log` → `compliance_event_log`
+
+**Problem:** The table `event_log` is a generic name that does not convey ownership. In a shared database with tables from multiple CCE services (`inbound_event` from Collector, `intelligence_event_log` from Compliance/Intelligence), the name is ambiguous — especially since the Insights Service queries both `event_log` and `inbound_event` for event analytics.
+
+**Solution:** Rename the table to `compliance_event_log` to clearly indicate Compliance Service ownership. This aligns with naming conventions already used by `intelligence_event_log`.
+
+**Schema change:**
+
+```sql
+ALTER TABLE event_log RENAME TO compliance_event_log;
+
+-- Rename indexes for consistency
+ALTER INDEX idx_event_log_cloudeventsid_source RENAME TO idx_cel_cloudeventsid_source;
+```
+
+**Code changes:**
+
+- `EventLog.java`: Update `@Table(name = "compliance_event_log")`
+- `EventLogRepository.java`: No change needed — JPA derives table name from entity annotation
+- `EventLogService.java`: No change needed — operates on the entity, not the table name directly
+
+> **Note:** This rename must be the **first** migration in the sequence — all subsequent migrations reference the new table name.
 
 ---
 
@@ -452,17 +477,18 @@ GROUP BY pi.id, pi.patient_id, pi.facility_id, pi.protocol_definition_id;
 | Change | Type | Affected Entity | Trigger |
 |--------|------|-----------------|---------|
 | Add `facility_id` to `protocol_instance` | Column | `ProtocolInstance` | Enrollment |
-| Add `practitioner_ref`, `practitioner_display` to `event_log` | Column | `EventLog` | Event processing |
+| Add `practitioner_ref`, `practitioner_display` to `compliance_event_log` | Column | `EventLog` | Event processing |
 | New `compliance_summary` table | Table | New entity | Step create/complete, scheduler transitions |
 | New `step_completion_stats` table | Table | New entity | Step create/complete |
 | New `deviation_summary` table | Table | New entity | Deviation create, step complete |
-| Drop `matched_step_instance_id` from `event_log` | Drop column | `EventLog` | — |
+| Drop `matched_step_instance_id` from `compliance_event_log` | Drop column | `EventLog` | — |
 | Drop `ip_address` from `audit_log` | Drop column | `AuditLog` | — |
 | Drop `error_message` from `intelligence_event_log` | Drop column | `IntelligenceEventLog` | — |
-| Add `step_instance_id` FK to `event_log` | Column + FK | `EventLog` | Step completion |
-| Drop `protocol_instance_id`, `protocol_definition_id`, `action_id` from `event_log` | Drop columns | `EventLog` | — (derivable via `step_instance_id`) |
+| Add `step_instance_id` FK to `compliance_event_log` | Column + FK | `EventLog` | Step completion |
+| Drop `protocol_instance_id`, `protocol_definition_id`, `action_id` from `compliance_event_log` | Drop columns | `EventLog` | — (derivable via `step_instance_id`) |
 | Add `protocol_definition_id` to `step_instance` | Column | `StepInstance` | Step creation |
-| Add `inbound_event_id` FK to `event_log` (deferred) | Column + FK | `EventLog` | Event processing (requires Collector §2.4) |
+| Add `inbound_event_id` FK to `compliance_event_log` (deferred) | Column + FK | `EventLog` | Event processing (requires Collector §2.4) |
+| Rename `event_log` → `compliance_event_log` | Rename table | `EventLog` | — |
 
 ### 4.1 Estimated Query Reduction for Insights Service
 
@@ -479,14 +505,15 @@ GROUP BY pi.id, pi.patient_id, pi.facility_id, pi.protocol_definition_id;
 
 | Order | Migration | Description |
 |-------|-----------|-------------|
-| V10 | `V10__add_facility_id_to_protocol_instance.sql` | Add column + index + backfill |
-| V11 | `V11__add_practitioner_to_event_log.sql` | Add columns + partial index |
-| V12 | `V12__create_compliance_summary.sql` | Create table + backfill from existing data |
-| V13 | `V13__create_step_completion_stats.sql` | Create table + backfill |
-| V14 | `V14__create_deviation_summary.sql` | Create table + backfill |
-| V15 | `V15__drop_dead_columns.sql` | Drop `event_log.matched_step_instance_id`, `audit_log.ip_address`, `intelligence_event_log.error_message` |
-| V16 | `V16__add_step_instance_fk_to_event_log.sql` | Add `step_instance_id` FK + partial index + backfill |
-| V17 | `V17__drop_write_only_event_log_columns.sql` | Drop `protocol_instance_id`, `protocol_definition_id`, `action_id` from `event_log` |
-| V18 | `V18__add_protocol_definition_id_to_step_instance.sql` | Add column + index + backfill + NOT NULL |
-| V19 *(deferred)* | `V19__add_inbound_event_id_to_event_log.sql` | Add FK + partial index + backfill (requires Collector §2.4) |
-| V20 *(deferred)* | `V20__drop_duplicated_event_log_columns.sql` | Drop `source_event_id`, `subject`, `type`, `event_time`, `data` |
+| V10 | `V10__rename_event_log_to_compliance_event_log.sql` | Rename table + indexes |
+| V11 | `V11__add_facility_id_to_protocol_instance.sql` | Add column + index + backfill |
+| V12 | `V12__add_practitioner_to_compliance_event_log.sql` | Add columns + partial index |
+| V13 | `V13__create_compliance_summary.sql` | Create table + backfill from existing data |
+| V14 | `V14__create_step_completion_stats.sql` | Create table + backfill |
+| V15 | `V15__create_deviation_summary.sql` | Create table + backfill |
+| V16 | `V16__drop_dead_columns.sql` | Drop `compliance_event_log.matched_step_instance_id`, `audit_log.ip_address`, `intelligence_event_log.error_message` |
+| V17 | `V17__add_step_instance_fk_to_compliance_event_log.sql` | Add `step_instance_id` FK + partial index + backfill |
+| V18 | `V18__drop_write_only_compliance_event_log_columns.sql` | Drop `protocol_instance_id`, `protocol_definition_id`, `action_id` from `compliance_event_log` |
+| V19 | `V19__add_protocol_definition_id_to_step_instance.sql` | Add column + index + backfill + NOT NULL |
+| V20 *(deferred)* | `V20__add_inbound_event_id_to_compliance_event_log.sql` | Add FK + partial index + backfill (requires Collector §2.4) |
+| V21 *(deferred)* | `V21__drop_duplicated_compliance_event_log_columns.sql` | Drop `source_event_id`, `subject`, `type`, `event_time`, `data` |
