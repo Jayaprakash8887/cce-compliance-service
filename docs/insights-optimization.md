@@ -412,3 +412,4 @@ Since all services are deployed fresh, the optimized schema is defined in the in
 | V2 | `V2__create_compliance_summary.sql` | Pre-computed compliance summary table |
 | V3 | `V3__create_step_completion_stats.sql` | Pre-computed step completion statistics table |
 | V4 | `V4__create_deviation_summary.sql` | Pre-computed deviation summary table |
+
