@@ -19,7 +19,10 @@ import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -349,26 +352,71 @@ public class StepInstanceService {
 
     /**
      * Auto-skip preceding optional steps when a subsequent step completes.
-     * Steps with requiredBehavior=could that are still in PENDING/DUE/OVERDUE
-     * within the same protocol instance are automatically skipped.
+     * Only skips steps that are direct ancestors (predecessors in the dependency graph)
+     * of the completed step AND have requiredBehavior=could AND are still actionable.
+     *
+     * A predecessor of action X is any action whose relatedActions list contains X
+     * (i.e., completing that action would create X). This is computed transitively
+     * to cover the full ancestor chain.
      */
     private void autoSkipPrecedingOptionalSteps(StepInstance completedStep) {
+        ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
+
+        // Parse protocol to determine the dependency graph
+        var definition = protocolInstance.getProtocolDefinition().getDefinition();
+        var planDefinition = planDefinitionParser.parse(definition.toString());
+        var actions = planDefinitionParser.extractActions(planDefinition);
+
+        // Compute all ancestor actionIds of the completed step (transitive predecessors)
+        Set<String> ancestorActionIds = computeAncestors(completedStep.getActionId(), actions);
+
+        if (ancestorActionIds.isEmpty()) {
+            return;
+        }
+
         List<StepInstance> siblings = stepInstanceRepository
-                .findByProtocolInstanceId(completedStep.getProtocolInstance().getId());
+                .findByProtocolInstanceId(protocolInstance.getId());
 
         for (StepInstance sibling : siblings) {
             if (sibling.getId().equals(completedStep.getId())) continue;
             if (!"could".equals(sibling.getRequiredBehavior())) continue;
             if (!ACTIONABLE_STATES.contains(sibling.getState())) continue;
+            if (!ancestorActionIds.contains(sibling.getActionId())) continue;
 
             sibling.setState(StepState.SKIPPED);
             stepInstanceRepository.save(sibling);
 
-            log.info("Auto-skipped optional step {} (actionId={}, requiredBehavior=could) " +
+            log.info("Auto-skipped predecessor optional step {} (actionId={}) " +
                             "due to completion of step {} (actionId={})",
                     sibling.getId(), sibling.getActionId(),
                     completedStep.getId(), completedStep.getActionId());
         }
+    }
+
+    /**
+     * Compute all transitive ancestors of a given actionId in the dependency graph.
+     * An ancestor of X is any action A such that A's relatedActions (directly or transitively)
+     * lead to X being created.
+     */
+    private Set<String> computeAncestors(String actionId,
+                                         List<PlanDefinitionParser.ActionMetadata> actions) {
+        Set<String> ancestors = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(actionId);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            // Find all actions whose relatedActions contain 'current'
+            for (PlanDefinitionParser.ActionMetadata action : actions) {
+                boolean createsTarget = action.relatedActions().stream()
+                        .anyMatch(ra -> current.equals(ra.actionId()));
+                if (createsTarget && !ancestors.contains(action.id())) {
+                    ancestors.add(action.id());
+                    queue.add(action.id());
+                }
+            }
+        }
+        return ancestors;
     }
 
     private OffsetDateTime calculateDueDate(OffsetDateTime baseTime,
