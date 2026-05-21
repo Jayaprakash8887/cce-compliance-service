@@ -20,8 +20,8 @@ public interface TriggerIndexRepository extends JpaRepository<TriggerIndex, Trig
             WHERE t.id.resourceType = :resourceType
               AND CONCAT(t.id.path, '|', t.id.codeSystem, '|', t.id.codeValue) IN :codeTriples
             GROUP BY t.id.protocolDefinitionId, t.id.actionId
-            HAVING COUNT(DISTINCT t.id.path) = (
-                SELECT COUNT(DISTINCT t2.id.path)
+            HAVING COUNT(DISTINCT CONCAT(t.id.path, '|', t.id.codeSystem)) = (
+                SELECT COUNT(DISTINCT CONCAT(t2.id.path, '|', t2.id.codeSystem))
                 FROM TriggerIndex t2
                 WHERE t2.id.protocolDefinitionId = t.id.protocolDefinitionId
                   AND t2.id.actionId = t.id.actionId

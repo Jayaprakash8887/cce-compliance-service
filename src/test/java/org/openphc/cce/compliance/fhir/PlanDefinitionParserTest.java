@@ -296,6 +296,100 @@ class PlanDefinitionParserTest {
         assertNull(labWork.timing());
     }
 
+    // ── RMNCH Protocol Tests — same-path codeFilter ──
+
+    @Test
+    void buildTriggerIndex_rmnch_ancVisitHasTwoIdentifierCodeFilters() throws IOException {
+        String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
+        PlanDefinition pd = parser.parse(rmnchJson);
+        UUID protocolDefId = UUID.randomUUID();
+        List<TriggerIndex> entries = parser.buildTriggerIndexEntries(pd, protocolDefId);
+
+        // anc-visit-1 should have 2 trigger index rows, both on path "identifier"
+        // with different systems (encounter-type and visit-count)
+        List<TriggerIndex> ancVisit1 = entries.stream()
+                .filter(e -> "anc-visit-1".equals(e.getActionId()))
+                .toList();
+        assertEquals(2, ancVisit1.size());
+        assertTrue(ancVisit1.stream().allMatch(e -> "identifier".equals(e.getPath())),
+                "Both codeFilters should have path 'identifier'");
+        assertTrue(ancVisit1.stream().anyMatch(e ->
+                "http://mdtlabs.com/encounter-type".equals(e.getCodeSystem())
+                        && "ANC".equals(e.getCodeValue())));
+        assertTrue(ancVisit1.stream().anyMatch(e ->
+                "http://mdtlabs.com/visit-count".equals(e.getCodeSystem())
+                        && "1".equals(e.getCodeValue())));
+    }
+
+    @Test
+    void buildTriggerIndex_rmnch_ancVisitsDistinguishedByVisitCount() throws IOException {
+        String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
+        PlanDefinition pd = parser.parse(rmnchJson);
+        UUID protocolDefId = UUID.randomUUID();
+        List<TriggerIndex> entries = parser.buildTriggerIndexEntries(pd, protocolDefId);
+
+        // Each ANC visit should have a unique visit-count code
+        for (int visit = 1; visit <= 3; visit++) {
+            String actionId = "anc-visit-" + visit;
+            String expectedCount = String.valueOf(visit);
+
+            List<TriggerIndex> visitEntries = entries.stream()
+                    .filter(e -> actionId.equals(e.getActionId()))
+                    .filter(e -> "http://mdtlabs.com/visit-count".equals(e.getCodeSystem()))
+                    .toList();
+            assertEquals(1, visitEntries.size(), "Should have exactly one visit-count entry for " + actionId);
+            assertEquals(expectedCount, visitEntries.get(0).getCodeValue());
+        }
+    }
+
+    @Test
+    void buildTriggerIndex_rmnch_totalEntryCount() throws IOException {
+        String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
+        PlanDefinition pd = parser.parse(rmnchJson);
+        UUID protocolDefId = UUID.randomUUID();
+        List<TriggerIndex> entries = parser.buildTriggerIndexEntries(pd, protocolDefId);
+
+        // Expected:
+        // registration: 1 (RelatedPerson, F1 only — empty path)
+        // family-planning: 1 (encounter-type=FAMILY_PLANNING)
+        // pregnancy-profile: 1 (encounter-type=PWPROFILE)
+        // anc-visit-1: 2 (encounter-type=ANC, visit-count=1)
+        // anc-visit-2: 2 (encounter-type=ANC, visit-count=2)
+        // anc-visit-3: 2 (encounter-type=ANC, visit-count=3)
+        // anc-referral: 2 (category=RMNCH, encounter-type=ANC)
+        // pregnancy-outcome: 1 (encounter-type=PREGNANCYOUTCOME)
+        // pnc: 1 (encounter-type=PNC_MOTHER)
+        assertEquals(13, entries.size());
+    }
+
+    @Test
+    void extractActions_rmnch_ancVisitsMandatory() throws IOException {
+        String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
+        PlanDefinition pd = parser.parse(rmnchJson);
+        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+
+        for (String ancId : List.of("anc-visit-1", "anc-visit-2", "anc-visit-3")) {
+            PlanDefinitionParser.ActionMetadata anc = actions.stream()
+                    .filter(a -> ancId.equals(a.id()))
+                    .findFirst().orElseThrow();
+            assertEquals("must", anc.requiredBehavior(), ancId + " should be mandatory");
+        }
+    }
+
+    @Test
+    void extractActions_rmnch_pregnancyProfileTriggersAncChain() throws IOException {
+        String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
+        PlanDefinition pd = parser.parse(rmnchJson);
+        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+
+        PlanDefinitionParser.ActionMetadata pwProfile = actions.stream()
+                .filter(a -> "pregnancy-profile".equals(a.id()))
+                .findFirst().orElseThrow();
+        assertEquals(1, pwProfile.relatedActions().size());
+        assertEquals("anc-visit-1", pwProfile.relatedActions().get(0).actionId());
+        assertEquals("after-end", pwProfile.relatedActions().get(0).relationship());
+    }
+
     // ── Intelligence Actions Tests ──
 
     @Test
