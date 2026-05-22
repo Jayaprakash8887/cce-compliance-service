@@ -42,7 +42,7 @@ Optimizations are distributed across all four upstream services. Each service ow
 
 | Service | New Pre-Computed Tables | Core Table Changes | Doc |
 |---------|------------------------|-------------------|-----|
-| **Compliance** (this doc) | `compliance_summary`, `step_completion_stats`, `deviation_summary`, `practitioner_activity_daily` | Rename `event_log` → `compliance_event_log`, dead column removal (cleanup only) | `cce-compliance-service/docs/insights-optimization.md` |
+| **Compliance** (this doc) | `compliance_summary`, `step_completion_stats`, `deviation_summary`, `practitioner_activity_daily` | See [core-schema-optimization.md](core-schema-optimization.md) | `cce-compliance-service/docs/insights-optimization.md` |
 | **Collector** | `ingestion_summary_daily`, `event_volume_daily`, `pipeline_loss_daily` | None | `cce-collector-service/docs/insights-optimization.md` |
 | **Scheduler** | `transition_log`, `step_state_snapshot` | None | `cce-scheduler-service/docs/insights-optimization.md` |
 | **Intelligence** | `delivery_summary_daily`, `adaptor_health_snapshot` | None | `cce-intelligence-service/docs/insights-optimization.md` |
@@ -239,30 +239,6 @@ DO UPDATE SET
 
 ---
 
-### 2.5 Dead Column Removal
-
-**Problem:** Three columns were present in the original schema but never populated anywhere in the codebase:
-
-| Table | Column | Type | Finding |
-|-------|--------|------|--------|
-| `compliance_event_log` | `matched_step_instance_id` | `UUID` | Never set — `setMatchedStepInstanceId()` has zero call sites |
-| `audit_log` | `ip_address` | `VARCHAR(45)` | Never set — `setIpAddress()` has zero call sites |
-| `intelligence_event_log` | `error_message` | `TEXT` | Never set — `setErrorMessage()` has zero call sites |
-
-**Solution (fresh deploy):** These columns are **not included** in the initial DDL. The corresponding fields, getters, and setters are removed from the JPA entities.
-
----
-
-### 2.6 Table Naming: `compliance_event_log`
-
-**Rationale:** The original table name `event_log` is generic and ambiguous in a shared database with tables from multiple CCE services (`inbound_event` from Collector, `intelligence_event_log` from Compliance/Intelligence). The fresh deployment uses `compliance_event_log` to clearly indicate Compliance Service ownership, aligning with `intelligence_event_log` naming conventions.
-
-**Code changes:**
-
-- `EventLog.java`: `@Table(name = "compliance_event_log")`
-
----
-
 ## 3. Consistency Guarantees
 
 All pre-computed tables are updated **synchronously within the same transaction** as the source operation (step creation, step completion, deviation creation, event processing). This guarantees:
@@ -286,12 +262,8 @@ Since this is a fresh deployment with no existing data, all optimizations are in
 | New `step_completion_stats` table | Table | New entity | Step create/complete |
 | New `deviation_summary` table | Table | New entity | Deviation create, step complete |
 | New `practitioner_activity_daily` table | Table | New entity | Event processing (practitioner extraction) |
-| Omit `matched_step_instance_id` from `compliance_event_log` | Not created | `EventLog` | — |
-| Omit `ip_address` from `audit_log` | Not created | `AuditLog` | — |
-| Omit `error_message` from `intelligence_event_log` | Not created | `IntelligenceEventLog` | — |
-| Table named `compliance_event_log` (not `event_log`) | Naming | `EventLog` | — |
 
-> **Note:** Core operational tables (`protocol_instance`, `step_instance`, `compliance_event_log`) retain their original schemas unchanged. All insights data is served from the pre-computed tables above.
+> **Note:** Core operational tables (`protocol_instance`, `step_instance`, `compliance_event_log`) retain their original schemas unchanged. All insights data is served from the pre-computed tables above. For core schema cleanup (dead column removal, table rename), see [core-schema-optimization.md](core-schema-optimization.md).
 
 ### 4.1 Estimated Query Reduction for Insights Service
 
@@ -310,11 +282,12 @@ Since all services are deployed fresh, the optimized schema is defined in the in
 
 | Order | Migration | Description |
 |-------|-----------|-------------|
-| V1 | `V1__initial_schema.sql` | All core tables with original schema (no insights columns added). `compliance_event_log` naming, dead columns excluded. |
 | V2 | `V2__create_compliance_summary.sql` | Pre-computed compliance summary table |
 | V3 | `V3__create_step_completion_stats.sql` | Pre-computed step completion statistics table |
 | V4 | `V4__create_deviation_summary.sql` | Pre-computed deviation summary table |
 | V5 | `V5__create_practitioner_activity_daily.sql` | Pre-computed practitioner activity table |
+
+> Core schema migrations (V1) are documented in [core-schema-optimization.md](core-schema-optimization.md).
 
 ---
 
