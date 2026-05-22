@@ -196,6 +196,11 @@ public class StepInstanceService {
     }
 
     private Deviation createDeviation(StepInstance step, DeviationType deviationType) {
+        return createDeviation(step, deviationType, null);
+    }
+
+    private Deviation createDeviation(StepInstance step, DeviationType deviationType,
+                                      Map<String, Object> additionalMetadata) {
         ProtocolInstance protocolInstance = step.getProtocolInstance();
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -207,6 +212,9 @@ public class StepInstanceService {
         if (deviationType == DeviationType.MISSED && step.getMissedDate() != null) {
             metadata.put("daysPastMissedDate",
                     Duration.between(step.getMissedDate(), now).toDays());
+        }
+        if (additionalMetadata != null) {
+            metadata.putAll(additionalMetadata);
         }
 
         return deviationService.recordDeviation(protocolInstance, step, deviationType,
@@ -260,8 +268,7 @@ public class StepInstanceService {
             metadata.put("incompletePrerequisites", incompletePrerequisites);
             metadata.put("completedActionId", completedActionId);
 
-            Deviation deviation = deviationService.recordDeviation(
-                    protocolInstance, completedStep,
+            Deviation deviation = createDeviation(completedStep,
                     DeviationType.ORDER_VIOLATION, metadata);
 
             log.warn("Order violation detected: step {} (actionId={}) completed while "
