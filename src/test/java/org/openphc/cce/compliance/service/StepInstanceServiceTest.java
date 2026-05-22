@@ -341,7 +341,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.DUE, step.getState());
-            verify(deviationService, never()).recordDeviation(any(), any(), any(), anyMap());
+            verify(deviationService, never()).createDeviation(any(), any());
         }
 
         @Test
@@ -354,7 +354,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.OVERDUE), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -367,9 +367,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.OVERDUE, step.getState());
 
-            verify(deviationService).recordDeviation(
-                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.OVERDUE),
-                    any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.OVERDUE));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
         }
 
@@ -383,7 +381,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -396,9 +394,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.MISSED, step.getState());
 
-            verify(deviationService).recordDeviation(
-                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.MISSED),
-                    any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
 
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -653,7 +649,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.SKIPPED, step.getState());
-            verify(deviationService, never()).recordDeviation(any(), any(), any(), any());
+            verify(deviationService, never()).createDeviation(any(), any());
             verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }
@@ -670,7 +666,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -682,8 +678,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.MISSED, step.getState());
-            verify(deviationService).recordDeviation(eq(step.getProtocolInstance()), eq(step),
-                    eq(DeviationType.MISSED), any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
         }
 
@@ -699,7 +694,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -711,7 +706,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.MISSED, step.getState());
-            verify(deviationService).recordDeviation(any(), any(), eq(DeviationType.MISSED), any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(eq(step), eq(deviation));
         }
     }
@@ -766,13 +761,13 @@ class StepInstanceServiceTest {
             when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.ORDER_VIOLATION), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.ORDER_VIOLATION), any()))
                     .thenReturn(deviation);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService).recordDeviation(
-                    eq(protocolInstance), eq(completedStep), eq(DeviationType.ORDER_VIOLATION),
+            verify(deviationService).createDeviation(
+                    eq(completedStep), eq(DeviationType.ORDER_VIOLATION),
                     argThat(metadata -> {
                         @SuppressWarnings("unchecked")
                         List<String> incomplete = (List<String>) metadata.get("incompletePrerequisites");
@@ -825,8 +820,8 @@ class StepInstanceServiceTest {
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService, never()).recordDeviation(
-                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+            verify(deviationService, never()).createDeviation(
+                    any(), eq(DeviationType.ORDER_VIOLATION), any());
         }
 
         @Test
@@ -874,8 +869,8 @@ class StepInstanceServiceTest {
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService, never()).recordDeviation(
-                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+            verify(deviationService, never()).createDeviation(
+                    any(), eq(DeviationType.ORDER_VIOLATION), any());
         }
 
         @Test
@@ -914,8 +909,8 @@ class StepInstanceServiceTest {
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService, never()).recordDeviation(
-                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+            verify(deviationService, never()).createDeviation(
+                    any(), eq(DeviationType.ORDER_VIOLATION), any());
         }
     }
 
