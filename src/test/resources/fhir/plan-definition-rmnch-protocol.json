@@ -281,16 +281,6 @@
             "system": "http://unitsofmeasure.org",
             "code": "d"
           }
-        },
-        {
-          "actionId": "anc-referral",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "value": 0,
-            "unit": "d",
-            "system": "http://unitsofmeasure.org",
-            "code": "d"
-          }
         }
       ],
       "timingTiming": {
@@ -344,18 +334,6 @@
         }
       ],
       "requiredBehavior": "must",
-      "relatedAction": [
-        {
-          "actionId": "anc-referral",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "value": 0,
-            "unit": "d",
-            "system": "http://unitsofmeasure.org",
-            "code": "d"
-          }
-        }
-      ],
       "timingTiming": {
         "repeat": {
           "count": 1,

@@ -1,6 +1,8 @@
 package org.openphc.cce.compliance.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityNotFoundException;
+import org.hl7.fhir.r4.model.PlanDefinition;
 import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
@@ -15,11 +17,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -136,7 +140,7 @@ public class StepInstanceService {
             case "PENDING_TO_DUE" -> applyTransition(step, StepState.PENDING, StepState.DUE);
             case "DUE_TO_OVERDUE" -> {
                 applyTransition(step, StepState.DUE, StepState.OVERDUE);
-                Deviation deviation = createDeviation(step, DeviationType.OVERDUE);
+                Deviation deviation = deviationService.createDeviation(step, DeviationType.OVERDUE);
                 intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
             }
             case "OVERDUE_TO_MISSED" -> {
@@ -146,7 +150,7 @@ public class StepInstanceService {
                             step.getId());
                 } else {
                     applyTransition(step, StepState.OVERDUE, StepState.MISSED);
-                    Deviation deviation = createDeviation(step, DeviationType.MISSED);
+                    Deviation deviation = deviationService.createDeviation(step, DeviationType.MISSED);
                     intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
                 }
                 // Check if protocol is now complete (MISSED/SKIPPED are terminal)
@@ -192,23 +196,7 @@ public class StepInstanceService {
                 step.getId(), expectedState, newState, step.getActionId());
     }
 
-    private Deviation createDeviation(StepInstance step, DeviationType deviationType) {
-        ProtocolInstance protocolInstance = step.getProtocolInstance();
 
-        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        Map<String, Object> metadata = new LinkedHashMap<>();
-        if (deviationType == DeviationType.OVERDUE && step.getDueDate() != null) {
-            metadata.put("daysOverdue",
-                    Duration.between(step.getDueDate(), now).toDays());
-        }
-        if (deviationType == DeviationType.MISSED && step.getMissedDate() != null) {
-            metadata.put("daysPastMissedDate",
-                    Duration.between(step.getMissedDate(), now).toDays());
-        }
-
-        return deviationService.recordDeviation(protocolInstance, step, deviationType,
-                metadata.isEmpty() ? null : metadata);
-    }
 
     /**
      * Detect order violations: when a step completes, check if any immediate
@@ -219,9 +207,9 @@ public class StepInstanceService {
     private void detectOrderViolations(StepInstance completedStep) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
-        var definition = protocolInstance.getProtocolDefinition().getDefinition();
-        var planDefinition = planDefinitionParser.parse(definition.toString());
-        var actions = planDefinitionParser.extractActions(planDefinition);
+        JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
+        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
+        List<PlanDefinitionParser.ActionMetadata> actions = planDefinitionParser.extractActions(planDefinition);
 
         String completedActionId = completedStep.getActionId();
 
@@ -257,8 +245,7 @@ public class StepInstanceService {
             metadata.put("incompletePrerequisites", incompletePrerequisites);
             metadata.put("completedActionId", completedActionId);
 
-            Deviation deviation = deviationService.recordDeviation(
-                    protocolInstance, completedStep,
+            Deviation deviation = deviationService.createDeviation(completedStep,
                     DeviationType.ORDER_VIOLATION, metadata);
 
             log.warn("Order violation detected: step {} (actionId={}) completed while "
@@ -277,12 +264,12 @@ public class StepInstanceService {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
         // Parse the protocol definition to get relatedAction info
-        var definition = protocolInstance.getProtocolDefinition().getDefinition();
-        var planDefinition = planDefinitionParser.parse(definition.toString());
-        var actions = planDefinitionParser.extractActions(planDefinition);
+        JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
+        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
+        List<PlanDefinitionParser.ActionMetadata> actions = planDefinitionParser.extractActions(planDefinition);
 
         // Find the completed action's metadata to get its relatedActions
-        var completedActionMetadata = actions.stream()
+        PlanDefinitionParser.ActionMetadata completedActionMetadata = actions.stream()
                 .filter(a -> completedStep.getActionId().equals(a.id()))
                 .findFirst()
                 .orElse(null);
@@ -303,7 +290,7 @@ public class StepInstanceService {
             OffsetDateTime dueDate = calculateDueDate(baseTime, relatedAction);
 
             // Find the target action's timing for overdue/missed dates
-            var targetAction = actions.stream()
+            PlanDefinitionParser.ActionMetadata targetAction = actions.stream()
                     .filter(a -> relatedAction.actionId().equals(a.id()))
                     .findFirst()
                     .orElse(null);
@@ -349,26 +336,71 @@ public class StepInstanceService {
 
     /**
      * Auto-skip preceding optional steps when a subsequent step completes.
-     * Steps with requiredBehavior=could that are still in PENDING/DUE/OVERDUE
-     * within the same protocol instance are automatically skipped.
+     * Only skips steps that are direct ancestors (predecessors in the dependency graph)
+     * of the completed step AND have requiredBehavior=could AND are still actionable.
+     *
+     * A predecessor of action X is any action whose relatedActions list contains X
+     * (i.e., completing that action would create X). This is computed transitively
+     * to cover the full ancestor chain.
      */
     private void autoSkipPrecedingOptionalSteps(StepInstance completedStep) {
+        ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
+
+        // Parse protocol to determine the dependency graph
+        JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
+        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
+        List<PlanDefinitionParser.ActionMetadata> actions = planDefinitionParser.extractActions(planDefinition);
+
+        // Compute all ancestor actionIds of the completed step (transitive predecessors)
+        Set<String> ancestorActionIds = computeAncestors(completedStep.getActionId(), actions);
+
+        if (ancestorActionIds.isEmpty()) {
+            return;
+        }
+
         List<StepInstance> siblings = stepInstanceRepository
-                .findByProtocolInstanceId(completedStep.getProtocolInstance().getId());
+                .findByProtocolInstanceId(protocolInstance.getId());
 
         for (StepInstance sibling : siblings) {
             if (sibling.getId().equals(completedStep.getId())) continue;
             if (!"could".equals(sibling.getRequiredBehavior())) continue;
             if (!ACTIONABLE_STATES.contains(sibling.getState())) continue;
+            if (!ancestorActionIds.contains(sibling.getActionId())) continue;
 
             sibling.setState(StepState.SKIPPED);
             stepInstanceRepository.save(sibling);
 
-            log.info("Auto-skipped optional step {} (actionId={}, requiredBehavior=could) " +
+            log.info("Auto-skipped predecessor optional step {} (actionId={}) " +
                             "due to completion of step {} (actionId={})",
                     sibling.getId(), sibling.getActionId(),
                     completedStep.getId(), completedStep.getActionId());
         }
+    }
+
+    /**
+     * Compute all transitive ancestors of a given actionId in the dependency graph.
+     * An ancestor of X is any action A such that A's relatedActions (directly or transitively)
+     * lead to X being created.
+     */
+    private Set<String> computeAncestors(String actionId,
+                                         List<PlanDefinitionParser.ActionMetadata> actions) {
+        Set<String> ancestors = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(actionId);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            // Find all actions whose relatedActions contain 'current'
+            for (PlanDefinitionParser.ActionMetadata action : actions) {
+                boolean createsTarget = action.relatedActions().stream()
+                        .anyMatch(ra -> current.equals(ra.actionId()));
+                if (createsTarget && !ancestors.contains(action.id())) {
+                    ancestors.add(action.id());
+                    queue.add(action.id());
+                }
+            }
+        }
+        return ancestors;
     }
 
     private OffsetDateTime calculateDueDate(OffsetDateTime baseTime,

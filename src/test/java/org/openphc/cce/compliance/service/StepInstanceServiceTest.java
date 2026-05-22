@@ -102,7 +102,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.PENDING, dueDate, dueDate.plusDays(3));
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             UUID eventId = UUID.randomUUID();
             service.completeStep(step, eventId, "test-source");
@@ -125,7 +125,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.DUE, pastDue, futureOverdue);
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -140,7 +140,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.OVERDUE, pastDue, pastOverdue);
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -180,7 +180,7 @@ class StepInstanceServiceTest {
                 if (s.getId() == null) s.setId(UUID.randomUUID());
                 return s;
             });
-            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             // Mock parser to return action metadata with relatedActions
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
@@ -229,7 +229,7 @@ class StepInstanceServiceTest {
                 if (s.getId() == null) s.setId(UUID.randomUUID());
                 return s;
             });
-            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
@@ -272,7 +272,7 @@ class StepInstanceServiceTest {
                 if (s.getId() == null) s.setId(UUID.randomUUID());
                 return s;
             });
-            when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
@@ -341,7 +341,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.DUE, step.getState());
-            verify(deviationService, never()).recordDeviation(any(), any(), any(), anyMap());
+            verify(deviationService, never()).createDeviation(any(), any());
         }
 
         @Test
@@ -354,7 +354,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.OVERDUE), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -367,9 +367,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.OVERDUE, step.getState());
 
-            verify(deviationService).recordDeviation(
-                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.OVERDUE),
-                    any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.OVERDUE));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
         }
 
@@ -383,7 +381,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -396,9 +394,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.MISSED, step.getState());
 
-            verify(deviationService).recordDeviation(
-                    eq(step.getProtocolInstance()), eq(step), eq(DeviationType.MISSED),
-                    any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
 
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -462,7 +458,7 @@ class StepInstanceServiceTest {
     class AutoSkipOptionalSteps {
 
         @Test
-        void completingStep_autoSkipsPrecedingCouldSteps() {
+        void completingStep_autoSkipsAncestorCouldSteps() {
             ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
 
             StepInstance optionalStep = StepInstance.builder()
@@ -489,13 +485,71 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(optionalStep, completedStep));
 
+            // Build dependency graph: optional-lab → mandatory-visit (optional-lab is ancestor)
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+            var optionalLabAction = new PlanDefinitionParser.ActionMetadata(
+                    "optional-lab", "Optional Lab", null,
+                    List.of(new PlanDefinitionParser.RelatedActionInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
+                    null, null, "could", List.of());
+            var mandatoryVisitAction = new PlanDefinitionParser.ActionMetadata(
+                    "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of());
+            when(planDefinitionParser.extractActions(mockPlanDef))
+                    .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
 
             assertEquals(StepState.SKIPPED, optionalStep.getState());
+        }
+
+        @Test
+        void completingStep_doesNotSkipParallelCouldSiblings() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            // Parallel sibling: pregnancy-profile (created by same parent, not an ancestor of family-planning)
+            StepInstance parallelSibling = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("pregnancy-profile")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("could")
+                    .build();
+
+            StepInstance completedStep = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("family-planning")
+                    .repeatIndex(0)
+                    .state(StepState.PENDING)
+                    .requiredBehavior("could")
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(7))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(10))
+                    .build();
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(parallelSibling, completedStep));
+
+            // Graph: registration → family-planning, registration → pregnancy-profile (parallel branches)
+            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            var registrationAction = new PlanDefinitionParser.ActionMetadata(
+                    "registration", "Registration", null,
+                    List.of(new PlanDefinitionParser.RelatedActionInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
+                            new PlanDefinitionParser.RelatedActionInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
+                    null, null, "must", List.of());
+            var familyPlanningAction = new PlanDefinitionParser.ActionMetadata(
+                    "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of());
+            var pregnancyProfileAction = new PlanDefinitionParser.ActionMetadata(
+                    "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of());
+            when(planDefinitionParser.extractActions(mockPlanDef))
+                    .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
+
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+
+            // pregnancy-profile should NOT be skipped — it's a parallel sibling, not an ancestor
+            assertEquals(StepState.PENDING, parallelSibling.getState());
         }
 
         @Test
@@ -523,7 +577,7 @@ class StepInstanceServiceTest {
                     .build();
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(mustStep, completedStep));
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
@@ -560,7 +614,7 @@ class StepInstanceServiceTest {
                     .build();
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(completedOptional, completedStep));
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
@@ -595,7 +649,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.SKIPPED, step.getState());
-            verify(deviationService, never()).recordDeviation(any(), any(), any(), any());
+            verify(deviationService, never()).createDeviation(any(), any());
             verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }
@@ -612,7 +666,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -624,8 +678,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.MISSED, step.getState());
-            verify(deviationService).recordDeviation(eq(step.getProtocolInstance()), eq(step),
-                    eq(DeviationType.MISSED), any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
         }
 
@@ -641,7 +694,7 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.MISSED), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(deviation);
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
@@ -653,7 +706,7 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.MISSED, step.getState());
-            verify(deviationService).recordDeviation(any(), any(), eq(DeviationType.MISSED), any());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(eq(step), eq(deviation));
         }
     }
@@ -708,13 +761,13 @@ class StepInstanceServiceTest {
             when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
-            when(deviationService.recordDeviation(any(), any(), eq(DeviationType.ORDER_VIOLATION), any()))
+            when(deviationService.createDeviation(any(), eq(DeviationType.ORDER_VIOLATION), any()))
                     .thenReturn(deviation);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService).recordDeviation(
-                    eq(protocolInstance), eq(completedStep), eq(DeviationType.ORDER_VIOLATION),
+            verify(deviationService).createDeviation(
+                    eq(completedStep), eq(DeviationType.ORDER_VIOLATION),
                     argThat(metadata -> {
                         @SuppressWarnings("unchecked")
                         List<String> incomplete = (List<String>) metadata.get("incompletePrerequisites");
@@ -767,8 +820,8 @@ class StepInstanceServiceTest {
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService, never()).recordDeviation(
-                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+            verify(deviationService, never()).createDeviation(
+                    any(), eq(DeviationType.ORDER_VIOLATION), any());
         }
 
         @Test
@@ -816,8 +869,8 @@ class StepInstanceServiceTest {
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService, never()).recordDeviation(
-                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+            verify(deviationService, never()).createDeviation(
+                    any(), eq(DeviationType.ORDER_VIOLATION), any());
         }
 
         @Test
@@ -837,7 +890,7 @@ class StepInstanceServiceTest {
                     .build();
 
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(completedStep));
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
@@ -856,8 +909,8 @@ class StepInstanceServiceTest {
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
-            verify(deviationService, never()).recordDeviation(
-                    any(), any(), eq(DeviationType.ORDER_VIOLATION), any());
+            verify(deviationService, never()).createDeviation(
+                    any(), eq(DeviationType.ORDER_VIOLATION), any());
         }
     }
 

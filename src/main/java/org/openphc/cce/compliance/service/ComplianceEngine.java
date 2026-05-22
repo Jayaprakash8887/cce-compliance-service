@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
+import org.hl7.fhir.r4.model.PlanDefinition;
 import org.openphc.cce.compliance.domain.entity.EventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
@@ -195,9 +196,9 @@ public class ComplianceEngine {
 
         // Evaluate Tier 1 results — check if they have conditions
         for (MatchedAction match : tier1Matches) {
-            var actions = getActionsForProtocol(match.protocolDefinitionId(), actionCache);
+            List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(match.protocolDefinitionId(), actionCache);
 
-            var actionMetadata = actions.stream()
+            PlanDefinitionParser.ActionMetadata actionMetadata = actions.stream()
                     .filter(a -> match.actionId().equals(a.id()))
                     .findFirst()
                     .orElse(null);
@@ -289,9 +290,9 @@ public class ComplianceEngine {
     private StepInstance createInitialStep(ProtocolInstance protocolInstance, String actionId,
                                            Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache) {
         UUID protocolDefId = protocolInstance.getProtocolDefinition().getId();
-        var actions = getActionsForProtocol(protocolDefId, actionCache);
+        List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(protocolDefId, actionCache);
 
-        var actionMetadata = actions.stream()
+        PlanDefinitionParser.ActionMetadata actionMetadata = actions.stream()
                 .filter(a -> actionId.equals(a.id()))
                 .findFirst()
                 .orElse(null);
@@ -321,7 +322,7 @@ public class ComplianceEngine {
             UUID protocolDefId, Map<UUID, List<PlanDefinitionParser.ActionMetadata>> cache) {
         return cache.computeIfAbsent(protocolDefId, id -> {
             ProtocolDefinition protocolDef = protocolDefinitionService.findById(id);
-            var planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
+            PlanDefinition planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
             return planDefinitionParser.extractActions(planDefinition);
         });
     }
