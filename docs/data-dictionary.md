@@ -240,7 +240,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Sub-steps reference their parent group step via `parent_step_id`. Multi-level nesting is supported — a sub-step can itself be a group whose children also have `parent_step_id` pointing to it, enabling arbitrary depth hierarchies.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Sub-steps reference their parent step via `parent_step_id`. Multi-level nesting is supported — a sub-step can itself contain sub-steps whose children also have `parent_step_id` pointing to it, enabling arbitrary depth hierarchies.
 
 ### Columns
 
@@ -259,7 +259,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
 | `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
 | `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
-| `parent_step_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. Non-null for sub-steps — references the immediate parent group step. For multi-level nesting, each level points to its direct parent (not the root). |
+| `parent_step_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. Non-null for sub-steps — references the immediate parent step. For multi-level nesting, each level points to its direct parent (not the root). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 
@@ -274,7 +274,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | Check | — | `completion_status IN ('ON_TIME', 'EARLY', 'LATE')` |
 | Check | — | `required_behavior IN ('must', 'could', 'must-unless-documented')` |
 | B-tree Index | `idx_step_instance_protocol` | `protocol_instance_id` — All steps within a protocol instance. |
-| B-tree Index | `idx_step_instance_parent_step_id` | `parent_step_id` — All sub-steps for a given parent group step. |
+| B-tree Index | `idx_step_instance_parent_step_id` | `parent_step_id` — All sub-steps for a given parent step. |
 | Partial B-tree | `idx_step_instance_state` | `state WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Active (non-terminal) steps. |
 | Partial B-tree | `idx_step_instance_due_date` | `due_date WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Scheduler time-based transitions. |
 
@@ -351,7 +351,7 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. For sub-step triggers, this is a composite path encoding the full ancestor hierarchy: `"ancestor/.../parent/subStepId"` (e.g., `"lab-workup/blood-tests/cbc"`). |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. For sub-step triggers, this is a composite path: `"parentStepId/subStepId"` (e.g., `"anc-visit-1/anc-visit-1-referral"`). |
 
 ### Constraints & Indexes
 

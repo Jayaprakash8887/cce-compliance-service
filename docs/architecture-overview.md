@@ -515,10 +515,8 @@ The table below maps CCE domain concepts to their FHIR PlanDefinition counterpar
 | CCE Domain Concept | FHIR PlanDefinition Element | Description |
 |---|---|---|
 | **Protocol Definition** | `PlanDefinition` | The clinical protocol (e.g., ANC High-Risk Monitoring) |
-| **Protocol Step** | `PlanDefinition.action` (type=step) | A step in the protocol with its own trigger (e.g., "ANC Visit 2") |
-| **Group Step** | `PlanDefinition.action` (type=group-step) | A container step whose completion is delegated to sub-steps. Can exist at any nesting level. |
-| **Nested Step** | `PlanDefinition.action.action` (type=step) | A nested action with its own trigger, tracked as a child step. |
-| **Nested Group** | `PlanDefinition.action.action` (type=group-step) | A nested group containing its own steps — enables multi-level nesting to arbitrary depth |
+| **Protocol Step** | `PlanDefinition.action` (type=step) | A step in the protocol with its own trigger (e.g., "ANC Visit 2"). May also contain nested sub-steps. |
+| **Sub-Step** | `PlanDefinition.action.action` (type=step) | A nested step within a parent step, tracked as a child step instance. Created after parent completes. |
 | **Intelligence Action** | `PlanDefinition.action.action` (type=fire-event) | A nested action that defines a conditional intelligence evaluation |
 
 ```mermaid
@@ -526,14 +524,12 @@ flowchart LR
     subgraph "FHIR PlanDefinition Structure"
         PD["PlanDefinition"]
         A1["action<br/>type=step"]
-        A2["action<br/>type=group-step"]
+        A2["action<br/>type=step<br/>(with sub-steps)"]
         IA1["action.action<br/>type=fire-event"]
         IA2["action.action<br/>type=fire-event"]  
-        SS1["action.action<br/>type=group-step"]
+        SS1["action.action<br/>type=step"]
         SS2["action.action<br/>type=step"]
-        IA3["action.action<br/>type=fire-event"]
-        SS1A["action.action.action<br/>type=step"]
-        SS1B["action.action.action<br/>type=step"]
+        IA3["action.action.action<br/>type=fire-event"]
 
         PD --> A1
         PD --> A2
@@ -542,21 +538,17 @@ flowchart LR
         A2 --> SS1
         A2 --> SS2
         SS1 --> IA3
-        SS1 --> SS1A
-        SS1 --> SS1B
     end
 
     subgraph "CCE Domain Model"
         PROTO["Protocol Definition"]
         S1["Step: anc-visit-1"]
-        S2["Group Step: lab-workup"]
+        S2["Step: anc-visit-2<br/>(has sub-steps)"]
         R1["Intelligence Action:<br/>overdue-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
-        SUB1["Nested Group: blood-tests"]
-        SUB2["Step: urine-test"]
-        R3["Intelligence Action:<br/>lab-overdue-alert"]
-        LEAF1["Step: cbc"]
-        LEAF2["Step: hb-test"]
+        SUB1["Sub-Step: referral"]
+        SUB2["Sub-Step: referral-ack"]
+        R3["Intelligence Action:<br/>referral-escalation"]
 
         PROTO --> S1
         PROTO --> S2
@@ -565,8 +557,6 @@ flowchart LR
         S2 --> SUB1
         S2 --> SUB2
         SUB1 --> R3
-        SUB1 --> LEAF1
-        SUB1 --> LEAF2
     end
 
     PD -.- PROTO
@@ -577,8 +567,6 @@ flowchart LR
     SS1 -.- SUB1
     SS2 -.- SUB2
     IA3 -.- R3
-    SS1A -.- LEAF1
-    SS1B -.- LEAF2
 ```
 
 Each **intelligence action** (`PlanDefinition.action.action`) contains:
@@ -645,11 +633,11 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 
 All execution and evaluation context is stored in a single row — no FK constraints, no joins required. See [Data Dictionary §11](data-dictionary.md#11-intelligence_event_log).
 
-### 6.4 Sub-Step Groups (Multi-Level Nesting)
+### 6.4 Sub-Steps (Step-Inside-Step Nesting)
 
-A **group step** is a `PlanDefinition.action` with `type.coding[0].code = "group-step"` that contains nested `action.action[]` entries. Group steps have no trigger of their own — they are created via `relatedAction` from a predecessor, and their completion is delegated to their child steps.
+A **step with sub-steps** is a `PlanDefinition.action` with `type.coding[0].code = "step"` that contains nested `action.action[]` entries of type `"step"` (sub-steps) and/or `"fire-event"` (intelligence actions). Steps can have **both** their own triggers **and** nested sub-steps. Sub-steps are created after the parent step completes — they represent follow-up work triggered by the parent's completion.
 
-**Multi-level nesting:** Steps can themselves be groups containing their own nested steps. The data model is self-referencing (`SubStepActionInfo` contains `List<SubStepActionInfo> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation, group completion) are recursive.
+**Multi-level nesting:** Sub-steps can themselves contain nested sub-steps. The data model is self-referencing (`SubStepActionInfo` contains `List<SubStepActionInfo> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation) are recursive.
 
 #### Classification Rules
 
@@ -657,33 +645,21 @@ Actions at ALL levels are classified by type (`type.coding[0].code`):
 
 | Type Code | Classification | Description |
 |---|---|---|
-| `"step"` | Step | Trigger-based action (has triggers, tracked as step instance) |
-| `"group-step"` | Group Step | Container action with nested steps (no triggers, completion delegated) |
+| `"step"` | Step | Trigger-based action (has triggers, tracked as step instance). May also contain nested sub-steps. |
 | `"fire-event"` | Intelligence Action | Conditional intelligence evaluation (nested only) |
 | *(missing)* | **Rejected** | `IllegalArgumentException` at load time |
 
-Every action **must** have an explicit `type` coding — `"step"`, `"group-step"`, or `"fire-event"`.
+Every action **must** have an explicit `type` coding — `"step"` or `"fire-event"`.
 
-**Validation:** A `"group-step"` action with triggers is rejected at load time (mutually exclusive patterns).
+#### Sub-Step Creation Timing
 
-#### Group Completion Semantics
-
-The parent's `selectionBehavior` determines when the group auto-completes:
-
-| `selectionBehavior` | Group completes when... |
-|---|---|
-| `all` (default) | All sub-steps reach a terminal state and at least one completed |
-| `any` | Any single sub-step completes |
-| `one-or-more` | At least one sub-step completes |
-| `exactly-one` | Exactly one sub-step completes |
-| `at-most-one` | Exactly one sub-step completes |
-| `all-or-none` | All sub-steps complete |
+Sub-steps are created **after the parent step completes** — not at enrollment time. Only entry-point sub-steps (those with no `relatedAction` dependency on a sibling) are created immediately. Subsequent sub-steps are created progressively as siblings complete (via `relatedAction`).
 
 #### Trigger Indexing
 
-Sub-step triggers are indexed in `trigger_index` using a **composite actionId** format that encodes the full ancestor path: `"ancestor/.../parent/subStepId"`. For example, a 3-level structure produces IDs like `"grandparent-group/parent-group/leaf-step"`. This is built recursively by `indexNestedSubStepTriggers()` and enables the Tier 1 query to match sub-step triggers at any depth and route them correctly through the engine.
+Sub-step triggers are indexed in `trigger_index` using a **composite actionId** format that encodes the parent path: `"parentStepId/subStepId"`. For example, a nested referral step under ANC Visit 1 produces: `"anc-visit-1/anc-visit-1-referral"`. This is built recursively by `indexNestedSubStepTriggers()` and enables the Tier 1 query to match sub-step triggers and route them correctly through the engine.
 
-#### Sub-Step Lifecycle (Multi-Level)
+#### Sub-Step Lifecycle
 
 ```mermaid
 sequenceDiagram
@@ -691,67 +667,51 @@ sequenceDiagram
     participant SIS as StepInstanceService
     participant DB as step_instance
 
-    Note over Engine: Event matches composite actionId "grandparent/parent/child"
-    Engine->>Engine: Split actionId into segments [grandparent, parent, child]
+    Note over Engine: Parent step completes (e.g., anc-visit-1)
+    Engine->>SIS: completeStep(parentStep)
+    SIS->>SIS: createEntryPointSubStepsForAction(parentStep)
+    SIS->>DB: Create entry-point sub-steps (PENDING)
     
-    loop For each intermediate ancestor segment
-        Engine->>SIS: findActionableStep(protocolId, ancestorActionId)
-        alt Ancestor doesn't exist
-            Engine->>SIS: createStep(ancestor, parentStepId)
-            Engine->>SIS: createSubSteps(ancestor, subStepInfos) [recursive]
-        end
-    end
-    
-    Engine->>SIS: findActionableStep(protocolId, leafActionId)
-    Engine->>SIS: completeStep(leafSubStep)
-    SIS->>SIS: createDependentSubSteps(leafSubStep)
-    SIS->>SIS: evaluateGroupCompletion(leafSubStep)
-    alt Parent group complete (per selectionBehavior)
-        SIS->>DB: parent.state = COMPLETED
-        alt Parent itself has a parentStepId (multi-level)
-            SIS->>SIS: evaluateGroupCompletion(parent) [recursive bubble-up]
-        else Top-level group
-            SIS->>SIS: createDependentSteps(parent) [top-level progressive instantiation]
-        end
-    end
+    Note over Engine: Later — event matches composite actionId "anc-visit-1/referral"
+    Engine->>Engine: Detect composite actionId (contains "/")
+    Engine->>SIS: findStepByProtocolAndActionId(protocolId, compositeId)
+    Engine->>SIS: completeStep(subStep)
+    SIS->>SIS: createDependentSubSteps(subStep) [progressive siblings]
+    SIS->>SIS: createEntryPointSubStepsForAction(subStep) [nested sub-steps if any]
 ```
 
 #### PlanDefinition Sub-Step Structure (Multi-Level Example)
 
 ```json
 {
-  "id": "lab-workup",
-  "title": "Lab Workup Group",
-  "selectionBehavior": "all",
+  "id": "anc-visit-1",
+  "title": "ANC Visit 1",
+  "type": { "coding": [{ "code": "step" }] },
+  "trigger": [{ "data": [{ "type": "Encounter", "codeFilter": ["..."] }] }],
+  "requiredBehavior": "must",
+  "relatedAction": [{ "actionId": "anc-visit-2", "relationship": "after-end", "offsetDuration": { "value": 30, "unit": "d" } }],
   "action": [
     {
-      "id": "blood-tests",
-      "type": { "coding": [{ "code": "sub-step" }] },
-      "title": "Blood Tests Group",
-      "selectionBehavior": "all",
+      "id": "anc-visit-1-referral",
+      "type": { "coding": [{ "code": "step" }] },
+      "title": "ANC Visit 1 Referral",
+      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }],
+      "requiredBehavior": "could",
+      "relatedAction": [{ "actionId": "anc-visit-1-referral-ack", "relationship": "after-end" }],
       "action": [
         {
-          "id": "cbc",
-          "type": { "coding": [{ "code": "sub-step" }] },
-          "title": "Complete Blood Count",
-          "trigger": [{ "data": [{ "type": "Observation", "codeFilter": ["..."] }] }],
-          "requiredBehavior": "must"
-        },
-        {
-          "id": "hb-electrophoresis",
-          "type": { "coding": [{ "code": "sub-step" }] },
-          "title": "Hemoglobin Electrophoresis",
-          "trigger": [{ "data": [{ "type": "Observation", "codeFilter": ["..."] }] }],
-          "relatedAction": [{ "actionId": "cbc", "relationship": "after-end" }],
-          "requiredBehavior": "must"
+          "id": "anc-visit-1-referral-escalation",
+          "type": { "coding": [{ "code": "fire-event" }] },
+          "condition": [{ "kind": "applicability", "expression": { "language": "text/jsonlogic", "expression": "..." } }],
+          "definitionCanonical": "ActivityDefinition/anc-urgent-escalation|1.0.0"
         }
       ]
     },
     {
-      "id": "urine-test",
-      "type": { "coding": [{ "code": "sub-step" }] },
-      "title": "Urine Test",
-      "trigger": [{ "data": [{ "type": "Observation", "codeFilter": ["..."] }] }],
+      "id": "anc-visit-1-referral-ack",
+      "type": { "coding": [{ "code": "step" }] },
+      "title": "ANC Visit 1 Referral Ack",
+      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }],
       "requiredBehavior": "must"
     }
   ]
@@ -759,11 +719,11 @@ sequenceDiagram
 ```
 
 In this example:
-- `lab-workup` is a top-level group with `selectionBehavior=all`
-- `blood-tests` is a **nested group** (sub-step that is itself a group) with its own `selectionBehavior=all`
-- `cbc` and `hb-electrophoresis` are leaf sub-steps within the nested group
-- Trigger index entries: `"lab-workup/blood-tests/cbc"`, `"lab-workup/blood-tests/hb-electrophoresis"`, `"lab-workup/urine-test"`
-- When both `cbc` and `hb-electrophoresis` complete → `blood-tests` group auto-completes → if `urine-test` also complete → `lab-workup` group auto-completes (recursive bubble-up)
+- `anc-visit-1` is a top-level step with its own trigger AND nested sub-steps
+- When `anc-visit-1` completes, entry-point sub-steps are created (`anc-visit-1-referral` has no dependency, so it's created immediately)
+- `anc-visit-1-referral-ack` is created progressively when `anc-visit-1-referral` completes (via `relatedAction`)
+- Trigger index entries: `"anc-visit-1"` (top-level), `"anc-visit-1/anc-visit-1-referral"`, `"anc-visit-1/anc-visit-1-referral-ack"` (sub-steps)
+- Sub-steps have their own intelligence actions (fire-event nested under the sub-step)
 
 ## 7. Security
 

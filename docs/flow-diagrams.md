@@ -470,9 +470,9 @@ flowchart TD
     N --> O["Log DLQ routing"]
 ```
 
-## 9. Multi-Level Sub-Step Processing
+## 9. Sub-Step Processing
 
-This diagram shows how the engine processes an inbound event that matches a deeply-nested sub-step trigger (e.g., composite actionId `"grandparent-group/parent-group/leaf-step"`).
+This diagram shows how the engine processes an inbound event that matches a sub-step trigger (e.g., composite actionId `"anc-visit-1/anc-visit-1-referral"`).
 
 ```mermaid
 sequenceDiagram
@@ -483,72 +483,59 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     Consumer->>Engine: processInboundEvent(cloudEvent)
-    Note over Engine: Tier 1 match returns composite actionId<br/>"grandparent-group/parent-group/leaf-step"
+    Note over Engine: Tier 1 match returns composite actionId<br/>"anc-visit-1/anc-visit-1-referral"
 
-    Engine->>Engine: Split actionId into segments:<br/>[grandparent-group, parent-group, leaf-step]
+    Engine->>Engine: Detect composite actionId (contains "/")
+    Engine->>Engine: Extract parentActionId = "anc-visit-1"
 
     rect rgb(240, 248, 255)
-        Note over Engine,DB: Ensure all ancestor steps exist
-        loop For each intermediate ancestor (grandparent-group, parent-group)
-            Engine->>SIS: findActionableStep(protocolId, ancestorActionId)
-            alt Ancestor step doesn't exist
-                Engine->>SIS: createStep(ancestor, parentStepId)
-                SIS->>DB: INSERT step_instance (state=PENDING, parent refs)
-                Engine->>SIS: createSubSteps(ancestorStep, subStepInfos)
-                Note over SIS: Recursively creates entry-point sub-steps<br/>at all nested levels
-                SIS->>DB: INSERT sub-step instances
-            end
+        Note over Engine,DB: Find completed parent step
+        Engine->>SIS: findStepByProtocolAndActionId(protocolId, "anc-visit-1")
+        alt Parent not found or not completed
+            Engine->>SIS: createStep(parent) + completeStep(parent)
+            SIS->>DB: INSERT + UPDATE step_instance
         end
     end
 
     rect rgb(245, 255, 245)
-        Note over Engine,DB: Complete the leaf sub-step
-        Engine->>SIS: findActionableStep(protocolId, "leaf-step")
-        Engine->>SIS: completeStep(leafStep)
-        SIS->>DB: UPDATE leaf-step state=COMPLETED
+        Note over Engine,DB: Find or create the sub-step
+        Engine->>SIS: findActionableStep(protocolId, compositeActionId)
+        alt Sub-step exists (created on parent completion)
+            Engine->>SIS: completeStep(subStep)
+        else Sub-step doesn't exist
+            Engine->>SIS: createStep(subStep, parentStepId)
+            Engine->>SIS: completeStep(subStep)
+        end
+        SIS->>DB: UPDATE sub-step state=COMPLETED
     end
 
     rect rgb(255, 248, 240)
-        Note over SIS,DB: Progressive instantiation + Group completion (recursive bubble-up)
-        SIS->>SIS: createDependentSubSteps(leafStep)
+        Note over SIS,DB: Progressive instantiation + entry-point sub-steps
+        SIS->>SIS: createDependentSubSteps(subStep)
         SIS->>DB: INSERT dependent sibling sub-steps (if any)
 
-        SIS->>SIS: evaluateGroupCompletion(leafStep)
-        SIS->>DB: SELECT sibling sub-steps for parent-group
-        alt parent-group selectionBehavior satisfied
-            SIS->>DB: UPDATE parent-group state=COMPLETED
-            Note over SIS: Parent has parentStepId → recursive bubble-up
-            SIS->>SIS: evaluateGroupCompletion(parent-group)
-            SIS->>DB: SELECT sibling sub-steps for grandparent-group
-            alt grandparent-group selectionBehavior satisfied
-                SIS->>DB: UPDATE grandparent-group state=COMPLETED
-                Note over SIS: Top-level group (no parentStepId)
-                SIS->>SIS: createDependentSteps(grandparent-group)
-                SIS->>SIS: detectOrderViolations()
-                SIS->>SIS: checkProtocolCompletion()
-            end
-        end
+        SIS->>SIS: createEntryPointSubStepsForAction(subStep)
+        Note over SIS: Creates nested sub-steps if subStep has children
+        SIS->>DB: INSERT nested sub-step instances (if any)
     end
 ```
 
-### Sub-Step Creation (Recursive)
+### Sub-Step Creation on Parent Completion
 
-Shows how `createSubSteps()` handles nested groups recursively when a group step is first instantiated.
+Shows how `createEntryPointSubStepsForAction()` creates entry-point sub-steps when a parent step completes.
 
 ```mermaid
 flowchart TD
-    START["createSubSteps(parentStep, subStepInfos)"] --> LOOP{"For each subStepInfo"}
+    START["createEntryPointSubStepsForAction(parentStep)"] --> PARSE["Parse PlanDefinition"]
+    PARSE --> FIND["Find sub-steps for action (findSubStepsOfAction)"]
+    FIND --> LOOP{"For each subStepInfo"}
     LOOP --> HAS_DEP{"Has relatedAction<br/>(depends on sibling)?"}
 
     HAS_DEP -->|"Yes"| SKIP["Skip (created progressively later)"]
     HAS_DEP -->|"No"| CREATE["createStep(subStep, parentStepId)"]
 
-    CREATE --> IS_GROUP{"subStepInfo.hasSubSteps()?"}
-    IS_GROUP -->|"Yes"| RECURSE["createSubSteps(newStep, subStepInfo.subSteps())<br/>[RECURSIVE]"]
-    IS_GROUP -->|"No"| NEXT["Continue to next"]
-
+    CREATE --> NEXT["Continue to next"]
     SKIP --> LOOP
-    RECURSE --> NEXT
     NEXT --> LOOP
     LOOP -->|"Done"| END["Return"]
 ```

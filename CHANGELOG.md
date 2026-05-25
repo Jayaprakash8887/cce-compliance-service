@@ -9,24 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### Sub-Step Groups (Multi-Level Nesting)
-- `PlanDefinition.action.action[]` with `type.coding[0].code = "sub-step"` creates child step instances within a parent group
-- **Multi-level nesting:** Sub-steps can themselves be groups containing their own sub-steps — recursive to arbitrary depth
-- `SubStepActionInfo` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, groupingBehavior, selectionBehavior, intelligenceActions, subSteps (self-referencing)
+#### Sub-Steps (Step-Inside-Step Nesting)
+- `PlanDefinition.action.action[]` with `type.coding[0].code = "step"` creates child step instances within a parent step
+- **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
+- Parent steps can have BOTH triggers AND sub-steps — sub-steps are created after parent completes
+- `SubStepActionInfo` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing)
 - `PlanDefinitionParser.classifyNestedActions()` — recursively routes nested actions to either sub-step or intelligence action builders at every nesting level
-- Sub-step trigger indexing with composite actionId format (`ancestor/.../parent/subStepId`) in `TriggerIndex` — supports arbitrary depth
+- Sub-step trigger indexing with composite actionId format (`parentStepId/subStepId`) in `TriggerIndex`
 - Recursive trigger indexing via `indexNestedSubStepTriggers()` — builds composite IDs at any nesting level
-- Recursive trigger validation via `validateActionTriggers()` — validates nested sub-step groups at all levels
-- `StepInstanceService.createSubSteps()` — recursively creates entry-point sub-steps for nested groups at all levels
-- `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction` scoped to group, with recursive child creation for nested groups
-- `StepInstanceService.evaluateGroupCompletion()` — auto-completes parent when `selectionBehavior` is satisfied, then **recursively bubbles up** to grandparent groups
-- `StepInstanceService.resolveSelectionBehavior()` / `resolveSubSteps()` — recursive tree traversal helpers to find metadata at any depth
-- `ComplianceEngine.processSubStepMatch()` — handles N-level composite actionId routing (iterates all intermediate ancestor segments)
+- Recursive trigger validation via `validateActionTriggers()` — validates nested sub-steps at all levels
+- `StepInstanceService.createEntryPointSubStepsForAction()` — creates entry-point sub-steps after parent step completion
+- `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`
+- `StepInstanceService.findStepByProtocolAndActionId()` — parent step lookup (any state, prefers COMPLETED)
+- `ComplianceEngine.processSubStepMatch()` — handles composite actionId routing (finds completed parent)
 - `ComplianceEngine.resolveSubStepInfo()` — recursive lookup of `SubStepActionInfo` at any depth in the action tree
-- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal for multi-level composite IDs
-- Group completion via FHIR `selectionBehavior`: all, any, exactly-one, at-most-one, one-or-more, all-or-none
+- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal for composite IDs
 - Duplicate creation guard in progressive sub-step instantiation
-- Validation: rejects PlanDefinition actions with both triggers AND sub-steps (mutually exclusive)
 - Flyway V5 migration: `parent_step_id` (UUID FK → step_instance) + index on `step_instance`
 
 #### Schema Optimization
@@ -35,23 +33,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Parser & Metadata
-- `ActionMetadata` record extended with `groupingBehavior`, `selectionBehavior`, `subSteps` fields and `hasSubSteps()` method
-- `SubStepActionInfo` record extended with `groupingBehavior`, `selectionBehavior`, `subSteps` (self-referencing) and `hasSubSteps()` method
+- `ActionMetadata` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps — with `hasSubSteps()` method
+- `SubStepActionInfo` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing) — with `hasSubSteps()` method
 - `buildSubStepActionInfo()` now calls `classifyNestedActions()` recursively on child actions at every nesting level
-- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for arbitrary-depth composite actionId construction
-- `validateTriggers()` uses recursive `validateActionTriggers()` to validate nested sub-step groups at all levels
+- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for composite actionId construction
+- `validateTriggers()` uses recursive `validateActionTriggers()` to validate nested sub-steps at all levels
+- Only two valid action types: `"step"` and `"fire-event"` — all others rejected at parse time
 
 #### Engine Flow
 - `ComplianceEngine.processMatch()` — detects composite actionId (contains "/") and routes to sub-step processing
-- `ComplianceEngine.processSubStepMatch()` — splits composite actionId into all segments, iterates to ensure all intermediate ancestor steps exist
-- `performTwoTierMatching()` — uses `resolveSubStepInfo()` for multi-level composite actionId condition evaluation
-- `StepInstanceService.completeStep()` — when `parentStepId != null`, triggers progressive sibling creation + group completion evaluation
-- `StepInstanceService.evaluateGroupCompletion()` — recursive bubble-up when completed group itself has a `parentStepId`
-- `StepInstanceService.createDependentSubSteps()` — uses `resolveSubSteps()` recursive helper for multi-level parent resolution
-- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal for multi-level composite IDs
+- `ComplianceEngine.processSubStepMatch()` — finds completed parent step, resolves sub-step, creates/completes it
+- `performTwoTierMatching()` — uses `resolveSubStepInfo()` for composite actionId condition evaluation
+- `StepInstanceService.completeStep()` — creates entry-point sub-steps via `createEntryPointSubStepsForAction()` on both top-level and sub-step completion
+- `StepInstanceService.createDependentSubSteps()` — progressive sibling creation when sub-step completes
+- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal for composite IDs
 
 #### Bug Fixes
-- `isGroupComplete()` — `all-or-none` no longer returns true when 0 completions exist (requires all complete)
 - Dead code removal: unused `hasDependency` variable in `createDependentSubSteps()`
 - Performance: PlanDefinition parsed once in sub-step completion flow (was parsed twice)
 - Misleading V5 migration comment fixed (referenced columns never added)

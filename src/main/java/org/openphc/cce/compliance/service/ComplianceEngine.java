@@ -342,8 +342,9 @@ public class ComplianceEngine {
 
     /**
      * Process a sub-step trigger match. The composite actionId encodes the full hierarchy path:
-     * "topLevelGroupId/subStepId" for 2-level, "topLevelGroupId/nestedGroupId/leafId" for 3-level, etc.
-     * Ensures all ancestor steps exist, then finds/creates and completes the leaf sub-step.
+     * "parentStepId/subStepId" for 2-level, "grandparent/parent/leafId" for 3-level, etc.
+     * In the step-inside-step model, ancestor steps are COMPLETED (sub-steps are created
+     * after parent completion). Finds the leaf sub-step and completes it.
      */
     private void processSubStepMatch(String compositeActionId, ProtocolInstance protocolInstance,
                                      CloudEventMessage event, EventLog eventLog,
@@ -359,29 +360,22 @@ public class ComplianceEngine {
         UUID protocolDefId = protocolInstance.getProtocolDefinition().getId();
         List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(protocolDefId, actionCache);
 
-        // Ensure all ancestor steps exist (from top-level group down to the immediate parent)
-        StepInstance currentParent = stepInstanceService.findActionableStep(
+        // Find the top-level parent step (may be COMPLETED since sub-steps are post-completion)
+        StepInstance currentParent = stepInstanceService.findStepByProtocolAndActionId(
                 protocolInstance.getId(), topLevelActionId);
         if (currentParent == null) {
+            // Parent step hasn't been created/completed yet — create and complete it on-demand
             currentParent = createInitialStep(protocolInstance, topLevelActionId, actionCache);
-
-            // Create sub-steps for the newly created top-level group
-            PlanDefinitionParser.ActionMetadata topMetadata = actions.stream()
-                    .filter(a -> topLevelActionId.equals(a.id()))
-                    .findFirst()
-                    .orElse(null);
-            if (topMetadata != null && topMetadata.hasSubSteps()) {
-                stepInstanceService.createSubSteps(currentParent, topMetadata.subSteps());
-            }
+            stepInstanceService.completeStep(currentParent, eventLog.getId(), event.getSource());
         }
 
-        // For multi-level (3+ segments), ensure intermediate group steps exist
+        // For multi-level (3+ segments), resolve intermediate parent steps
         for (int i = 1; i < segments.length - 1; i++) {
             String intermediateActionId = segments[i];
-            StepInstance intermediateStep = stepInstanceService.findActionableStep(
+            StepInstance intermediateStep = stepInstanceService.findStepByProtocolAndActionId(
                     protocolInstance.getId(), intermediateActionId);
             if (intermediateStep == null) {
-                // Resolve sub-step metadata for the intermediate group
+                // Intermediate step doesn't exist — create and complete on-demand
                 PlanDefinitionParser.SubStepActionInfo intermediateInfo =
                         resolveSubStepInfo(intermediateActionId, segments[i - 1], actions);
 
@@ -398,21 +392,16 @@ public class ComplianceEngine {
                 intermediateStep = stepInstanceService.createStep(protocolInstance, intermediateActionId, 0,
                         now, overdueDate, missedDate, requiredBehavior,
                         currentParent.getId());
-
-                // If the intermediate is a group, create its entry-point sub-steps
-                if (intermediateInfo != null && intermediateInfo.hasSubSteps()) {
-                    stepInstanceService.createSubSteps(intermediateStep, intermediateInfo.subSteps());
-                }
             }
             currentParent = intermediateStep;
         }
 
-        // Find or create the leaf sub-step instance
-        String immediateParentActionId = segments[segments.length - 2];
+        // Find the actionable leaf sub-step (should already exist if parent completed normally)
         StepInstance subStep = stepInstanceService.findActionableStep(
                 protocolInstance.getId(), leafActionId);
         if (subStep == null) {
-            // Resolve leaf sub-step metadata
+            // Sub-step doesn't exist yet — create on-demand with parent reference
+            String immediateParentActionId = segments[segments.length - 2];
             PlanDefinitionParser.SubStepActionInfo subStepInfo =
                     resolveSubStepInfo(leafActionId, immediateParentActionId, actions);
 

@@ -8,7 +8,7 @@
 
 ## Overview
 
-Release 1.2.0 adds **sub-step group support with multi-level nesting** — the ability to decompose a protocol step into independently-triggerable child steps, which can themselves be groups containing their own sub-steps, recursively to arbitrary depth. Sub-steps are modeled as nested `PlanDefinition.action.action[]` entries with `type.coding[0].code = "sub-step"`, indexed in `trigger_index` with composite actionIds (encoding the full ancestor path), and tracked in `step_instance` with parent references. Group completion is controlled by FHIR `selectionBehavior` and bubbles up recursively through all nesting levels.
+Release 1.2.0 adds **step-inside-step support with multi-level nesting** — the ability to nest independently-triggerable child steps within a parent step. Sub-steps are modeled as nested `PlanDefinition.action.action[]` entries with `type.coding[0].code = "step"`, indexed in `trigger_index` with composite actionIds (`"parentId/subStepId"`), and tracked in `step_instance` with parent references. Parent steps can have **both** triggers and sub-steps — sub-steps are created after the parent step completes.
 
 Additionally, this release includes core schema optimizations (V4 migration) for production workloads.
 
@@ -16,36 +16,33 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 
 ## Feature Summary
 
-### Sub-Step Groups (Multi-Level Nesting)
-- `PlanDefinition.action.action[]` with `type = "sub-step"` creates child step instances within a group
-- **Multi-level nesting:** Sub-steps can themselves be groups containing nested sub-steps — recursive to arbitrary depth
-- Group steps have NO trigger (validated at load time — mutually exclusive with sub-steps)
-- Sub-step triggers indexed in `trigger_index` with composite actionId format: `"ancestor/.../parent/subStepId"` (arbitrary depth)
-- `selectionBehavior` controls group completion: `all` (default), `any`, `exactly-one`, `at-most-one`, `one-or-more`, `all-or-none`
-- **Recursive group completion:** When a sub-step group completes, its parent group is re-evaluated, bubbling up to the top-level
-- Progressive instantiation within groups: sub-steps with `relatedAction` pointing to siblings are created when the sibling completes
+### Sub-Steps (Step-Inside-Step Nesting)
+- `PlanDefinition.action.action[]` with `type = "step"` creates child step instances within a parent step
+- **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
+- Parent steps can have BOTH triggers AND sub-steps (sub-steps are created after parent completes)
+- Sub-step triggers indexed in `trigger_index` with composite actionId format: `"parentStepId/subStepId"`
+- Entry-point sub-steps (no `relatedAction` dependency on siblings) created immediately on parent completion
+- Progressive instantiation within sub-steps: sub-steps with `relatedAction` pointing to siblings are created when the sibling completes
 - Sub-steps can have their own intelligence actions (nested fire-event)
-- `ComplianceEngine.processSubStepMatch()` handles N-level composite actionId routing (creates intermediate ancestor steps as needed)
-- Tier 2 condition evaluation extended for multi-level sub-step triggers
+- `ComplianceEngine.processSubStepMatch()` handles composite actionId routing (finds completed parent, resolves sub-step)
+- Tier 2 condition evaluation extended for sub-step triggers
 - Duplicate creation guard in progressive sub-step instantiation
 
 ### PlanDefinition Parser Enhancements
 - `classifyNestedActions()` — recursively routes nested actions to either `SubStepActionInfo` or `IntelligenceActionInfo` at every nesting level
-- Classification by explicit `type.coding[0].code` with backward-compatible fallback heuristics
-- `ActionMetadata` record extended with `groupingBehavior`, `selectionBehavior`, `subSteps` fields
-- New `SubStepActionInfo` record (self-referencing): id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, groupingBehavior, selectionBehavior, intelligenceActions, subSteps
-- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for arbitrary-depth composite actionId construction
-- `validateTriggers()` uses recursive `validateActionTriggers()` for nested group validation
-- Validation: rejects actions with both triggers AND sub-steps
+- Classification by explicit `type.coding[0].code`: only `"step"` and `"fire-event"` are valid
+- `ActionMetadata` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps
+- New `SubStepActionInfo` record (self-referencing): id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps
+- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for composite actionId construction
+- `validateTriggers()` uses recursive `validateActionTriggers()` for nested validation
 
 ### Step Instance Lifecycle
 - `StepInstance` entity: new `parent_step_id` (UUID FK) column
-- `StepInstanceService.createSubSteps()` — recursively creates entry-point sub-steps for nested groups at all levels
-- `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`, with recursive child creation for nested groups
-- `StepInstanceService.evaluateGroupCompletion()` — auto-completes parent when `selectionBehavior` is satisfied, then **recursively evaluates grandparent** completion
-- `StepInstanceService.resolveSelectionBehavior()` / `resolveSubSteps()` — recursive tree traversal helpers for multi-level lookup
+- `StepInstanceService.createEntryPointSubStepsForAction()` — creates entry-point sub-steps after parent step completion
+- `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`
+- `StepInstanceService.findStepByProtocolAndActionId()` — looks up steps by protocol and action ID (any state, prefers COMPLETED)
 - `createStep()` overload with `parentStepId` parameter for explicit parent reference
-- On parent auto-completion: top-level progressive instantiation, deviation detection, and protocol completion check run normally
+- On parent completion: top-level progressive instantiation, deviation detection, and protocol completion check run normally
 
 ### Core Schema Optimization (V4)
 - Performance indexes and constraints for production workloads
@@ -70,10 +67,10 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
                                     ├── Tier 2 Evaluation (ExpressionEvaluationService)
                                     ├── Enrollment (ProtocolInstanceService)
                                     ├── Step Management (StepInstanceService)
-                                    │   ├── Sub-Step Groups (multi-level recursive nesting)
-                                    │   │   ├── createSubSteps (recursive for nested groups)
-                                    │   │   ├── evaluateGroupCompletion (recursive bubble-up)
-                                    │   │   └── resolveSubSteps / resolveSelectionBehavior (tree traversal)
+                                    │   ├── Sub-Steps (step-inside-step nesting)
+                                    │   │   ├── createEntryPointSubStepsForAction (on parent completion)
+                                    │   │   ├── createDependentSubSteps (progressive siblings)
+                                    │   │   └── findStepByProtocolAndActionId (parent lookup)
                                     │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
                                     ├── Deviation Detection (DeviationService)
                                     │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
@@ -89,13 +86,13 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 2. No breaking changes to existing REST API endpoints
 3. No changes to existing Kafka message schemas
 4. Existing PlanDefinitions without sub-steps continue to work unchanged
-5. Sub-step functionality activates only for PlanDefinitions with nested `action.action[]` typed as `sub-step`
+5. Sub-step functionality activates only for PlanDefinitions with nested `action.action[]` typed as `"step"`
 
 ---
 
 ## Known Limitations (v1.2.0)
 
-- **Sub-step scheduler transitions:** The Scheduler Service is not yet aware of sub-step parent relationships. Sub-step OVERDUE→MISSED transitions may trigger without evaluating group-level semantics. This will be addressed in a future release.
+- **Sub-step scheduler transitions:** The Scheduler Service is not yet aware of sub-step parent relationships. Sub-step OVERDUE→MISSED transitions work independently of the parent step lifecycle.
 - **No REST API for sub-step queries:** No dedicated endpoint to list sub-steps for a given parent step (use existing step list filtered by `parentStepId`).
 - **Multi-level nesting depth:** While the code supports arbitrary depth recursively, only 2-level nesting has been integration-tested. Extremely deep nesting (>5 levels) should be validated for performance.
 - All limitations from v1.1.0 still apply.

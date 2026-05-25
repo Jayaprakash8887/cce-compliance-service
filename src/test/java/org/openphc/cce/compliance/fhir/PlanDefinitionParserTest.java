@@ -585,27 +585,26 @@ class PlanDefinitionParserTest {
     // ── Sub-Step Plan Definition Tests ──
 
     @Test
-    void extractActions_subStepsPlanDefinition_parsesGroupsWithSubSteps() throws IOException {
+    void extractActions_subStepsPlanDefinition_parsesStepsWithSubSteps() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // Should have 8 top-level actions
+        // Should have 8 top-level actions (no group wrappers)
         assertEquals(8, actions.size());
 
-        // anc-visit-1-group is a group with sub-steps
-        PlanDefinitionParser.ActionMetadata visit1Group = actions.stream()
-                .filter(a -> "anc-visit-1-group".equals(a.id()))
+        // anc-visit-1 is a step with triggers AND sub-steps
+        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+                .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals("logical-group", visit1Group.groupingBehavior());
-        assertEquals("one-or-more", visit1Group.selectionBehavior());
-        assertTrue(visit1Group.hasSubSteps());
-        assertEquals(3, visit1Group.subSteps().size());
+        assertTrue(visit1.hasSubSteps());
+        assertEquals(2, visit1.subSteps().size());
+        // Step also has its own triggers
+        assertFalse(visit1.triggers().isEmpty());
 
         // Verify sub-step IDs
-        assertEquals("anc-visit-1", visit1Group.subSteps().get(0).id());
-        assertEquals("anc-visit-1-referral", visit1Group.subSteps().get(1).id());
-        assertEquals("anc-visit-1-referral-ack", visit1Group.subSteps().get(2).id());
+        assertEquals("anc-visit-1-referral", visit1.subSteps().get(0).id());
+        assertEquals("anc-visit-1-referral-ack", visit1.subSteps().get(1).id());
     }
 
     @Test
@@ -614,12 +613,12 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        PlanDefinitionParser.ActionMetadata visit1Group = actions.stream()
-                .filter(a -> "anc-visit-1-group".equals(a.id()))
+        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+                .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
 
         // anc-visit-1-referral sub-step has 1 intelligence action (escalation)
-        PlanDefinitionParser.SubStepActionInfo referralSubStep = visit1Group.subSteps().stream()
+        PlanDefinitionParser.SubStepActionInfo referralSubStep = visit1.subSteps().stream()
                 .filter(s -> "anc-visit-1-referral".equals(s.id()))
                 .findFirst().orElseThrow();
         assertEquals(1, referralSubStep.intelligenceActions().size());
@@ -627,7 +626,7 @@ class PlanDefinitionParserTest {
         assertEquals("CRITICAL", referralSubStep.intelligenceActions().get(0).severity());
 
         // anc-visit-1-referral-ack sub-step has 1 intelligence action (overdue notification)
-        PlanDefinitionParser.SubStepActionInfo ackSubStep = visit1Group.subSteps().stream()
+        PlanDefinitionParser.SubStepActionInfo ackSubStep = visit1.subSteps().stream()
                 .filter(s -> "anc-visit-1-referral-ack".equals(s.id()))
                 .findFirst().orElseThrow();
         assertEquals(1, ackSubStep.intelligenceActions().size());
@@ -641,20 +640,15 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        PlanDefinitionParser.ActionMetadata visit1Group = actions.stream()
-                .filter(a -> "anc-visit-1-group".equals(a.id()))
+        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+                .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
 
-        // anc-visit-1 → anc-visit-1-referral (progressive instantiation)
-        PlanDefinitionParser.SubStepActionInfo visit1 = visit1Group.subSteps().get(0);
-        assertEquals(1, visit1.relatedActions().size());
-        assertEquals("anc-visit-1-referral", visit1.relatedActions().get(0).actionId());
-        assertEquals("after-end", visit1.relatedActions().get(0).relationship());
-
-        // anc-visit-1-referral → anc-visit-1-referral-ack
-        PlanDefinitionParser.SubStepActionInfo referral = visit1Group.subSteps().get(1);
+        // anc-visit-1-referral → anc-visit-1-referral-ack (progressive instantiation)
+        PlanDefinitionParser.SubStepActionInfo referral = visit1.subSteps().get(0);
         assertEquals(1, referral.relatedActions().size());
         assertEquals("anc-visit-1-referral-ack", referral.relatedActions().get(0).actionId());
+        assertEquals("after-end", referral.relatedActions().get(0).relationship());
     }
 
     @Test
@@ -664,64 +658,66 @@ class PlanDefinitionParserTest {
         UUID protocolDefId = UUID.randomUUID();
         List<TriggerIndex> entries = parser.buildTriggerIndexEntries(pd, protocolDefId);
 
-        // Sub-step triggers should use composite actionId: "groupId/subStepId"
-        boolean hasVisit1Composite = entries.stream()
-                .anyMatch(e -> "anc-visit-1-group/anc-visit-1".equals(e.getId().getActionId()));
-        assertTrue(hasVisit1Composite, "Should have composite trigger index for anc-visit-1");
-
+        // Sub-step triggers should use composite actionId: "parentStepId/subStepId"
         boolean hasReferralComposite = entries.stream()
-                .anyMatch(e -> "anc-visit-1-group/anc-visit-1-referral".equals(e.getId().getActionId()));
+                .anyMatch(e -> "anc-visit-1/anc-visit-1-referral".equals(e.getId().getActionId()));
         assertTrue(hasReferralComposite, "Should have composite trigger index for anc-visit-1-referral");
 
         boolean hasAckComposite = entries.stream()
-                .anyMatch(e -> "anc-visit-1-group/anc-visit-1-referral-ack".equals(e.getId().getActionId()));
+                .anyMatch(e -> "anc-visit-1/anc-visit-1-referral-ack".equals(e.getId().getActionId()));
         assertTrue(hasAckComposite, "Should have composite trigger index for anc-visit-1-referral-ack");
+
+        // Parent step itself should have a direct (non-composite) trigger index
+        boolean hasVisit1Direct = entries.stream()
+                .anyMatch(e -> "anc-visit-1".equals(e.getId().getActionId()));
+        assertTrue(hasVisit1Direct, "Should have direct trigger index for anc-visit-1");
     }
 
     @Test
-    void validateTriggers_subStepsPlanDefinition_groupWithNoTriggersIsValid() throws IOException {
+    void validateTriggers_subStepsPlanDefinition_stepsWithTriggersAndSubStepsAreValid() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
-        // Should not throw — group steps have no triggers, sub-steps have triggers
+        // Should not throw — steps with both triggers and sub-steps are valid
         assertDoesNotThrow(() -> parser.validateTriggers(pd));
     }
 
     @Test
-    void extractActions_subStepsPlanDefinition_topLevelGroupHasNoTriggers() throws IOException {
+    void extractActions_subStepsPlanDefinition_stepHasTriggersAndSubSteps() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // Group steps should have empty triggers
-        PlanDefinitionParser.ActionMetadata visit1Group = actions.stream()
-                .filter(a -> "anc-visit-1-group".equals(a.id()))
+        // anc-visit-1 has BOTH triggers and sub-steps (step-inside-step)
+        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+                .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertTrue(visit1Group.triggers().isEmpty(), "Group step should have no triggers");
+        assertFalse(visit1.triggers().isEmpty(), "Step should have triggers");
+        assertTrue(visit1.hasSubSteps(), "Step should have sub-steps");
 
-        // Group should have no intelligence actions (they're on sub-steps)
-        assertTrue(visit1Group.intelligenceActions().isEmpty(),
-                "Group step should have no direct intelligence actions");
+        // No direct intelligence actions on the parent step (they're on sub-steps)
+        assertTrue(visit1.intelligenceActions().isEmpty(),
+                "Parent step should have no direct intelligence actions");
     }
 
     @Test
-    void extractActions_subStepsPlanDefinition_progressiveChainBetweenGroups() throws IOException {
+    void extractActions_subStepsPlanDefinition_progressiveChainBetweenSteps() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
 
-        // anc-visit-1-group → anc-visit-2-group (30 days)
-        PlanDefinitionParser.ActionMetadata visit1Group = actions.stream()
-                .filter(a -> "anc-visit-1-group".equals(a.id()))
+        // anc-visit-1 → anc-visit-2 (30 days)
+        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+                .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals(1, visit1Group.relatedActions().size());
-        assertEquals("anc-visit-2-group", visit1Group.relatedActions().get(0).actionId());
-        assertEquals(BigDecimal.valueOf(30), visit1Group.relatedActions().get(0).offsetValue());
+        assertEquals(1, visit1.relatedActions().size());
+        assertEquals("anc-visit-2", visit1.relatedActions().get(0).actionId());
+        assertEquals(BigDecimal.valueOf(30), visit1.relatedActions().get(0).offsetValue());
 
-        // anc-visit-2-group → anc-visit-3-group (30 days)
-        PlanDefinitionParser.ActionMetadata visit2Group = actions.stream()
-                .filter(a -> "anc-visit-2-group".equals(a.id()))
+        // anc-visit-2 → anc-visit-3 (30 days)
+        PlanDefinitionParser.ActionMetadata visit2 = actions.stream()
+                .filter(a -> "anc-visit-2".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals(1, visit2Group.relatedActions().size());
-        assertEquals("anc-visit-3-group", visit2Group.relatedActions().get(0).actionId());
+        assertEquals(1, visit2.relatedActions().size());
+        assertEquals("anc-visit-3", visit2.relatedActions().get(0).actionId());
     }
 }

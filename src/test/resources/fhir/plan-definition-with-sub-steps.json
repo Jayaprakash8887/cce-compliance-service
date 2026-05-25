@@ -3,7 +3,7 @@
   "url": "http://mdtlabs.com/PlanDefinition/rmnch-protocol-sub-steps",
   "date": "2026-05-25",
   "name": "RMNCHProtocolSubSteps",
-  "title": "RMNCH Protocol \u2014 Sub-Step Groups for ANC Visits",
+  "title": "RMNCH Protocol — Step-Inside-Step for ANC Visits",
   "action": [
     {
       "id": "registration",
@@ -19,7 +19,7 @@
           "type": "named-event"
         }
       ],
-      "description": "Enrollment trigger \u2014 matches any RelatedPerson resource.",
+      "description": "Enrollment trigger — matches any RelatedPerson resource.",
       "timingTiming": {
         "repeat": {
           "count": 1,
@@ -151,7 +151,7 @@
           "valueInteger": 14
         }
       ],
-      "description": "Pregnancy registration. When completed, triggers the ANC Visit 1 Step Group.",
+      "description": "Pregnancy registration. When completed, triggers the ANC Visit 1 step.",
       "timingTiming": {
         "repeat": {
           "count": 1,
@@ -162,7 +162,7 @@
       },
       "relatedAction": [
         {
-          "actionId": "anc-visit-1-group",
+          "actionId": "anc-visit-1",
           "relationship": "after-end",
           "offsetDuration": {
             "code": "d",
@@ -183,82 +183,76 @@
       }
     },
     {
-      "id": "anc-visit-1-group",
-      "title": "ANC Visit 1 Step Group",
-      "groupingBehavior": "logical-group",
-      "selectionBehavior": "one-or-more",
-      "action": [
+      "id": "anc-visit-1",
+      "title": "ANC Visit 1",
+      "trigger": [
         {
-          "id": "anc-visit-1",
-          "type": {
-            "coding": [
-              {
-                "system": "http://hl7.org/fhir/action-type",
-                "code": "step"
-              }
-            ]
-          },
-          "title": "ANC Visit 1",
-          "trigger": [
+          "data": [
             {
-              "data": [
+              "type": "Encounter",
+              "codeFilter": [
                 {
-                  "type": "Encounter",
-                  "codeFilter": [
+                  "code": [
                     {
-                      "code": [
-                        {
-                          "code": "ANC",
-                          "system": "http://mdtlabs.com/encounter-type"
-                        }
-                      ],
-                      "path": "identifier"
-                    },
-                    {
-                      "code": [
-                        {
-                          "code": "1",
-                          "system": "http://mdtlabs.com/visit-count"
-                        }
-                      ],
-                      "path": "identifier"
+                      "code": "ANC",
+                      "system": "http://mdtlabs.com/encounter-type"
                     }
-                  ]
+                  ],
+                  "path": "identifier"
+                },
+                {
+                  "code": [
+                    {
+                      "code": "1",
+                      "system": "http://mdtlabs.com/visit-count"
+                    }
+                  ],
+                  "path": "identifier"
                 }
-              ],
-              "name": "anc-visit-1-trigger",
-              "type": "named-event"
+              ]
             }
           ],
-          "extension": [
-            {
-              "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
-              "valueInteger": 7
-            }
-          ],
-          "description": "First antenatal care visit. Entry-point sub-step \u2014 created when group is instantiated.",
-          "timingTiming": {
-            "repeat": {
-              "count": 1,
-              "period": 90,
-              "frequency": 1,
-              "periodUnit": "d"
-            }
-          },
-          "relatedAction": [
-            {
-              "actionId": "anc-visit-1-referral",
-              "relationship": "after-end",
-              "offsetDuration": {
-                "code": "d",
-                "unit": "d",
-                "value": 0,
-                "system": "http://unitsofmeasure.org"
-              }
-            }
-          ],
-          "requiredBehavior": "must"
-        },
+          "name": "anc-visit-1-trigger",
+          "type": "named-event"
+        }
+      ],
+      "extension": [
+        {
+          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
+          "valueInteger": 7
+        }
+      ],
+      "description": "First antenatal care visit. Has triggers and nested sub-steps (referral chain). Sub-steps are created after this step completes.",
+      "timingTiming": {
+        "repeat": {
+          "count": 1,
+          "period": 90,
+          "frequency": 1,
+          "periodUnit": "d"
+        }
+      },
+      "relatedAction": [
+        {
+          "actionId": "anc-visit-2",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "code": "d",
+            "unit": "d",
+            "value": 30,
+            "system": "http://unitsofmeasure.org"
+          }
+        }
+      ],
+      "requiredBehavior": "must",
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      },
+      "action": [
         {
           "id": "anc-visit-1-referral",
           "type": {
@@ -302,7 +296,7 @@
               "valueInteger": 7
             }
           ],
-          "description": "ANC Visit 1 referral. Created when ANC Visit 1 completes. Optional \u2014 referral may not be issued.",
+          "description": "ANC Visit 1 referral. Entry-point sub-step — created when ANC Visit 1 completes.",
           "timingTiming": {
             "repeat": {
               "count": 1,
@@ -321,6 +315,7 @@
               }
             }
           ],
+          "requiredBehavior": "could",
           "action": [
             {
               "id": "anc-visit-1-referral-escalation",
@@ -354,8 +349,7 @@
               ],
               "definitionCanonical": "http://openphc.org/ActivityDefinition/anc-urgent-escalation|1.0.0"
             }
-          ],
-          "requiredBehavior": "could"
+          ]
         },
         {
           "id": "anc-visit-1-referral-ack",
@@ -445,25 +439,60 @@
             }
           ]
         }
+      ]
+    },
+    {
+      "id": "anc-visit-2",
+      "title": "ANC Visit 2",
+      "trigger": [
+        {
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "code": [
+                    {
+                      "code": "ANC",
+                      "system": "http://mdtlabs.com/encounter-type"
+                    }
+                  ],
+                  "path": "identifier"
+                },
+                {
+                  "code": [
+                    {
+                      "code": "2",
+                      "system": "http://mdtlabs.com/visit-count"
+                    }
+                  ],
+                  "path": "identifier"
+                }
+              ]
+            }
+          ],
+          "name": "anc-visit-2-trigger",
+          "type": "named-event"
+        }
       ],
       "extension": [
         {
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
-          "valueInteger": 90
+          "valueInteger": 7
         }
       ],
-      "description": "ANC Visit 1 group \u2014 contains ANC Visit 1, Referral, and Referral Ack as sub-steps with progressive instantiation. Group completes when all terminal sub-steps reach terminal state.",
+      "description": "Second antenatal care visit. Has triggers and nested sub-steps (referral chain).",
       "timingTiming": {
         "repeat": {
           "count": 1,
-          "period": 90,
+          "period": 60,
           "frequency": 1,
           "periodUnit": "d"
         }
       },
       "relatedAction": [
         {
-          "actionId": "anc-visit-2-group",
+          "actionId": "anc-visit-3",
           "relationship": "after-end",
           "offsetDuration": {
             "code": "d",
@@ -478,88 +507,11 @@
         "coding": [
           {
             "system": "http://hl7.org/fhir/action-type",
-            "code": "group-step"
+            "code": "step"
           }
         ]
-      }
-    },
-    {
-      "id": "anc-visit-2-group",
-      "title": "ANC Visit 2 Step Group",
-      "groupingBehavior": "logical-group",
-      "selectionBehavior": "one-or-more",
+      },
       "action": [
-        {
-          "id": "anc-visit-2",
-          "type": {
-            "coding": [
-              {
-                "system": "http://hl7.org/fhir/action-type",
-                "code": "step"
-              }
-            ]
-          },
-          "title": "ANC Visit 2",
-          "trigger": [
-            {
-              "data": [
-                {
-                  "type": "Encounter",
-                  "codeFilter": [
-                    {
-                      "code": [
-                        {
-                          "code": "ANC",
-                          "system": "http://mdtlabs.com/encounter-type"
-                        }
-                      ],
-                      "path": "identifier"
-                    },
-                    {
-                      "code": [
-                        {
-                          "code": "2",
-                          "system": "http://mdtlabs.com/visit-count"
-                        }
-                      ],
-                      "path": "identifier"
-                    }
-                  ]
-                }
-              ],
-              "name": "anc-visit-2-trigger",
-              "type": "named-event"
-            }
-          ],
-          "extension": [
-            {
-              "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
-              "valueInteger": 7
-            }
-          ],
-          "description": "Second antenatal care visit. Entry-point sub-step.",
-          "timingTiming": {
-            "repeat": {
-              "count": 1,
-              "period": 60,
-              "frequency": 1,
-              "periodUnit": "d"
-            }
-          },
-          "relatedAction": [
-            {
-              "actionId": "anc-visit-2-referral",
-              "relationship": "after-end",
-              "offsetDuration": {
-                "code": "d",
-                "unit": "d",
-                "value": 0,
-                "system": "http://unitsofmeasure.org"
-              }
-            }
-          ],
-          "requiredBehavior": "must"
-        },
         {
           "id": "anc-visit-2-referral",
           "type": {
@@ -603,7 +555,7 @@
               "valueInteger": 7
             }
           ],
-          "description": "ANC Visit 2 referral. Created when ANC Visit 2 completes. Optional.",
+          "description": "ANC Visit 2 referral. Entry-point sub-step — created when ANC Visit 2 completes.",
           "timingTiming": {
             "repeat": {
               "count": 1,
@@ -746,14 +698,49 @@
             }
           ]
         }
+      ]
+    },
+    {
+      "id": "anc-visit-3",
+      "title": "ANC Visit 3",
+      "trigger": [
+        {
+          "data": [
+            {
+              "type": "Encounter",
+              "codeFilter": [
+                {
+                  "code": [
+                    {
+                      "code": "ANC",
+                      "system": "http://mdtlabs.com/encounter-type"
+                    }
+                  ],
+                  "path": "identifier"
+                },
+                {
+                  "code": [
+                    {
+                      "code": "3",
+                      "system": "http://mdtlabs.com/visit-count"
+                    }
+                  ],
+                  "path": "identifier"
+                }
+              ]
+            }
+          ],
+          "name": "anc-visit-3-trigger",
+          "type": "named-event"
+        }
       ],
       "extension": [
         {
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
-          "valueInteger": 60
+          "valueInteger": 7
         }
       ],
-      "description": "ANC Visit 2 group \u2014 contains ANC Visit 2, Referral, and Referral Ack as sub-steps. Group completes when all sub-steps reach terminal state.",
+      "description": "Third antenatal care visit. Terminal ANC step — no further ANC visits.",
       "timingTiming": {
         "repeat": {
           "count": 1,
@@ -762,105 +749,16 @@
           "periodUnit": "d"
         }
       },
-      "relatedAction": [
-        {
-          "actionId": "anc-visit-3-group",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "code": "d",
-            "unit": "d",
-            "value": 30,
-            "system": "http://unitsofmeasure.org"
-          }
-        }
-      ],
       "requiredBehavior": "must",
       "type": {
         "coding": [
           {
             "system": "http://hl7.org/fhir/action-type",
-            "code": "group-step"
+            "code": "step"
           }
         ]
-      }
-    },
-    {
-      "id": "anc-visit-3-group",
-      "title": "ANC Visit 3 Step Group",
-      "groupingBehavior": "logical-group",
-      "selectionBehavior": "one-or-more",
+      },
       "action": [
-        {
-          "id": "anc-visit-3",
-          "type": {
-            "coding": [
-              {
-                "system": "http://hl7.org/fhir/action-type",
-                "code": "step"
-              }
-            ]
-          },
-          "title": "ANC Visit 3",
-          "trigger": [
-            {
-              "data": [
-                {
-                  "type": "Encounter",
-                  "codeFilter": [
-                    {
-                      "code": [
-                        {
-                          "code": "ANC",
-                          "system": "http://mdtlabs.com/encounter-type"
-                        }
-                      ],
-                      "path": "identifier"
-                    },
-                    {
-                      "code": [
-                        {
-                          "code": "3",
-                          "system": "http://mdtlabs.com/visit-count"
-                        }
-                      ],
-                      "path": "identifier"
-                    }
-                  ]
-                }
-              ],
-              "name": "anc-visit-3-trigger",
-              "type": "named-event"
-            }
-          ],
-          "extension": [
-            {
-              "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
-              "valueInteger": 7
-            }
-          ],
-          "description": "Third antenatal care visit. Entry-point sub-step.",
-          "timingTiming": {
-            "repeat": {
-              "count": 1,
-              "period": 60,
-              "frequency": 1,
-              "periodUnit": "d"
-            }
-          },
-          "relatedAction": [
-            {
-              "actionId": "anc-visit-3-referral",
-              "relationship": "after-end",
-              "offsetDuration": {
-                "code": "d",
-                "unit": "d",
-                "value": 0,
-                "system": "http://unitsofmeasure.org"
-              }
-            }
-          ],
-          "requiredBehavior": "must"
-        },
         {
           "id": "anc-visit-3-referral",
           "type": {
@@ -904,7 +802,7 @@
               "valueInteger": 7
             }
           ],
-          "description": "ANC Visit 3 referral. Created when ANC Visit 3 completes. Optional.",
+          "description": "ANC Visit 3 referral. Entry-point sub-step — created when ANC Visit 3 completes.",
           "timingTiming": {
             "repeat": {
               "count": 1,
@@ -1047,31 +945,7 @@
             }
           ]
         }
-      ],
-      "extension": [
-        {
-          "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
-          "valueInteger": 60
-        }
-      ],
-      "description": "ANC Visit 3 group \u2014 contains ANC Visit 3, Referral, and Referral Ack as sub-steps. Terminal group \u2014 no further ANC visits after this.",
-      "timingTiming": {
-        "repeat": {
-          "count": 1,
-          "period": 60,
-          "frequency": 1,
-          "periodUnit": "d"
-        }
-      },
-      "requiredBehavior": "must",
-      "type": {
-        "coding": [
-          {
-            "system": "http://hl7.org/fhir/action-type",
-            "code": "group-step"
-          }
-        ]
-      }
+      ]
     },
     {
       "id": "pregnancy-outcome",
@@ -1188,6 +1062,6 @@
   ],
   "status": "active",
   "version": "1.0.0",
-  "description": "RMNCH protocol with sub-step groups. ANC visit chain uses group steps: Visit 1 Group (Visit 1 \u2192 Referral \u2192 Ack) \u2192 Visit 2 Group (Visit 2 \u2192 Referral \u2192 Ack) \u2192 Visit 3 Group (Visit 3 \u2192 Referral \u2192 Ack). Each group has selectionBehavior=all and progressive sub-step instantiation.",
+  "description": "RMNCH protocol with step-inside-step nesting. ANC visit chain uses steps with nested sub-steps: Visit 1 (Referral → Ack) → Visit 2 (Referral → Ack) → Visit 3 (Referral → Ack). Each parent step has triggers AND sub-steps — sub-steps are created after parent completion.",
   "resourceType": "PlanDefinition"
 }

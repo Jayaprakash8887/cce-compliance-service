@@ -150,14 +150,6 @@ public class PlanDefinitionParser {
             }
         }
 
-        // A group step must not have its own triggers —
-        // triggers on the parent would bypass group completion semantics.
-        if (isGroupStep(action) && !action.getTrigger().isEmpty()) {
-            throw new IllegalArgumentException(
-                    "Action '" + action.getId() + "' has both triggers and sub-steps. " +
-                            "A group step must not have its own triggers — completion is delegated to sub-steps.");
-        }
-
         // Recursively validate nested steps
         for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
             if (isStepAction(nestedAction)) {
@@ -229,14 +221,6 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
-        // Extract groupingBehavior and selectionBehavior
-        String groupingBehavior = action.hasGroupingBehavior()
-                ? action.getGroupingBehavior().toCode()
-                : null;
-        String selectionBehavior = action.hasSelectionBehavior()
-                ? action.getSelectionBehavior().toCode()
-                : null;
-
         // Classify nested actions by type
         List<IntelligenceActionInfo> intelligenceActions = new ArrayList<>();
         List<SubStepActionInfo> subSteps = new ArrayList<>();
@@ -250,16 +234,14 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                groupingBehavior,
-                selectionBehavior,
                 intelligenceActions,
                 subSteps
         );
     }
 
     /**
-     * Classify nested actions into intelligence actions (fire-event) and steps (step/group-step).
-     * Every nested action MUST have an explicit type coding: "step", "group-step", or "fire-event".
+     * Classify nested actions into intelligence actions (fire-event) and sub-steps (step).
+     * Every nested action MUST have an explicit type coding: "step" or "fire-event".
      * Actions without explicit type are rejected at load time.
      */
     private void classifyNestedActions(PlanDefinition.PlanDefinitionActionComponent parentAction,
@@ -276,23 +258,16 @@ public class PlanDefinitionParser {
             } else {
                 throw new IllegalArgumentException(
                         "Nested action '" + nestedAction.getId()
-                                + "' must have explicit type coding: 'step', 'group-step', or 'fire-event'");
+                                + "' must have explicit type coding: 'step' or 'fire-event'");
             }
         }
     }
 
     /**
-     * Determine if an action is a step (type "step" or "group-step").
+     * Determine if an action is a step (type "step").
      */
     private boolean isStepAction(PlanDefinition.PlanDefinitionActionComponent action) {
-        return hasTypeCoding(action, "step") || hasTypeCoding(action, "group-step");
-    }
-
-    /**
-     * Determine if an action is a group step (type "group-step").
-     */
-    private boolean isGroupStep(PlanDefinition.PlanDefinitionActionComponent action) {
-        return hasTypeCoding(action, "group-step");
+        return hasTypeCoding(action, "step");
     }
 
     /**
@@ -304,16 +279,16 @@ public class PlanDefinitionParser {
 
     /**
      * Validate that an action has a required type coding.
-     * Valid types: "step" (trigger-based), "group-step" (contains nested actions), "fire-event" (intelligence).
+     * Valid types: "step" (trigger-based, may contain sub-steps) or "fire-event" (intelligence).
      */
     private void validateActionType(PlanDefinition.PlanDefinitionActionComponent action) {
         if (!action.hasType()) {
             throw new IllegalArgumentException(
-                    "Action '" + action.getId() + "' must have explicit type coding: 'step', 'group-step', or 'fire-event'");
+                    "Action '" + action.getId() + "' must have explicit type coding: 'step' or 'fire-event'");
         }
         if (!isStepAction(action) && !isIntelligenceAction(action)) {
             throw new IllegalArgumentException(
-                    "Action '" + action.getId() + "' has unsupported type coding. Must be 'step', 'group-step', or 'fire-event'");
+                    "Action '" + action.getId() + "' has unsupported type coding. Must be 'step' or 'fire-event'");
         }
     }
 
@@ -388,14 +363,6 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
-        // Extract groupingBehavior and selectionBehavior (for nested groups)
-        String groupingBehavior = action.hasGroupingBehavior()
-                ? action.getGroupingBehavior().toCode()
-                : null;
-        String selectionBehavior = action.hasSelectionBehavior()
-                ? action.getSelectionBehavior().toCode()
-                : null;
-
         // Recursively classify nested actions into intelligence actions and sub-steps
         List<IntelligenceActionInfo> subStepIntelligenceActions = new ArrayList<>();
         List<SubStepActionInfo> nestedSubSteps = new ArrayList<>();
@@ -409,8 +376,6 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                groupingBehavior,
-                selectionBehavior,
                 subStepIntelligenceActions,
                 nestedSubSteps
         );
@@ -524,12 +489,10 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            String groupingBehavior,
-            String selectionBehavior,
             List<IntelligenceActionInfo> intelligenceActions,
             List<SubStepActionInfo> subSteps
     ) {
-        /** Returns true if this action is a group containing sub-steps. */
+        /** Returns true if this action has nested sub-steps. */
         public boolean hasSubSteps() {
             return subSteps != null && !subSteps.isEmpty();
         }
@@ -597,12 +560,10 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            String groupingBehavior,
-            String selectionBehavior,
             List<IntelligenceActionInfo> intelligenceActions,
             List<SubStepActionInfo> subSteps
     ) {
-        /** Returns true if this sub-step is itself a group containing nested sub-steps. */
+        /** Returns true if this sub-step has its own nested sub-steps. */
         public boolean hasSubSteps() {
             return subSteps != null && !subSteps.isEmpty();
         }
