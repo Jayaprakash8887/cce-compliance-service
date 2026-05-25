@@ -259,11 +259,8 @@ public class PlanDefinitionParser {
 
     /**
      * Classify nested actions into intelligence actions (fire-event) and sub-steps.
-     * Classification rule:
-     * - Explicit type coding "sub-step" → sub-step
-     * - Explicit type coding "fire-event" → intelligence action
-     * - No type but has definitionCanonical + condition + severity → intelligence action (backward compat)
-     * - No type and has triggers → sub-step
+     * Every nested action MUST have an explicit type coding: either "sub-step" or "fire-event".
+     * Actions without explicit type are rejected at load time.
      */
     private void classifyNestedActions(PlanDefinition.PlanDefinitionActionComponent parentAction,
                                        List<IntelligenceActionInfo> intelligenceActions,
@@ -271,35 +268,44 @@ public class PlanDefinitionParser {
         for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
             if (isSubStep(nestedAction)) {
                 subSteps.add(buildSubStepActionInfo(nestedAction));
-            } else {
+            } else if (isIntelligenceAction(nestedAction)) {
                 IntelligenceActionInfo intelligenceAction = buildIntelligenceActionInfo(nestedAction);
                 if (intelligenceAction != null) {
                     intelligenceActions.add(intelligenceAction);
                 }
+            } else {
+                throw new IllegalArgumentException(
+                        "Nested action '" + nestedAction.getId()
+                                + "' must have explicit type coding: either 'sub-step' or 'fire-event'");
             }
         }
     }
 
     /**
-     * Determine if a nested action is a sub-step.
-     * A nested action is a sub-step if:
-     * 1. It has explicit type coding with code "sub-step", OR
-     * 2. It has no type but has triggers (indicating it's an event-matched step)
+     * Determine if a nested action is a sub-step (explicit type coding "sub-step" required).
      */
     private boolean isSubStep(PlanDefinition.PlanDefinitionActionComponent action) {
-        // Check explicit type coding
-        if (action.hasType()) {
-            CodeableConcept type = action.getType();
-            for (Coding coding : type.getCoding()) {
-                if ("sub-step".equals(coding.getCode())) {
-                    return true;
-                }
-            }
-            // Has explicit type but not sub-step — not a sub-step
+        return hasTypeCoding(action, "sub-step");
+    }
+
+    /**
+     * Determine if a nested action is an intelligence action (explicit type coding "fire-event" required).
+     */
+    private boolean isIntelligenceAction(PlanDefinition.PlanDefinitionActionComponent action) {
+        return hasTypeCoding(action, "fire-event");
+    }
+
+    private boolean hasTypeCoding(PlanDefinition.PlanDefinitionActionComponent action, String code) {
+        if (!action.hasType()) {
             return false;
         }
-        // No explicit type: sub-step if it has triggers (intelligence actions have condition+definitionCanonical instead)
-        return !action.getTrigger().isEmpty();
+        CodeableConcept type = action.getType();
+        for (Coding coding : type.getCoding()) {
+            if (code.equals(coding.getCode())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private SubStepActionInfo buildSubStepActionInfo(PlanDefinition.PlanDefinitionActionComponent action) {

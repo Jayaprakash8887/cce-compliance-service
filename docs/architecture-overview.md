@@ -659,8 +659,9 @@ Nested actions (`action.action[]`) are classified by the parser:
 |---|---|
 | Explicit `type.coding[0].code = "sub-step"` | Sub-step |
 | Explicit `type.coding[0].code = "fire-event"` | Intelligence action |
-| No type + has `trigger[]` | Sub-step (heuristic) |
-| No type + has `condition` + `definitionCanonical` + severity | Intelligence action (backward-compatible) |
+| No explicit type | **Rejected** at load time (`IllegalArgumentException`) |
+
+Every nested action **must** have an explicit `type` coding — either `"sub-step"` or `"fire-event"`.
 
 **Validation:** An action with both triggers AND sub-steps is rejected at load time (mutually exclusive patterns).
 

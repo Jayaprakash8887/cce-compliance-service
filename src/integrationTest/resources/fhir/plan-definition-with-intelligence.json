@@ -34,6 +34,7 @@
         {
           "id": "overdue-escalation",
           "title": "Overdue Escalation Alert",
+          "type": { "coding": [{ "code": "fire-event" }] },
           "condition": [
             {
               "kind": "applicability",
@@ -58,6 +59,7 @@
         {
           "id": "missed-critical-alert",
           "title": "Missed Step Critical Alert",
+          "type": { "coding": [{ "code": "fire-event" }] },
           "condition": [
             {
               "kind": "applicability",

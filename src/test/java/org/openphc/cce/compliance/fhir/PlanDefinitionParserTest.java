@@ -499,6 +499,7 @@ class PlanDefinitionParserTest {
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "intel-action-1",
+                      "type": {"coding": [{"code": "fire-event"}]},
                       "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
                       "definitionCanonical": "ActivityDefinition/test|1.0",
                       "extension": [
@@ -528,6 +529,7 @@ class PlanDefinitionParserTest {
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "intel-action-1",
+                      "type": {"coding": [{"code": "fire-event"}]},
                       "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
                       "definitionCanonical": "ActivityDefinition/test|1.0",
                       "extension": [
@@ -541,6 +543,33 @@ class PlanDefinitionParserTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
                 () -> parser.extractActions(pd));
         assertTrue(ex.getMessage().contains("intelligence-destination"));
+    }
+
+    @Test
+    void extractActions_nestedActionMissingType_throwsIllegalArgument() {
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-missing-type",
+                  "url": "http://test.org/PlanDefinition/missing-type",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "step-1",
+                    "trigger": [{"type": "named-event", "name": "test"}],
+                    "action": [{
+                      "id": "untyped-action",
+                      "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
+                      "definitionCanonical": "ActivityDefinition/test|1.0"
+                    }]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> parser.extractActions(pd));
+        assertTrue(ex.getMessage().contains("must have explicit type coding"));
+        assertTrue(ex.getMessage().contains("untyped-action"));
     }
 
     private String loadFixture(String resourcePath) throws IOException {
