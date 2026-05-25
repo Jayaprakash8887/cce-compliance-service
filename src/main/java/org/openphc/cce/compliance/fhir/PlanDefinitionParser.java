@@ -34,6 +34,7 @@ public class PlanDefinitionParser {
     public List<ActionMetadata> extractActions(PlanDefinition planDefinition) {
         List<ActionMetadata> result = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
+            validateActionType(action);
             result.add(buildActionMetadata(action));
         }
         return result;
@@ -67,11 +68,11 @@ public class PlanDefinitionParser {
                                             String parentCompositeId, UUID protocolDefinitionId,
                                             List<TriggerIndex> entries) {
         for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
-            if (isSubStep(nestedAction)) {
+            if (isStepAction(nestedAction)) {
                 String compositeActionId = parentCompositeId + "/" + nestedAction.getId();
                 indexActionTriggers(nestedAction, compositeActionId, protocolDefinitionId, entries);
 
-                // Recurse: if this sub-step is itself a group with nested sub-steps
+                // Recurse: if this step is itself a group with nested steps
                 indexNestedSubStepTriggers(nestedAction, compositeActionId, protocolDefinitionId, entries);
             }
         }
@@ -149,18 +150,17 @@ public class PlanDefinitionParser {
             }
         }
 
-        // A group step (has sub-steps) must not have its own triggers —
+        // A group step must not have its own triggers —
         // triggers on the parent would bypass group completion semantics.
-        boolean hasSubSteps = action.getAction().stream().anyMatch(this::isSubStep);
-        if (hasSubSteps && !action.getTrigger().isEmpty()) {
+        if (isGroupStep(action) && !action.getTrigger().isEmpty()) {
             throw new IllegalArgumentException(
                     "Action '" + action.getId() + "' has both triggers and sub-steps. " +
                             "A group step must not have its own triggers — completion is delegated to sub-steps.");
         }
 
-        // Recursively validate nested sub-steps
+        // Recursively validate nested steps
         for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
-            if (isSubStep(nestedAction)) {
+            if (isStepAction(nestedAction)) {
                 validateActionTriggers(nestedAction);
             }
         }
@@ -258,15 +258,15 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Classify nested actions into intelligence actions (fire-event) and sub-steps.
-     * Every nested action MUST have an explicit type coding: either "sub-step" or "fire-event".
+     * Classify nested actions into intelligence actions (fire-event) and steps (step/group-step).
+     * Every nested action MUST have an explicit type coding: "step", "group-step", or "fire-event".
      * Actions without explicit type are rejected at load time.
      */
     private void classifyNestedActions(PlanDefinition.PlanDefinitionActionComponent parentAction,
                                        List<IntelligenceActionInfo> intelligenceActions,
                                        List<SubStepActionInfo> subSteps) {
         for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
-            if (isSubStep(nestedAction)) {
+            if (isStepAction(nestedAction)) {
                 subSteps.add(buildSubStepActionInfo(nestedAction));
             } else if (isIntelligenceAction(nestedAction)) {
                 IntelligenceActionInfo intelligenceAction = buildIntelligenceActionInfo(nestedAction);
@@ -276,23 +276,45 @@ public class PlanDefinitionParser {
             } else {
                 throw new IllegalArgumentException(
                         "Nested action '" + nestedAction.getId()
-                                + "' must have explicit type coding: either 'sub-step' or 'fire-event'");
+                                + "' must have explicit type coding: 'step', 'group-step', or 'fire-event'");
             }
         }
     }
 
     /**
-     * Determine if a nested action is a sub-step (explicit type coding "sub-step" required).
+     * Determine if an action is a step (type "step" or "group-step").
      */
-    private boolean isSubStep(PlanDefinition.PlanDefinitionActionComponent action) {
-        return hasTypeCoding(action, "sub-step");
+    private boolean isStepAction(PlanDefinition.PlanDefinitionActionComponent action) {
+        return hasTypeCoding(action, "step") || hasTypeCoding(action, "group-step");
     }
 
     /**
-     * Determine if a nested action is an intelligence action (explicit type coding "fire-event" required).
+     * Determine if an action is a group step (type "group-step").
+     */
+    private boolean isGroupStep(PlanDefinition.PlanDefinitionActionComponent action) {
+        return hasTypeCoding(action, "group-step");
+    }
+
+    /**
+     * Determine if an action is an intelligence action (type "fire-event").
      */
     private boolean isIntelligenceAction(PlanDefinition.PlanDefinitionActionComponent action) {
         return hasTypeCoding(action, "fire-event");
+    }
+
+    /**
+     * Validate that an action has a required type coding.
+     * Valid types: "step" (trigger-based), "group-step" (contains nested actions), "fire-event" (intelligence).
+     */
+    private void validateActionType(PlanDefinition.PlanDefinitionActionComponent action) {
+        if (!action.hasType()) {
+            throw new IllegalArgumentException(
+                    "Action '" + action.getId() + "' must have explicit type coding: 'step', 'group-step', or 'fire-event'");
+        }
+        if (!isStepAction(action) && !isIntelligenceAction(action)) {
+            throw new IllegalArgumentException(
+                    "Action '" + action.getId() + "' has unsupported type coding. Must be 'step', 'group-step', or 'fire-event'");
+        }
     }
 
     private boolean hasTypeCoding(PlanDefinition.PlanDefinitionActionComponent action, String code) {

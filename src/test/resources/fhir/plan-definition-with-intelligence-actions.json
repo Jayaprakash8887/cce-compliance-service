@@ -36,7 +36,13 @@
         {
           "id": "bp-high-alert",
           "title": "High BP Alert Action",
-          "type": { "coding": [{ "code": "fire-event" }] },
+          "type": {
+            "coding": [
+              {
+                "code": "fire-event"
+              }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -61,7 +67,13 @@
         {
           "id": "bp-critical-escalation",
           "title": "Critical BP Escalation Action",
-          "type": { "coding": [{ "code": "fire-event" }] },
+          "type": {
+            "coding": [
+              {
+                "code": "fire-event"
+              }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -83,7 +95,15 @@
             }
           ]
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "no-sub-actions",
@@ -98,7 +118,15 @@
             }
           ]
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "partial-actions",
@@ -118,13 +146,25 @@
         {
           "id": "missing-condition",
           "title": "Action Without Condition",
-          "type": { "coding": [{ "code": "fire-event" }] },
+          "type": {
+            "coding": [
+              {
+                "code": "fire-event"
+              }
+            ]
+          },
           "definitionCanonical": "http://openphc.org/ActivityDefinition/some-action|1.0.0"
         },
         {
           "id": "missing-definition",
           "title": "Action Without DefinitionCanonical",
-          "type": { "coding": [{ "code": "fire-event" }] },
+          "type": {
+            "coding": [
+              {
+                "code": "fire-event"
+              }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -138,7 +178,13 @@
         {
           "id": "no-extensions-action",
           "title": "Valid Action Without Extensions",
-          "type": { "coding": [{ "code": "fire-event" }] },
+          "type": {
+            "coding": [
+              {
+                "code": "fire-event"
+              }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -160,7 +206,15 @@
             }
           ]
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     }
   ]
 }

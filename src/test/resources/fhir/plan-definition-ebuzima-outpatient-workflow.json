@@ -12,7 +12,7 @@
     {
       "id": "visit-encounter",
       "title": "Patient Visit Encounter",
-      "description": "Enrollment trigger — patient check-in at nursing station. Matches any Encounter (F1 scenario: resource type only). Encounter type coding in Ebuzima payloads uses display-only values (no code field), so codeFilter cannot be applied.",
+      "description": "Enrollment trigger \u2014 patient check-in at nursing station. Matches any Encounter (F1 scenario: resource type only). Encounter type coding in Ebuzima payloads uses display-only values (no code field), so codeFilter cannot be applied.",
       "trigger": [
         {
           "type": "named-event",
@@ -44,6 +44,14 @@
           "period": 1,
           "periodUnit": "d"
         }
+      },
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
       }
     },
     {
@@ -99,12 +107,20 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 1
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "chief-complaints",
       "title": "Chief Complaints",
-      "description": "Clinical consultation — chief complaints recording. Matches Observation with LOINC code 33747-0 (Chief Complaints).",
+      "description": "Clinical consultation \u2014 chief complaints recording. Matches Observation with LOINC code 33747-0 (Chief Complaints).",
       "trigger": [
         {
           "type": "named-event",
@@ -154,12 +170,20 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 1
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "history-assessment",
       "title": "History of Present Illness",
-      "description": "Clinical consultation — history recording. Matches Observation with LOINC code 10164-2 (History of Present illness Narrative).",
+      "description": "Clinical consultation \u2014 history recording. Matches Observation with LOINC code 10164-2 (History of Present illness Narrative).",
       "trigger": [
         {
           "type": "named-event",
@@ -209,7 +233,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 1
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "lab-order",
@@ -252,7 +284,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 1
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "lab-results",
@@ -307,7 +347,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 5
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "diagnosis",
@@ -361,7 +409,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 1
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "treatment",
@@ -392,7 +448,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 1
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     }
   ]
 }

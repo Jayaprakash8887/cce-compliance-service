@@ -4,7 +4,7 @@
   "url": "http://openphc.org/PlanDefinition/anc-high-risk",
   "version": "1.0.0",
   "name": "ANCHighRiskProtocol",
-  "title": "Antenatal Care — High-Risk Protocol",
+  "title": "Antenatal Care \u2014 High-Risk Protocol",
   "status": "active",
   "date": "2026-01-15",
   "description": "Protocol for monitoring high-risk antenatal patients. Includes initial enrollment, blood pressure checks, lab work, and follow-up visits.",
@@ -67,6 +67,14 @@
           "period": 1,
           "periodUnit": "d"
         }
+      },
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
       }
     },
     {
@@ -120,7 +128,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 3
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "lab-work",
@@ -156,12 +172,20 @@
             }
           ]
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "any-encounter-log",
       "title": "Log Any Encounter",
-      "description": "Track all encounters of type Encounter — broadest match (Scenario 1: F1 only).",
+      "description": "Track all encounters of type Encounter \u2014 broadest match (Scenario 1: F1 only).",
       "trigger": [
         {
           "type": "named-event",
@@ -172,7 +196,15 @@
             }
           ]
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "encounter-condition-only",
@@ -192,12 +224,20 @@
             "expression": "Encounter.status = 'finished'"
           }
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "global-risk-assessment",
       "title": "Global Risk Assessment",
-      "description": "Condition-only trigger — evaluated for every inbound event (Scenario 5: F3 only).",
+      "description": "Condition-only trigger \u2014 evaluated for every inbound event (Scenario 5: F3 only).",
       "trigger": [
         {
           "type": "named-event",
@@ -207,7 +247,15 @@
             "expression": "{\">\": [{\"var\": \"riskScore\"}, 7]}"
           }
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://hl7.org/fhir/action-type",
+            "code": "step"
+          }
+        ]
+      }
     }
   ]
 }

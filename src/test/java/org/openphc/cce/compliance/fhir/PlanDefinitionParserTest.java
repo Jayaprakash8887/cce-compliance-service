@@ -496,6 +496,7 @@ class PlanDefinitionParserTest {
                   "status": "active",
                   "action": [{
                     "id": "step-1",
+                    "type": {"coding": [{"code": "step"}]},
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "intel-action-1",
@@ -526,6 +527,7 @@ class PlanDefinitionParserTest {
                   "status": "active",
                   "action": [{
                     "id": "step-1",
+                    "type": {"coding": [{"code": "step"}]},
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "intel-action-1",
@@ -556,6 +558,7 @@ class PlanDefinitionParserTest {
                   "status": "active",
                   "action": [{
                     "id": "step-1",
+                    "type": {"coding": [{"code": "step"}]},
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "untyped-action",

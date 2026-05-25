@@ -515,25 +515,25 @@ The table below maps CCE domain concepts to their FHIR PlanDefinition counterpar
 | CCE Domain Concept | FHIR PlanDefinition Element | Description |
 |---|---|---|
 | **Protocol Definition** | `PlanDefinition` | The clinical protocol (e.g., ANC High-Risk Monitoring) |
-| **Protocol Step** | `PlanDefinition.action` | A step in the protocol (e.g., "ANC Visit 2") |
-| **Group Step** | `PlanDefinition.action` (with nested sub-steps) | A container step whose completion is delegated to sub-steps. Can exist at any nesting level. |
-| **Sub-Step** | `PlanDefinition.action.action` (type=sub-step) | A nested action with its own trigger, tracked as a child step. Can itself be a group (recursive). |
-| **Nested Group** | `PlanDefinition.action.action` (type=sub-step, with own `action[]`) | A sub-step that is also a group — enables multi-level nesting to arbitrary depth |
+| **Protocol Step** | `PlanDefinition.action` (type=step) | A step in the protocol with its own trigger (e.g., "ANC Visit 2") |
+| **Group Step** | `PlanDefinition.action` (type=group-step) | A container step whose completion is delegated to sub-steps. Can exist at any nesting level. |
+| **Nested Step** | `PlanDefinition.action.action` (type=step) | A nested action with its own trigger, tracked as a child step. |
+| **Nested Group** | `PlanDefinition.action.action` (type=group-step) | A nested group containing its own steps — enables multi-level nesting to arbitrary depth |
 | **Intelligence Action** | `PlanDefinition.action.action` (type=fire-event) | A nested action that defines a conditional intelligence evaluation |
 
 ```mermaid
 flowchart LR
     subgraph "FHIR PlanDefinition Structure"
         PD["PlanDefinition"]
-        A1["action"]
-        A2["action (group)"]
+        A1["action<br/>type=step"]
+        A2["action<br/>type=group-step"]
         IA1["action.action<br/>type=fire-event"]
         IA2["action.action<br/>type=fire-event"]  
-        SS1["action.action<br/>type=sub-step (group)"]
-        SS2["action.action<br/>type=sub-step"]
+        SS1["action.action<br/>type=group-step"]
+        SS2["action.action<br/>type=step"]
         IA3["action.action<br/>type=fire-event"]
-        SS1A["action.action.action<br/>type=sub-step (leaf)"]
-        SS1B["action.action.action<br/>type=sub-step (leaf)"]
+        SS1A["action.action.action<br/>type=step"]
+        SS1B["action.action.action<br/>type=step"]
 
         PD --> A1
         PD --> A2
@@ -553,10 +553,10 @@ flowchart LR
         R1["Intelligence Action:<br/>overdue-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
         SUB1["Nested Group: blood-tests"]
-        SUB2["Sub-Step: urine-test"]
+        SUB2["Step: urine-test"]
         R3["Intelligence Action:<br/>lab-overdue-alert"]
-        LEAF1["Sub-Step: cbc"]
-        LEAF2["Sub-Step: hb-test"]
+        LEAF1["Step: cbc"]
+        LEAF2["Step: hb-test"]
 
         PROTO --> S1
         PROTO --> S2
@@ -647,23 +647,24 @@ All execution and evaluation context is stored in a single row — no FK constra
 
 ### 6.4 Sub-Step Groups (Multi-Level Nesting)
 
-A **group step** is a `PlanDefinition.action` that contains nested `action.action[]` entries with `type.coding[0].code = "sub-step"`. Group steps have no trigger of their own — they are created via `relatedAction` from a predecessor, and their completion is delegated to their sub-steps.
+A **group step** is a `PlanDefinition.action` with `type.coding[0].code = "group-step"` that contains nested `action.action[]` entries. Group steps have no trigger of their own — they are created via `relatedAction` from a predecessor, and their completion is delegated to their child steps.
 
-**Multi-level nesting:** Sub-steps can themselves be groups containing their own nested sub-steps. The data model is self-referencing (`SubStepActionInfo` contains `List<SubStepActionInfo> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation, group completion) are recursive.
+**Multi-level nesting:** Steps can themselves be groups containing their own nested steps. The data model is self-referencing (`SubStepActionInfo` contains `List<SubStepActionInfo> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation, group completion) are recursive.
 
 #### Classification Rules
 
-Nested actions (`action.action[]`) are classified by the parser:
+Actions at ALL levels are classified by type (`type.coding[0].code`):
 
-| Criterion | Classification |
-|---|---|
-| Explicit `type.coding[0].code = "sub-step"` | Sub-step |
-| Explicit `type.coding[0].code = "fire-event"` | Intelligence action |
-| No explicit type | **Rejected** at load time (`IllegalArgumentException`) |
+| Type Code | Classification | Description |
+|---|---|---|
+| `"step"` | Step | Trigger-based action (has triggers, tracked as step instance) |
+| `"group-step"` | Group Step | Container action with nested steps (no triggers, completion delegated) |
+| `"fire-event"` | Intelligence Action | Conditional intelligence evaluation (nested only) |
+| *(missing)* | **Rejected** | `IllegalArgumentException` at load time |
 
-Every nested action **must** have an explicit `type` coding — either `"sub-step"` or `"fire-event"`.
+Every action **must** have an explicit `type` coding — `"step"`, `"group-step"`, or `"fire-event"`.
 
-**Validation:** An action with both triggers AND sub-steps is rejected at load time (mutually exclusive patterns).
+**Validation:** A `"group-step"` action with triggers is rejected at load time (mutually exclusive patterns).
 
 #### Group Completion Semantics
 
