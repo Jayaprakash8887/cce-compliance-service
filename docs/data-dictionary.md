@@ -71,7 +71,6 @@ erDiagram
         uuid matched_event_id
         varchar required_behavior
         uuid parent_step_id FK
-        varchar parent_action_id
         timestamptz created_at
         timestamptz updated_at
     }
@@ -261,7 +260,6 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
 | `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
 | `parent_step_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. Non-null for sub-steps — references the immediate parent group step. For multi-level nesting, each level points to its direct parent (not the root). |
-| `parent_action_id` | `VARCHAR` | Yes | — | The `action.id` of the immediate parent group action in the PlanDefinition. Stored for fast lookup without re-parsing. For multi-level nesting, this is the direct parent's actionId. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 

@@ -397,7 +397,7 @@ public class ComplianceEngine {
 
                 intermediateStep = stepInstanceService.createStep(protocolInstance, intermediateActionId, 0,
                         now, overdueDate, missedDate, requiredBehavior,
-                        currentParent.getId(), currentParent.getActionId());
+                        currentParent.getId());
 
                 // If the intermediate is a group, create its entry-point sub-steps
                 if (intermediateInfo != null && intermediateInfo.hasSubSteps()) {
@@ -428,7 +428,7 @@ public class ComplianceEngine {
 
             subStep = stepInstanceService.createStep(protocolInstance, leafActionId, 0,
                     now, overdueDate, missedDate, requiredBehavior,
-                    currentParent.getId(), immediateParentActionId);
+                    currentParent.getId());
         }
 
         // Complete the sub-step

@@ -17,6 +17,7 @@ import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.enums.*;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
+import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -42,6 +43,7 @@ class IntelligenceActionEvaluatorTest {
     @Mock private IntelligenceTriggerProducer intelligenceTriggerProducer;
     @Mock private IntelligenceEventLogRepository intelligenceEventLogRepository;
     @Mock private DeviationRepository deviationRepository;
+    @Mock private StepInstanceRepository stepInstanceRepository;
 
     private IntelligenceActionEvaluator evaluator;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -54,7 +56,7 @@ class IntelligenceActionEvaluatorTest {
                 planDefinitionParser, expressionEvaluationService,
                 actionDefinitionService, intelligenceTriggerProducer,
                 intelligenceEventLogRepository,
-                deviationRepository, objectMapper, meterRegistry, 256);
+                deviationRepository, stepInstanceRepository, objectMapper, meterRegistry, 256);
     }
 
     // ── Deviation Tests ──

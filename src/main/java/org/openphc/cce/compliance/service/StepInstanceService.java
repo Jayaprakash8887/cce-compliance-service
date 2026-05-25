@@ -68,16 +68,16 @@ public class StepInstanceService {
                                    OffsetDateTime overdueDate, OffsetDateTime missedDate,
                                    String requiredBehavior) {
         return createStep(protocolInstance, actionId, repeatIndex, dueDate,
-                overdueDate, missedDate, requiredBehavior, null, null);
+                overdueDate, missedDate, requiredBehavior, null);
     }
 
     /**
-     * Create a new step instance in PENDING state with parent references (for sub-steps).
+     * Create a new step instance in PENDING state with parent reference (for sub-steps).
      */
     public StepInstance createStep(ProtocolInstance protocolInstance, String actionId,
                                    int repeatIndex, OffsetDateTime dueDate,
                                    OffsetDateTime overdueDate, OffsetDateTime missedDate,
-                                   String requiredBehavior, UUID parentStepId, String parentActionId) {
+                                   String requiredBehavior, UUID parentStepId) {
         StepInstance step = StepInstance.builder()
                 .protocolInstance(protocolInstance)
                 .actionId(actionId)
@@ -88,7 +88,6 @@ public class StepInstanceService {
                 .missedDate(missedDate)
                 .requiredBehavior(requiredBehavior)
                 .parentStepId(parentStepId)
-                .parentActionId(parentActionId)
                 .build();
 
         step = stepInstanceRepository.save(step);
@@ -140,14 +139,13 @@ public class StepInstanceService {
                     .missedDate(missedDate)
                     .requiredBehavior(subStepInfo.requiredBehavior())
                     .parentStepId(parentStep.getId())
-                    .parentActionId(parentStep.getActionId())
                     .build();
 
             subStep = stepInstanceRepository.save(subStep);
             subSteps.add(subStep);
 
-            log.info("Created sub-step: actionId={}, parentStepId={}, parentActionId={}",
-                    subStepInfo.id(), parentStep.getId(), parentStep.getActionId());
+            log.info("Created sub-step: actionId={}, parentStepId={}",
+                    subStepInfo.id(), parentStep.getId());
 
             // If this sub-step is itself a group (has nested sub-steps), recursively create its entry-point children
             if (subStepInfo.hasSubSteps()) {
@@ -508,7 +506,8 @@ public class StepInstanceService {
                                          List<PlanDefinitionParser.ActionMetadata> actions) {
         ProtocolInstance protocolInstance = completedSubStep.getProtocolInstance();
         UUID parentStepId = completedSubStep.getParentStepId();
-        String parentActionId = completedSubStep.getParentActionId();
+        StepInstance parentStep = findByIdOrThrow(parentStepId);
+        String parentActionId = parentStep.getActionId();
 
         // Find the sub-steps list for the parent action (may be top-level or nested)
         List<PlanDefinitionParser.SubStepActionInfo> parentSubSteps = resolveSubSteps(parentActionId, actions);
@@ -573,7 +572,6 @@ public class StepInstanceService {
                     .missedDate(missedDate)
                     .requiredBehavior(requiredBehavior)
                     .parentStepId(parentStepId)
-                    .parentActionId(parentActionId)
                     .build();
 
             subStep = stepInstanceRepository.save(subStep);
@@ -649,7 +647,7 @@ public class StepInstanceService {
         List<StepInstance> childSteps = stepInstanceRepository.findByParentStepId(parentStepId);
 
         // Look up the parent action's selectionBehavior — may be top-level or nested
-        String parentActionId = completedSubStep.getParentActionId();
+        String parentActionId = parentStep.getActionId();
         String selectionBehavior = resolveSelectionBehavior(parentActionId, actions);
 
         boolean groupComplete = isGroupComplete(childSteps, selectionBehavior);

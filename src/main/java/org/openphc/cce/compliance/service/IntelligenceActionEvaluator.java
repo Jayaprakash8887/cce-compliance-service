@@ -8,6 +8,7 @@ import jakarta.persistence.EntityNotFoundException;
 import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
+import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -36,6 +37,7 @@ public class IntelligenceActionEvaluator {
     private final IntelligenceTriggerProducer intelligenceTriggerProducer;
     private final IntelligenceEventLogRepository intelligenceEventLogRepository;
     private final DeviationRepository deviationRepository;
+    private final StepInstanceRepository stepInstanceRepository;
     private final ObjectMapper objectMapper;
     private final Counter actionsEvaluatedCounter;
     private final Counter actionsFiredCounter;
@@ -48,6 +50,7 @@ public class IntelligenceActionEvaluator {
                                      IntelligenceTriggerProducer intelligenceTriggerProducer,
                                      IntelligenceEventLogRepository intelligenceEventLogRepository,
                                      DeviationRepository deviationRepository,
+                                     StepInstanceRepository stepInstanceRepository,
                                      ObjectMapper objectMapper,
                                      MeterRegistry meterRegistry,
                                      @Value("${cce.intelligence.plan-definition-cache-size:256}") int maxPlanDefinitionCacheSize) {
@@ -57,6 +60,7 @@ public class IntelligenceActionEvaluator {
         this.intelligenceTriggerProducer = intelligenceTriggerProducer;
         this.intelligenceEventLogRepository = intelligenceEventLogRepository;
         this.deviationRepository = deviationRepository;
+        this.stepInstanceRepository = stepInstanceRepository;
         this.objectMapper = objectMapper;
         this.actionsEvaluatedCounter = meterRegistry.counter("cce.intelligence.actions.evaluated");
         this.actionsFiredCounter = meterRegistry.counter("cce.intelligence.actions.fired");
@@ -157,8 +161,8 @@ public class IntelligenceActionEvaluator {
 
     /**
      * Find intelligence actions for a step. Handles both:
-     * - Top-level steps (parentActionId == null) → returns ActionMetadata.intelligenceActions()
-     * - Sub-steps (parentActionId != null) → finds the parent group, then the matching sub-step's intelligenceActions()
+     * - Top-level steps (parentStepId == null) → returns ActionMetadata.intelligenceActions()
+     * - Sub-steps (parentStepId != null) → finds the parent group, then the matching sub-step's intelligenceActions()
      * - Composite actionIds (containing '/') → splits and resolves as sub-step (fallback for explicit matches)
      */
     private List<PlanDefinitionParser.IntelligenceActionInfo> findIntelligenceActions(
@@ -166,19 +170,23 @@ public class IntelligenceActionEvaluator {
         List<PlanDefinitionParser.ActionMetadata> actions = planDefinitionParser.extractActions(planDefinition);
         String actionId = step.getActionId();
 
-        // Sub-step: step has a parentActionId → search recursively within the action tree
-        String parentActionId = step.getParentActionId();
-        if (parentActionId != null) {
-            // Search top-level actions for the parent, then find this sub-step within it
-            for (PlanDefinitionParser.ActionMetadata protocolStep : actions) {
-                List<PlanDefinitionParser.IntelligenceActionInfo> result =
-                        findIntelligenceActionsInSubSteps(actionId, parentActionId, protocolStep);
-                if (result != null) {
-                    return result;
+        // Sub-step: step has a parentStepId → derive parent's actionId and search recursively
+        if (step.getParentStepId() != null) {
+            String parentActionId = stepInstanceRepository.findById(step.getParentStepId())
+                    .map(StepInstance::getActionId)
+                    .orElse(null);
+            if (parentActionId != null) {
+                // Search top-level actions for the parent, then find this sub-step within it
+                for (PlanDefinitionParser.ActionMetadata protocolStep : actions) {
+                    List<PlanDefinitionParser.IntelligenceActionInfo> result =
+                            findIntelligenceActionsInSubSteps(actionId, parentActionId, protocolStep);
+                    if (result != null) {
+                        return result;
+                    }
                 }
             }
-            log.debug("No intelligence actions found for sub-step: actionId={}, parentActionId={}",
-                    actionId, parentActionId);
+            log.debug("No intelligence actions found for sub-step: actionId={}, parentStepId={}",
+                    actionId, step.getParentStepId());
             return List.of();
         }
 

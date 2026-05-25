@@ -492,7 +492,7 @@ sequenceDiagram
         loop For each intermediate ancestor (grandparent-group, parent-group)
             Engine->>SIS: findActionableStep(protocolId, ancestorActionId)
             alt Ancestor step doesn't exist
-                Engine->>SIS: createStep(ancestor, parentStepId, parentActionId)
+                Engine->>SIS: createStep(ancestor, parentStepId)
                 SIS->>DB: INSERT step_instance (state=PENDING, parent refs)
                 Engine->>SIS: createSubSteps(ancestorStep, subStepInfos)
                 Note over SIS: Recursively creates entry-point sub-steps<br/>at all nested levels
@@ -541,7 +541,7 @@ flowchart TD
     LOOP --> HAS_DEP{"Has relatedAction<br/>(depends on sibling)?"}
 
     HAS_DEP -->|"Yes"| SKIP["Skip (created progressively later)"]
-    HAS_DEP -->|"No"| CREATE["createStep(subStep, parentStepId, parentActionId)"]
+    HAS_DEP -->|"No"| CREATE["createStep(subStep, parentStepId)"]
 
     CREATE --> IS_GROUP{"subStepInfo.hasSubSteps()?"}
     IS_GROUP -->|"Yes"| RECURSE["createSubSteps(newStep, subStepInfo.subSteps())<br/>[RECURSIVE]"]

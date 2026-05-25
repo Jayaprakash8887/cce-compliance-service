@@ -27,7 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Group completion via FHIR `selectionBehavior`: all, any, exactly-one, at-most-one, one-or-more, all-or-none
 - Duplicate creation guard in progressive sub-step instantiation
 - Validation: rejects PlanDefinition actions with both triggers AND sub-steps (mutually exclusive)
-- Flyway V5 migration: `parent_step_id` (UUID FK → step_instance), `parent_action_id` (VARCHAR) + index on `step_instance`
+- Flyway V5 migration: `parent_step_id` (UUID FK → step_instance) + index on `step_instance`
 
 #### Schema Optimization
 - Flyway V4 migration: Performance indexes and constraints for production workloads

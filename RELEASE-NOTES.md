@@ -39,12 +39,12 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 - Validation: rejects actions with both triggers AND sub-steps
 
 ### Step Instance Lifecycle
-- `StepInstance` entity: new `parent_step_id` (UUID FK) and `parent_action_id` (VARCHAR) columns
+- `StepInstance` entity: new `parent_step_id` (UUID FK) column
 - `StepInstanceService.createSubSteps()` — recursively creates entry-point sub-steps for nested groups at all levels
 - `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`, with recursive child creation for nested groups
 - `StepInstanceService.evaluateGroupCompletion()` — auto-completes parent when `selectionBehavior` is satisfied, then **recursively evaluates grandparent** completion
 - `StepInstanceService.resolveSelectionBehavior()` / `resolveSubSteps()` — recursive tree traversal helpers for multi-level lookup
-- `createStep()` overload with `parentStepId, parentActionId` parameters for explicit parent reference
+- `createStep()` overload with `parentStepId` parameter for explicit parent reference
 - On parent auto-completion: top-level progressive instantiation, deviation detection, and protocol completion check run normally
 
 ### Core Schema Optimization (V4)
@@ -56,7 +56,7 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 
 5 Flyway migrations (2 new since v1.1.0):
 - `V4__core_schema_optimization.sql` — Performance indexes and constraints
-- `V5__add_sub_step_support.sql` — Adds `parent_step_id` (UUID FK → step_instance), `parent_action_id` (VARCHAR) to `step_instance` + index
+- `V5__add_sub_step_support.sql` — Adds `parent_step_id` (UUID FK → step_instance) to `step_instance` + index
 
 ---
 

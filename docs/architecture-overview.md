@@ -696,7 +696,7 @@ sequenceDiagram
     loop For each intermediate ancestor segment
         Engine->>SIS: findActionableStep(protocolId, ancestorActionId)
         alt Ancestor doesn't exist
-            Engine->>SIS: createStep(ancestor, parentStepId, parentActionId)
+            Engine->>SIS: createStep(ancestor, parentStepId)
             Engine->>SIS: createSubSteps(ancestor, subStepInfos) [recursive]
         end
     end
