@@ -200,25 +200,14 @@ public class ComplianceEngine {
 
             String actionId = match.actionId();
 
-            // Handle composite actionId for sub-steps ("parentActionId/subStepId")
+            // Handle composite actionId for sub-steps (multi-level: "parent/child" or "grandparent/parent/child")
             if (actionId.contains("/")) {
-                String[] parts = actionId.split("/", 2);
-                String parentActionId = parts[0];
-                String subStepId = parts[1];
+                String[] segments = actionId.split("/");
+                String leafId = segments[segments.length - 1];
+                String immediateParentId = segments[segments.length - 2];
 
-                PlanDefinitionParser.ActionMetadata parentMetadata = actions.stream()
-                        .filter(a -> parentActionId.equals(a.id()))
-                        .findFirst()
-                        .orElse(null);
-
-                if (parentMetadata == null || !parentMetadata.hasSubSteps()) {
-                    continue;
-                }
-
-                PlanDefinitionParser.SubStepActionInfo subStepInfo = parentMetadata.subSteps().stream()
-                        .filter(s -> subStepId.equals(s.id()))
-                        .findFirst()
-                        .orElse(null);
+                PlanDefinitionParser.SubStepActionInfo subStepInfo =
+                        resolveSubStepInfo(leafId, immediateParentId, actions);
 
                 if (subStepInfo == null) {
                     continue;
@@ -352,58 +341,80 @@ public class ComplianceEngine {
     }
 
     /**
-     * Process a sub-step trigger match. The composite actionId format is "parentActionId/subStepId".
-     * Ensures the parent step exists, then finds/creates and completes the sub-step.
+     * Process a sub-step trigger match. The composite actionId encodes the full hierarchy path:
+     * "topLevelGroupId/subStepId" for 2-level, "topLevelGroupId/nestedGroupId/leafId" for 3-level, etc.
+     * Ensures all ancestor steps exist, then finds/creates and completes the leaf sub-step.
      */
     private void processSubStepMatch(String compositeActionId, ProtocolInstance protocolInstance,
                                      CloudEventMessage event, EventLog eventLog,
                                      Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache) {
-        String[] parts = compositeActionId.split("/", 2);
-        String parentActionId = parts[0];
-        String subStepActionId = parts[1];
+        String[] segments = compositeActionId.split("/");
+        String topLevelActionId = segments[0];
+        String leafActionId = segments[segments.length - 1];
 
         eventLog.setProtocolInstanceId(protocolInstance.getId());
         eventLog.setProtocolDefinitionId(protocolInstance.getProtocolDefinition().getId());
         eventLog.setActionId(compositeActionId);
 
-        // Find or create the parent step
-        StepInstance parentStep = stepInstanceService.findActionableStep(
-                protocolInstance.getId(), parentActionId);
-        if (parentStep == null) {
-            parentStep = createInitialStep(protocolInstance, parentActionId, actionCache);
+        UUID protocolDefId = protocolInstance.getProtocolDefinition().getId();
+        List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(protocolDefId, actionCache);
 
-            // Create sub-steps for the newly created parent
-            UUID protocolDefId = protocolInstance.getProtocolDefinition().getId();
-            List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(protocolDefId, actionCache);
-            PlanDefinitionParser.ActionMetadata parentMetadata = actions.stream()
-                    .filter(a -> parentActionId.equals(a.id()))
+        // Ensure all ancestor steps exist (from top-level group down to the immediate parent)
+        StepInstance currentParent = stepInstanceService.findActionableStep(
+                protocolInstance.getId(), topLevelActionId);
+        if (currentParent == null) {
+            currentParent = createInitialStep(protocolInstance, topLevelActionId, actionCache);
+
+            // Create sub-steps for the newly created top-level group
+            PlanDefinitionParser.ActionMetadata topMetadata = actions.stream()
+                    .filter(a -> topLevelActionId.equals(a.id()))
                     .findFirst()
                     .orElse(null);
-
-            if (parentMetadata != null && parentMetadata.hasSubSteps()) {
-                stepInstanceService.createSubSteps(parentStep, parentMetadata.subSteps());
+            if (topMetadata != null && topMetadata.hasSubSteps()) {
+                stepInstanceService.createSubSteps(currentParent, topMetadata.subSteps());
             }
         }
 
-        // Find or create the sub-step instance
-        StepInstance subStep = stepInstanceService.findActionableStep(
-                protocolInstance.getId(), subStepActionId);
-        if (subStep == null) {
-            // Sub-step not yet created (e.g., it depends on a sibling via relatedAction)
-            // Create it now with the parent reference
-            UUID protocolDefId = protocolInstance.getProtocolDefinition().getId();
-            List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(protocolDefId, actionCache);
-            PlanDefinitionParser.ActionMetadata parentMetadata = actions.stream()
-                    .filter(a -> parentActionId.equals(a.id()))
-                    .findFirst()
-                    .orElse(null);
+        // For multi-level (3+ segments), ensure intermediate group steps exist
+        for (int i = 1; i < segments.length - 1; i++) {
+            String intermediateActionId = segments[i];
+            StepInstance intermediateStep = stepInstanceService.findActionableStep(
+                    protocolInstance.getId(), intermediateActionId);
+            if (intermediateStep == null) {
+                // Resolve sub-step metadata for the intermediate group
+                PlanDefinitionParser.SubStepActionInfo intermediateInfo =
+                        resolveSubStepInfo(intermediateActionId, segments[i - 1], actions);
 
-            PlanDefinitionParser.SubStepActionInfo subStepInfo = parentMetadata != null
-                    ? parentMetadata.subSteps().stream()
-                        .filter(s -> subStepActionId.equals(s.id()))
-                        .findFirst()
-                        .orElse(null)
-                    : null;
+                OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+                OffsetDateTime overdueDate = null;
+                OffsetDateTime missedDate = null;
+                String requiredBehavior = intermediateInfo != null ? intermediateInfo.requiredBehavior() : null;
+
+                if (intermediateInfo != null && intermediateInfo.toleranceDays() != null) {
+                    overdueDate = now.plusDays(intermediateInfo.toleranceDays());
+                    missedDate = overdueDate.plusDays(intermediateInfo.toleranceDays());
+                }
+
+                intermediateStep = stepInstanceService.createStep(protocolInstance, intermediateActionId, 0,
+                        now, overdueDate, missedDate, requiredBehavior,
+                        currentParent.getId(), currentParent.getActionId());
+
+                // If the intermediate is a group, create its entry-point sub-steps
+                if (intermediateInfo != null && intermediateInfo.hasSubSteps()) {
+                    stepInstanceService.createSubSteps(intermediateStep, intermediateInfo.subSteps());
+                }
+            }
+            currentParent = intermediateStep;
+        }
+
+        // Find or create the leaf sub-step instance
+        String immediateParentActionId = segments[segments.length - 2];
+        StepInstance subStep = stepInstanceService.findActionableStep(
+                protocolInstance.getId(), leafActionId);
+        if (subStep == null) {
+            // Resolve leaf sub-step metadata
+            PlanDefinitionParser.SubStepActionInfo subStepInfo =
+                    resolveSubStepInfo(leafActionId, immediateParentActionId, actions);
 
             OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
             OffsetDateTime overdueDate = null;
@@ -415,10 +426,9 @@ public class ComplianceEngine {
                 missedDate = overdueDate.plusDays(subStepInfo.toleranceDays());
             }
 
-            subStep = stepInstanceService.createStep(protocolInstance, subStepActionId, 0,
-                    now, overdueDate, missedDate, requiredBehavior);
-            subStep.setParentStepId(parentStep.getId());
-            subStep.setParentActionId(parentActionId);
+            subStep = stepInstanceService.createStep(protocolInstance, leafActionId, 0,
+                    now, overdueDate, missedDate, requiredBehavior,
+                    currentParent.getId(), immediateParentActionId);
         }
 
         // Complete the sub-step
@@ -430,10 +440,51 @@ public class ComplianceEngine {
         auditService.audit("COMPLIANCE", "SUB_STEP_MATCHED", "system",
                 "EventLog", eventLog.getId().toString(),
                 Map.of("protocolDefinitionId", protocolInstance.getProtocolDefinition().getId().toString(),
-                        "parentActionId", parentActionId,
-                        "subStepActionId", subStepActionId,
+                        "compositeActionId", compositeActionId,
+                        "leafActionId", leafActionId,
                         "protocolInstanceId", protocolInstance.getId().toString(),
                         "patientId", event.getSubject()));
+    }
+
+    /**
+     * Resolve a SubStepActionInfo by its ID and parent action ID, searching the full action tree.
+     */
+    private PlanDefinitionParser.SubStepActionInfo resolveSubStepInfo(
+            String subStepId, String parentActionId,
+            List<PlanDefinitionParser.ActionMetadata> actions) {
+        for (PlanDefinitionParser.ActionMetadata action : actions) {
+            if (parentActionId.equals(action.id())) {
+                return action.subSteps().stream()
+                        .filter(s -> subStepId.equals(s.id()))
+                        .findFirst()
+                        .orElse(null);
+            }
+            PlanDefinitionParser.SubStepActionInfo result =
+                    resolveSubStepInfoRecursive(subStepId, parentActionId, action.subSteps());
+            if (result != null) return result;
+        }
+        return null;
+    }
+
+    private PlanDefinitionParser.SubStepActionInfo resolveSubStepInfoRecursive(
+            String subStepId, String parentActionId,
+            List<PlanDefinitionParser.SubStepActionInfo> subSteps) {
+        if (subSteps == null) return null;
+        for (PlanDefinitionParser.SubStepActionInfo subStep : subSteps) {
+            if (parentActionId.equals(subStep.id())) {
+                if (subStep.subSteps() != null) {
+                    return subStep.subSteps().stream()
+                            .filter(s -> subStepId.equals(s.id()))
+                            .findFirst()
+                            .orElse(null);
+                }
+                return null;
+            }
+            PlanDefinitionParser.SubStepActionInfo result =
+                    resolveSubStepInfoRecursive(subStepId, parentActionId, subStep.subSteps());
+            if (result != null) return result;
+        }
+        return null;
     }
 
     private StepInstance createInitialStep(ProtocolInstance protocolInstance, String actionId,

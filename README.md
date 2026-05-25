@@ -6,9 +6,9 @@
 ![Kafka](https://img.shields.io/badge/Kafka-3.x%20KRaft-orange)
 ![License](https://img.shields.io/badge/license-proprietary-lightgrey)
 
-> **Release 1.1.0** — [Release Notes](RELEASE-NOTES.md) | [Changelog](CHANGELOG.md)
+> **Release 1.2.0** — [Release Notes](RELEASE-NOTES.md) | [Changelog](CHANGELOG.md)
 
-A core microservice within the Clinical Compliance Engine (CCE) platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps, detecting deviations, evaluating intelligence actions, and publishing intelligence triggers for downstream processing.
+A core microservice within the Clinical Compliance Engine (CCE) platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps (including multi-level nested sub-steps), detecting deviations, evaluating intelligence actions, and publishing intelligence triggers for downstream processing.
 
 ## Quick Start
 
@@ -51,6 +51,7 @@ Kafka → InboundEventConsumer → ComplianceEngine
                                   ├── Tier 2 Evaluation (ExpressionEvaluationService)
                                   ├── Enrollment (ProtocolInstanceService)
                                   ├── Step Management (StepInstanceService)
+                                  │   ├── Sub-Step Groups (multi-level recursive nesting)
                                   │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
                                   ├── Deviation Detection (DeviationService)
                                   │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
@@ -61,7 +62,7 @@ Kafka → InboundEventConsumer → ComplianceEngine
 ## Testing
 
 ```bash
-# Unit tests (351 tests)
+# Unit tests (368 tests)
 ./gradlew test
 
 # Integration tests (39 tests)

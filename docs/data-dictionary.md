@@ -241,7 +241,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Sub-steps reference their parent group step via `parent_step_id`.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Sub-steps reference their parent group step via `parent_step_id`. Multi-level nesting is supported — a sub-step can itself be a group whose children also have `parent_step_id` pointing to it, enabling arbitrary depth hierarchies.
 
 ### Columns
 
@@ -260,8 +260,8 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
 | `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
 | `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
-| `parent_step_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. Non-null for sub-steps — references the parent group step. |
-| `parent_action_id` | `VARCHAR` | Yes | — | The `action.id` of the parent group action in the PlanDefinition. Stored for fast lookup without re-parsing. |
+| `parent_step_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. Non-null for sub-steps — references the immediate parent group step. For multi-level nesting, each level points to its direct parent (not the root). |
+| `parent_action_id` | `VARCHAR` | Yes | — | The `action.id` of the immediate parent group action in the PlanDefinition. Stored for fast lookup without re-parsing. For multi-level nesting, this is the direct parent's actionId. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 
@@ -353,7 +353,7 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. For sub-step triggers, this is a composite path encoding the full ancestor hierarchy: `"ancestor/.../parent/subStepId"` (e.g., `"lab-workup/blood-tests/cbc"`). |
 
 ### Constraints & Indexes
 

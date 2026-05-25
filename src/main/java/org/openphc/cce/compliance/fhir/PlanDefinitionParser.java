@@ -53,15 +53,28 @@ public class PlanDefinitionParser {
             // Index top-level action triggers
             indexActionTriggers(action, actionId, protocolDefinitionId, entries);
 
-            // Index sub-step triggers (nested actions with type=sub-step)
-            for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
-                if (isSubStep(nestedAction)) {
-                    String compositeActionId = actionId + "/" + nestedAction.getId();
-                    indexActionTriggers(nestedAction, compositeActionId, protocolDefinitionId, entries);
-                }
-            }
+            // Recursively index sub-step triggers at all nesting levels
+            indexNestedSubStepTriggers(action, actionId, protocolDefinitionId, entries);
         }
         return entries;
+    }
+
+    /**
+     * Recursively index sub-step triggers. The composite actionId encodes the full
+     * ancestry path: "grandparent/parent/child" for arbitrary depth.
+     */
+    private void indexNestedSubStepTriggers(PlanDefinition.PlanDefinitionActionComponent parentAction,
+                                            String parentCompositeId, UUID protocolDefinitionId,
+                                            List<TriggerIndex> entries) {
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
+            if (isSubStep(nestedAction)) {
+                String compositeActionId = parentCompositeId + "/" + nestedAction.getId();
+                indexActionTriggers(nestedAction, compositeActionId, protocolDefinitionId, entries);
+
+                // Recurse: if this sub-step is itself a group with nested sub-steps
+                indexNestedSubStepTriggers(nestedAction, compositeActionId, protocolDefinitionId, entries);
+            }
+        }
     }
 
     private void indexActionTriggers(PlanDefinition.PlanDefinitionActionComponent action, String actionId,
@@ -123,21 +136,32 @@ public class PlanDefinitionParser {
      */
     public void validateTriggers(PlanDefinition planDefinition) {
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
-            for (TriggerDefinition trigger : action.getTrigger()) {
-                if (!hasData(trigger) && getCondition(trigger) == null) {
-                    throw new IllegalArgumentException(
-                            "Action '" + action.getId() + "' has a trigger with no data[] and no condition. " +
-                                    "At least one of data[] or condition must be present.");
-                }
-            }
+            validateActionTriggers(action);
+        }
+    }
 
-            // A group step (has sub-steps) must not have its own triggers —
-            // triggers on the parent would bypass group completion semantics.
-            boolean hasSubSteps = action.getAction().stream().anyMatch(this::isSubStep);
-            if (hasSubSteps && !action.getTrigger().isEmpty()) {
+    private void validateActionTriggers(PlanDefinition.PlanDefinitionActionComponent action) {
+        for (TriggerDefinition trigger : action.getTrigger()) {
+            if (!hasData(trigger) && getCondition(trigger) == null) {
                 throw new IllegalArgumentException(
-                        "Action '" + action.getId() + "' has both triggers and sub-steps. " +
-                                "A group step must not have its own triggers — completion is delegated to sub-steps.");
+                        "Action '" + action.getId() + "' has a trigger with no data[] and no condition. " +
+                                "At least one of data[] or condition must be present.");
+            }
+        }
+
+        // A group step (has sub-steps) must not have its own triggers —
+        // triggers on the parent would bypass group completion semantics.
+        boolean hasSubSteps = action.getAction().stream().anyMatch(this::isSubStep);
+        if (hasSubSteps && !action.getTrigger().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Action '" + action.getId() + "' has both triggers and sub-steps. " +
+                            "A group step must not have its own triggers — completion is delegated to sub-steps.");
+        }
+
+        // Recursively validate nested sub-steps
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
+            if (isSubStep(nestedAction)) {
+                validateActionTriggers(nestedAction);
             }
         }
     }
@@ -336,14 +360,18 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
-        // Sub-steps can have their own intelligence actions
+        // Extract groupingBehavior and selectionBehavior (for nested groups)
+        String groupingBehavior = action.hasGroupingBehavior()
+                ? action.getGroupingBehavior().toCode()
+                : null;
+        String selectionBehavior = action.hasSelectionBehavior()
+                ? action.getSelectionBehavior().toCode()
+                : null;
+
+        // Recursively classify nested actions into intelligence actions and sub-steps
         List<IntelligenceActionInfo> subStepIntelligenceActions = new ArrayList<>();
-        for (PlanDefinition.PlanDefinitionActionComponent childAction : action.getAction()) {
-            IntelligenceActionInfo info = buildIntelligenceActionInfo(childAction);
-            if (info != null) {
-                subStepIntelligenceActions.add(info);
-            }
-        }
+        List<SubStepActionInfo> nestedSubSteps = new ArrayList<>();
+        classifyNestedActions(action, subStepIntelligenceActions, nestedSubSteps);
 
         return new SubStepActionInfo(
                 action.getId(),
@@ -353,7 +381,10 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                subStepIntelligenceActions
+                groupingBehavior,
+                selectionBehavior,
+                subStepIntelligenceActions,
+                nestedSubSteps
         );
     }
 
@@ -538,6 +569,14 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            List<IntelligenceActionInfo> intelligenceActions
-    ) {}
+            String groupingBehavior,
+            String selectionBehavior,
+            List<IntelligenceActionInfo> intelligenceActions,
+            List<SubStepActionInfo> subSteps
+    ) {
+        /** Returns true if this sub-step is itself a group containing nested sub-steps. */
+        public boolean hasSubSteps() {
+            return subSteps != null && !subSteps.isEmpty();
+        }
+    }
 }

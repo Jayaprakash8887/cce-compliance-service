@@ -491,9 +491,9 @@ class StepInstanceServiceTest {
             var optionalLabAction = new PlanDefinitionParser.ActionMetadata(
                     "optional-lab", "Optional Lab", null,
                     List.of(new PlanDefinitionParser.RelatedActionInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
-                    null, null, "could", List.of());
+                    null, null, "could", null, null, List.of(), List.of());
             var mandatoryVisitAction = new PlanDefinitionParser.ActionMetadata(
-                    "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of());
+                    "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", null, null, List.of(), List.of());
             when(planDefinitionParser.extractActions(mockPlanDef))
                     .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
 
@@ -538,11 +538,11 @@ class StepInstanceServiceTest {
                     "registration", "Registration", null,
                     List.of(new PlanDefinitionParser.RelatedActionInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
                             new PlanDefinitionParser.RelatedActionInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
-                    null, null, "must", List.of());
+                    null, null, "must", null, null, List.of(), List.of());
             var familyPlanningAction = new PlanDefinitionParser.ActionMetadata(
-                    "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of());
+                    "family-planning", "Family Planning", null, List.of(), null, null, "could", null, null, List.of(), List.of());
             var pregnancyProfileAction = new PlanDefinitionParser.ActionMetadata(
-                    "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of());
+                    "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", null, null, List.of(), List.of());
             when(planDefinitionParser.extractActions(mockPlanDef))
                     .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
 
