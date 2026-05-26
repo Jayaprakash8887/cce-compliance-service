@@ -9,24 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### Sub-Steps (Step-Inside-Step Nesting)
-- `PlanDefinition.action.action[]` with `type.coding[0]` system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"` creates child step instances within a parent step
-- **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
-- Parent steps can have BOTH triggers AND sub-steps — sub-steps are created after parent completes
-- `PlanDefinitionParser.classifyNestedActions()` — recursively routes nested actions to either sub-step or intelligence action builders at every nesting level
-- Sub-step trigger indexing with plain action IDs in `TriggerIndex` (parent derived from PlanDefinition tree at runtime)
-- Recursive trigger indexing via `indexNestedSubStepTriggers()` — indexes sub-steps at any nesting level
-- Recursive trigger validation via `validateActionTriggers()` — validates nested sub-steps at all levels
-- `StepInstanceService.createEntryPointSubStepsForAction()` — creates entry-point sub-steps after parent step completion
-- `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`
-- `StepInstanceService.findStepByProtocolAndActionId()` — parent step lookup (any state, prefers COMPLETED)
-- `ComplianceEngine.processSubStepMatch()` — handles sub-step routing (derives parent from PD tree, finds completed parent)
-- `ComplianceEngine.resolveSubStepInfo()` — recursive lookup of `StepMetadata` at any depth in the action tree
-- `ComplianceEngine.findAncestryPath()` — derives parent hierarchy from PlanDefinition tree for sub-step detection
-- `ComplianceEngine.findSubStepInTree()` — locates StepMetadata by plain ID anywhere in the action tree
-- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal via parentStepId
-- Duplicate creation guard in progressive sub-step instantiation
-- Flyway V5 migration: `parent_step_id` (UUID FK → step_instance) + index on `step_instance`
+#### Flat Sub-Step Model
+- `PlanDefinition.action.action[]` with `type.coding[0]` system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"` are flattened into peer-level steps by `extractSteps()`
+- Entry-point sub-steps (no sibling `relatedAction`) automatically get a `relatedStep` to their parent action (relationship: `after-end`, no offset)
+- Sub-steps with `relatedAction` pointing to siblings are flattened as-is — progressive instantiation via standard `createDependentSteps()`
+- All trigger indexing uses the step's plain action ID (no composite path encoding)
+- Intelligence actions found via flat lookup by `actionId` — no tree traversal needed
+
+#### actionId Validation
+- `PlanDefinitionParser.validateActionIds()` — validates mandatory and unique action IDs across all nesting levels
+- `collectActionIds()` — recursive helper collecting all IDs for uniqueness check
+- Violations rejected with `IllegalArgumentException` at protocol load time
 
 #### Schema Optimization
 - Flyway V4 migration: Performance indexes and constraints for production workloads
@@ -34,24 +27,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Parser & Metadata
-- `StepMetadata` record: id, title, triggers, relatedSteps, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing) — with `hasSubSteps()` method
-- `buildStepMetadata()` reused for both top-level actions and nested sub-steps via `classifyNestedActions()`
-- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for sub-step trigger indexing (plain IDs)
-- `validateTriggers()` uses recursive `validateActionTriggers()` to validate nested sub-steps at all levels
-- Only two valid action types: `"step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) and `"fire-event"` (system: `http://terminology.hl7.org/CodeSystem/action-type`) — parser validates both system URI and code via `hasTypeCoding()`; unrecognized system+code combinations rejected at parse time
+- `StepMetadata` record (8 fields): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions` — flat, no self-referencing `subSteps` field
+- `extractSteps()` replaces `extractAllActions()` — returns a flat `List<StepMetadata>` for all steps at all nesting levels
+- `flattenAction()` — recursive helper that classifies nested actions and flattens step-type actions
+- `buildTriggerIndexEntries()` indexes all flattened steps uniformly with their plain action IDs
+- `validateTriggers()` validates all steps in the flat list — no recursive tree traversal needed
+- Only two valid action types: `"step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) and `"fire-event"` (system: `http://terminology.hl7.org/CodeSystem/action-type`) — parser validates both system URI and code via `hasTypeCoding()`
 
 #### Engine Flow
-- `ComplianceEngine.processMatch()` — detects sub-steps via PD tree lookup (`findAncestryPath()`) and routes to sub-step processing
-- `ComplianceEngine.processSubStepMatch()` — uses ancestry path to find completed parent step, resolves sub-step, creates/completes it
-- `performTwoTierMatching()` — uses `findSubStepInTree()` for sub-step condition evaluation
-- `StepInstanceService.completeStep()` — creates entry-point sub-steps via `createEntryPointSubStepsForAction()` on both top-level and sub-step completion
-- `StepInstanceService.createDependentSubSteps()` — progressive sibling creation when sub-step completes
-- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal via parentStepId (composite fallback removed)
+- `ComplianceEngine` — no sub-step-specific routing; all matched steps (top-level or nested) are processed uniformly
+- `StepInstanceService.completeStep()` — parses PlanDefinition **once** and passes `List<StepMetadata>` to `detectOrderViolations()`, `createDependentSteps()`, `autoSkipPrecedingOptionalSteps()`
+- `IntelligenceActionEvaluator.findIntelligenceActions()` — flat lookup by actionId (no tree traversal or `parentStepId` usage)
 
-#### Bug Fixes
-- Dead code removal: unused `hasDependency` variable in `createDependentSubSteps()`
-- Performance: PlanDefinition parsed once in sub-step completion flow (was parsed twice)
-- Misleading V5 migration comment fixed (referenced columns never added)
+#### Removed
+- `StepInstance.parentStepId` field — no parent-child hierarchy in domain model
+- `EventLog.matchedStepInstanceId` field — dead field never written to
+- `StepInstanceService.findStepByProtocolAndActionId()` — removed (was sub-step-specific)
+- `StepInstanceService.createEntryPointSubStepsForAction()` — replaced by flat `createDependentSteps()`
+- `StepInstanceService.createDependentSubSteps()` — replaced by flat `createDependentSteps()`
+- `ComplianceEngine.processSubStepMatch()` — removed (flat model processes all steps uniformly)
+- `ComplianceEngine.findAncestryPath()` — removed (no parent derivation needed)
+- `ComplianceEngine.findSubStepInTree()` — removed (flat list replaces tree)
+- `ComplianceEngine.resolveSubStepInfo()` — removed
+- `StepInstanceRepository.findByParentStepId()` — removed
+- `StepInstanceRepository.findByProtocolInstanceIdAndActionId()` — removed (dead code)
+- Flyway V5 migration (`parent_step_id` column) — never applied, deleted
 
 ---
 

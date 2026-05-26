@@ -8,40 +8,41 @@
 
 ## Overview
 
-Release 1.2.0 adds **step-inside-step support with multi-level nesting** — the ability to nest independently-triggerable child steps within a parent step. Sub-steps are modeled as nested `PlanDefinition.action.action[]` entries with `type.coding[0]` system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"`, indexed in `trigger_index` with their plain action IDs (parent derived from PlanDefinition tree at runtime), and tracked in `step_instance` with parent references. Parent steps can have **both** triggers and sub-steps — sub-steps are created after the parent step completes.
+Release 1.2.0 adds **flat-model sub-step support** — nested `PlanDefinition.action.action[]` entries of type `"step"` are flattened into peer-level steps at parse time, connected via `relatedSteps` references. No parent-child hierarchy is stored in the database. This approach simplifies the domain model while preserving full support for multi-level nested action structures in FHIR PlanDefinitions.
 
-Additionally, this release includes core schema optimizations (V4 migration) for production workloads.
+Additionally, this release includes core schema optimizations (V4 migration) for production workloads and mandatory unique `actionId` validation.
 
 ---
 
 ## Feature Summary
 
-### Sub-Steps (Step-Inside-Step Nesting)
-- `PlanDefinition.action.action[]` with `type = "step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) creates child step instances within a parent step
-- **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
-- Parent steps can have BOTH triggers AND sub-steps (sub-steps are created after parent completes)
-- Sub-step triggers indexed in `trigger_index` with their plain action ID (parent derived from PD tree via `findAncestryPath()`)
-- Entry-point sub-steps (no `relatedAction` dependency on siblings) created immediately on parent completion
-- Progressive instantiation within sub-steps: sub-steps with `relatedAction` pointing to siblings are created when the sibling completes
-- Sub-steps can have their own intelligence actions (nested fire-event)
-- `ComplianceEngine.processSubStepMatch()` handles sub-step routing (derives parent from PD tree, finds completed parent, resolves sub-step)
-- Tier 2 condition evaluation extended for sub-step triggers
-- Duplicate creation guard in progressive sub-step instantiation
+### Flat Sub-Step Model
+- `PlanDefinition.action.action[]` with `type = "step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) flattened into peer-level steps by `extractSteps()`
+- **No parent-child column** — all steps stored uniformly in `step_instance` without `parent_step_id`
+- Entry-point sub-steps (no `relatedAction` dependency on siblings) automatically get a `relatedStep` to their parent action (relationship: `after-end`, no offset) added by the parser
+- Sub-steps with `relatedAction` pointing to siblings flattened as-is — progressive instantiation via standard `createDependentSteps()`
+- All trigger indexing uses the step's **plain action ID** (e.g., `"anc-visit-1-referral"`)
+- Intelligence actions found via flat lookup by `actionId` — no tree traversal
+
+### actionId Validation
+- All action IDs validated at protocol load time via `validateActionIds()`
+- **Mandatory:** Every action at every nesting level must have a non-blank `id`
+- **Unique:** No two actions (at any level) may share the same `id`
+- Violations rejected with `IllegalArgumentException`
 
 ### PlanDefinition Parser Enhancements
-- `classifyNestedActions()` — recursively routes nested actions to either `StepMetadata` (sub-steps) or `IntelligenceActionInfo` at every nesting level
-- Classification by explicit `type.coding[0]` (system + code): `"step"` requires system `http://openphc.org/fhir/CodeSystem/action-type`, `"fire-event"` requires system `http://terminology.hl7.org/CodeSystem/action-type` (enforced by `PlanDefinitionActionType` enum with `getSystem()`)
-- `StepMetadata` record (self-referencing): id, title, triggers, relatedSteps, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps — reused for both top-level actions and nested sub-steps
-- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for plain sub-step ID indexing
-- `validateTriggers()` uses recursive `validateActionTriggers()` for nested validation
+- `extractSteps()` — flattens all nested step-type actions into a single `List<StepMetadata>`
+- `flattenAction()` — recursive helper that classifies nested actions and builds flat step entries
+- `validateActionIds()` + `collectActionIds()` — recursive validation of mandatory + unique IDs
+- `StepMetadata` record (8 fields): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`
+- `buildTriggerIndexEntries()` indexes all flattened steps with their plain action IDs
+- `validateTriggers()` validates all steps uniformly (no recursive tree traversal needed)
 
 ### Step Instance Lifecycle
-- `StepInstance` entity: new `parent_step_id` (UUID FK) column
-- `StepInstanceService.createEntryPointSubStepsForAction()` — creates entry-point sub-steps after parent step completion
-- `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`
-- `StepInstanceService.findStepByProtocolAndActionId()` — looks up steps by protocol and action ID (any state, prefers COMPLETED)
-- `createStep()` overload with `parentStepId` parameter for explicit parent reference
-- On parent completion: top-level progressive instantiation, deviation detection, and protocol completion check run normally
+- `StepInstanceService.createDependentSteps(step, steps)` — creates dependent steps when any step completes (including flattened sub-steps)
+- `StepInstanceService.detectOrderViolations(step, steps)` — order violation detection across all peer steps
+- `StepInstanceService.autoSkipPrecedingOptionalSteps(step, steps)` — auto-skip preceding `could` steps
+- `completeStep()` parses PlanDefinition **once** and passes `List<StepMetadata>` to all helper methods (eliminated redundant re-parses)
 
 ### Core Schema Optimization (V4)
 - Performance indexes and constraints for production workloads
@@ -50,9 +51,12 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 
 ## Database Schema Changes
 
-5 Flyway migrations (2 new since v1.1.0):
+1 new Flyway migration since v1.1.0:
 - `V4__core_schema_optimization.sql` — Performance indexes and constraints
-- `V5__add_sub_step_support.sql` — Adds `parent_step_id` (UUID FK → step_instance) to `step_instance` + index
+
+**Removed from schema:**
+- No `parent_step_id` column on `step_instance` (flat model)
+- No `matched_step_instance_id` column on `event_log` (dead field removed from entity)
 
 ---
 
@@ -66,10 +70,8 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
                                     ├── Tier 2 Evaluation (ExpressionEvaluationService)
                                     ├── Enrollment (ProtocolInstanceService)
                                     ├── Step Management (StepInstanceService)
-                                    │   ├── Sub-Steps (step-inside-step nesting)
-                                    │   │   ├── createEntryPointSubStepsForAction (on parent completion)
-                                    │   │   ├── createDependentSubSteps (progressive siblings)
-                                    │   │   └── findStepByProtocolAndActionId (parent lookup)
+                                    │   ├── Flat step model (all sub-steps flattened to peers)
+                                    │   ├── Progressive instantiation via relatedSteps
                                     │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
                                     ├── Deviation Detection (DeviationService)
                                     │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
@@ -81,19 +83,18 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 
 ## Migration from v1.1.0
 
-1. Apply Flyway V4 + V5 migrations (automatic on startup)
+1. Apply Flyway V4 migration (automatic on startup)
 2. No breaking changes to existing REST API endpoints
 3. No changes to existing Kafka message schemas
-4. Existing PlanDefinitions without sub-steps continue to work unchanged
-5. Sub-step functionality activates only for PlanDefinitions with nested `action.action[]` typed as `"step"`
+4. Existing PlanDefinitions without nested actions continue to work unchanged
+5. PlanDefinitions with nested `action.action[]` typed as `"step"` are now flattened at parse time — no schema change needed
 
 ---
 
 ## Known Limitations (v1.2.0)
 
-- **Sub-step scheduler transitions:** The Scheduler Service is not yet aware of sub-step parent relationships. Sub-step OVERDUE→MISSED transitions work independently of the parent step lifecycle.
-- **No REST API for sub-step queries:** No dedicated endpoint to list sub-steps for a given parent step (use existing step list filtered by `parentStepId`).
-- **Multi-level nesting depth:** While the code supports arbitrary depth recursively, only 2-level nesting has been integration-tested. Extremely deep nesting (>5 levels) should be validated for performance.
+- **Nesting depth:** While the parser supports arbitrary depth recursively, only 2-level nesting has been integration-tested.
+- **actionId uniqueness:** Enforced at load time — existing protocols with duplicate action IDs must be fixed before reloading.
 - All limitations from v1.1.0 still apply.
 
 ---

@@ -130,6 +130,9 @@ sequenceDiagram
     Parser->>Parser: FhirContext.parseResource()
     Parser-->>Service: PlanDefinition
 
+    Service->>Parser: validateActionIds(planDefinition)
+    Note over Service,Parser: Validates all actionIds are<br/>mandatory (non-blank) and unique
+
     Service->>Validator: validateOrThrow(planDefinition, "PlanDefinition")
     alt Validation Fails
         Validator-->>Service: throw FhirValidationException
@@ -255,7 +258,7 @@ flowchart TD
     U --> V
 
     V --> W["Set matchedEventId"]
-    W --> X["Update Event Log<br/>matchedStepInstanceId"]
+    W --> X["Update Event Log"]
 ```
 
 ## 5. Deviation Detection & Recording
@@ -470,37 +473,35 @@ flowchart TD
     N --> O["Log DLQ routing"]
 ```
 
-## 9. Parent-Child Step Relationship
+## 9. Flat Sub-Step Processing
 
-Sub-step processing follows the same flow as regular step processing (Section 1). The only additional behavior is **parent derivation**: when a matched actionId is not a top-level action, the engine derives its parent from the PlanDefinition tree and ensures the parent step exists before completing the child.
+All steps (including those originally nested in `action.action[]`) are treated as peers. Nested step-type actions are flattened at parse time with `relatedSteps` linking them to their parent. No separate sub-step routing is needed — the standard matching and completion flow handles them uniformly.
 
 ```mermaid
 flowchart TD
-    MATCH["Tier 1/2 match returns actionId"] --> CHECK{"findAncestryPath(actionId, actions)"}
-    CHECK -->|"null (top-level action)"| NORMAL["Normal step processing<br/>(Section 1, Step 6)"]
-    CHECK -->|"ancestry path found"| PARENT["Ensure parent step exists<br/>(find or create + complete)"]
-    PARENT --> SUBSTEP["Find or create sub-step<br/>(with parentStepId reference)"]
-    SUBSTEP --> COMPLETE["completeStep(subStep)"]
-    COMPLETE --> PROGRESSIVE["Progressive instantiation<br/>(same as top-level steps)"]
-    PROGRESSIVE --> ENTRY["createEntryPointSubStepsForAction(subStep)<br/>(if sub-step itself has nested children)"]
+    MATCH["Tier 1/2 match returns actionId"] --> NORMAL["Standard step processing<br/>(Section 1, Step 6)"]
+    NORMAL --> COMPLETE["completeStep(step)"]
+    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this actionId)"]
+    DEPS --> CREATED["Create dependent steps (PENDING)"]
+    CREATED --> CHECK["Check protocol completion"]
 ```
 
-### Sub-Step Creation on Parent Completion
+### Dependent Step Creation on Completion
 
-When any step completes, `createEntryPointSubStepsForAction()` checks if it has nested sub-steps and creates entry-point instances.
+When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's `actionId` and creates them with appropriate due dates.
 
 ```mermaid
 flowchart TD
-    START["createEntryPointSubStepsForAction(parentStep)"] --> PARSE["Parse PlanDefinition"]
-    PARSE --> FIND["Find sub-steps for action (findSubStepsOfAction)"]
-    FIND --> LOOP{"For each subStepInfo"}
-    LOOP --> HAS_DEP{"Has relatedAction<br/>(depends on sibling)?"}
+    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → completedStep.actionId"]
+    FIND --> LOOP{"For each dependent step"}
+    LOOP --> CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt, after-start → dueDate)"]
+    CALC --> RECURRING{"TimingInfo.count > 1?"}
 
-    HAS_DEP -->|"Yes"| SKIP["Skip (created progressively later)"]
-    HAS_DEP -->|"No"| CREATE["createStep(subStep, parentStepId)"]
+    RECURRING -->|"Yes"| MULTI["Create N recurring instances with staggered due dates"]
+    RECURRING -->|"No"| SINGLE["createStep(dependent, dueDate)"]
 
-    CREATE --> NEXT["Continue to next"]
-    SKIP --> LOOP
+    MULTI --> NEXT["Continue to next"]
+    SINGLE --> NEXT
     NEXT --> LOOP
     LOOP -->|"Done"| END["Return"]
 ```

@@ -34,7 +34,6 @@ erDiagram
     PROTOCOL_INSTANCE ||--o{ STEP_INSTANCE : "contains"
     PROTOCOL_INSTANCE ||--o{ DEVIATION : "has"
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
-    STEP_INSTANCE ||--o{ STEP_INSTANCE : "parent of (sub-steps)"
 
     PROTOCOL_DEFINITION {
         uuid id PK
@@ -70,7 +69,6 @@ erDiagram
         varchar completion_status
         uuid matched_event_id
         varchar required_behavior
-        uuid parent_step_id FK
         timestamptz created_at
         timestamptz updated_at
     }
@@ -110,7 +108,6 @@ erDiagram
         varchar action_id
         varchar facility_id
         varchar processing_status
-        uuid matched_step_instance_id
     }
 
     AUDIT_LOG {
@@ -240,7 +237,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Sub-steps reference their parent step via `parent_step_id`. Multi-level nesting is supported — a sub-step can itself contain sub-steps whose children also have `parent_step_id` pointing to it, enabling arbitrary depth hierarchies.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition (including nested actions that are flattened at parse time). Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Nested sub-steps from FHIR `action.action[]` are flattened to peer-level steps connected via `relatedSteps` references — there is no parent-child column.
 
 ### Columns
 
@@ -248,7 +245,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 |--------|-----------|----------|---------|-------------|
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). Must be unique within a PlanDefinition. |
 | `repeat_index` | `INTEGER` | **NOT NULL** | `0` | Zero-based occurrence counter for repeating actions. Non-repeating actions always have index 0. |
 | `state` | `VARCHAR` | **NOT NULL** | — | Current step state. See [StepState](#stepstate). |
 | `due_date` | `TIMESTAMPTZ` | Yes | — | Scheduled due date. Calculated from `relatedAction.offsetDuration`. `NULL` for event-triggered steps. |
@@ -259,7 +256,6 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
 | `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
 | `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
-| `parent_step_id` | `UUID` | Yes | — | Foreign key → `step_instance.id`. Non-null for sub-steps — references the immediate parent step. For multi-level nesting, each level points to its direct parent (not the root). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
 
@@ -269,12 +265,10 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 |------|------|---------|
 | Primary Key | `step_instance_pkey` | `id` |
 | Foreign Key | `step_instance_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
-| Foreign Key | `step_instance_parent_step_id_fkey` | `parent_step_id` → `step_instance(id)` |
 | Check | — | `state IN ('PENDING', 'DUE', 'OVERDUE', 'MISSED', 'COMPLETED', 'SKIPPED')` |
 | Check | — | `completion_status IN ('ON_TIME', 'EARLY', 'LATE')` |
 | Check | — | `required_behavior IN ('must', 'could', 'must-unless-documented')` |
 | B-tree Index | `idx_step_instance_protocol` | `protocol_instance_id` — All steps within a protocol instance. |
-| B-tree Index | `idx_step_instance_parent_step_id` | `parent_step_id` — All sub-steps for a given parent step. |
 | Partial B-tree | `idx_step_instance_state` | `state WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Active (non-terminal) steps. |
 | Partial B-tree | `idx_step_instance_due_date` | `due_date WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Scheduler time-based transitions. |
 
@@ -351,7 +345,7 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. For sub-step triggers, this is the sub-step's own plain ID (e.g., `"anc-visit-1-referral"`); parent relationship is derived from PlanDefinition at runtime. |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. All steps (including those originally nested in `action.action[]`) use their plain action ID — the flat model treats all steps uniformly. |
 
 ### Constraints & Indexes
 
@@ -422,7 +416,6 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 | `action_id` | `VARCHAR` | Yes | — | Matched protocol definition action. `NULL` for zero-match or duplicate events. |
 | `facility_id` | `VARCHAR` | Yes | — | FOSA ID from CloudEvent `facilityid` extension. |
 | `processing_status` | `VARCHAR` | **NOT NULL** | — | Processing outcome. See [ProcessingStatus](#processingstatus). |
-| `matched_step_instance_id` | `UUID` | Yes | — | Step completed as a result of this event. |
 
 ### Constraints & Indexes
 

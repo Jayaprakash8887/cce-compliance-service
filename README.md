@@ -8,7 +8,7 @@
 
 > **Release 1.2.0** — [Release Notes](RELEASE-NOTES.md) | [Changelog](CHANGELOG.md)
 
-A core microservice within the Clinical Compliance Engine (CCE) platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps (including multi-level nested sub-steps), detecting deviations, evaluating intelligence actions, and publishing intelligence triggers for downstream processing.
+A core microservice within the Clinical Compliance Engine (CCE) platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps (including nested sub-steps flattened to peers), detecting deviations, evaluating intelligence actions, and publishing intelligence triggers for downstream processing.
 
 ## Quick Start
 
@@ -51,7 +51,7 @@ Kafka → InboundEventConsumer → ComplianceEngine
                                   ├── Tier 2 Evaluation (ExpressionEvaluationService)
                                   ├── Enrollment (ProtocolInstanceService)
                                   ├── Step Management (StepInstanceService)
-                                  │   ├── Sub-Step Groups (multi-level recursive nesting)
+                                  │   ├── Flat step model (sub-steps flattened to peers)
                                   │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
                                   ├── Deviation Detection (DeviationService)
                                   │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
@@ -62,7 +62,7 @@ Kafka → InboundEventConsumer → ComplianceEngine
 ## Testing
 
 ```bash
-# Unit tests (368 tests)
+# Unit tests (374 tests)
 ./gradlew test
 
 # Integration tests (39 tests)
