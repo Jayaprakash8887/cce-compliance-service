@@ -426,7 +426,7 @@ public class StepInstanceService {
                     instanceMissedDate = instanceOverdueDate.plusDays(targetAction.toleranceDays());
                 }
 
-                StepInstance newStep = createStep(protocolInstance, relatedStep.actionId(),
+                createStep(protocolInstance, relatedStep.actionId(),
                         i, instanceDueDate, instanceOverdueDate, instanceMissedDate,
                         requiredBehavior);
 
