@@ -32,11 +32,11 @@ public class PlanDefinitionParser {
     /**
      * Extract all actions from a PlanDefinition with their metadata.
      */
-    public List<ActionMetadata> extractActions(PlanDefinition planDefinition) {
-        List<ActionMetadata> result = new ArrayList<>();
+    public List<StepMetadata> extractActions(PlanDefinition planDefinition) {
+        List<StepMetadata> result = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
             validateActionType(action);
-            result.add(buildActionMetadata(action));
+            result.add(buildStepMetadata(action));
         }
         return result;
     }
@@ -159,9 +159,9 @@ public class PlanDefinitionParser {
         }
     }
 
-    private ActionMetadata buildActionMetadata(PlanDefinition.PlanDefinitionActionComponent action) {
+    private StepMetadata buildStepMetadata(PlanDefinition.PlanDefinitionActionComponent action) {
         List<TriggerInfo> triggers = extractTriggerInfos(action);
-        List<RelatedActionInfo> relatedActions = extractRelatedActions(action);
+        List<RelatedStepInfo> relatedSteps = extractRelatedSteps(action);
         TimingInfo timingInfo = extractTimingInfo(action);
         Integer toleranceDays = extractToleranceDays(action);
 
@@ -172,14 +172,14 @@ public class PlanDefinitionParser {
 
         // Classify nested actions by type
         List<IntelligenceActionInfo> intelligenceActions = new ArrayList<>();
-        List<ActionMetadata> subSteps = new ArrayList<>();
+        List<StepMetadata> subSteps = new ArrayList<>();
         classifyNestedActions(action, intelligenceActions, subSteps);
 
-        return new ActionMetadata(
+        return new StepMetadata(
                 action.getId(),
                 action.getTitle(),
                 triggers,
-                relatedActions,
+                relatedSteps,
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
@@ -195,10 +195,10 @@ public class PlanDefinitionParser {
      */
     private void classifyNestedActions(PlanDefinition.PlanDefinitionActionComponent parentAction,
                                        List<IntelligenceActionInfo> intelligenceActions,
-                                       List<ActionMetadata> subSteps) {
+                                       List<StepMetadata> subSteps) {
         for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
             if (isStepAction(nestedAction)) {
-                subSteps.add(buildActionMetadata(nestedAction));
+                subSteps.add(buildStepMetadata(nestedAction));
             } else if (isIntelligenceAction(nestedAction)) {
                 IntelligenceActionInfo intelligenceAction = buildIntelligenceActionInfo(nestedAction);
                 if (intelligenceAction != null) {
@@ -278,18 +278,18 @@ public class PlanDefinitionParser {
         return triggers;
     }
 
-    private List<RelatedActionInfo> extractRelatedActions(PlanDefinition.PlanDefinitionActionComponent action) {
-        List<RelatedActionInfo> relatedActions = new ArrayList<>();
+    private List<RelatedStepInfo> extractRelatedSteps(PlanDefinition.PlanDefinitionActionComponent action) {
+        List<RelatedStepInfo> relatedSteps = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionRelatedActionComponent ra : action.getRelatedAction()) {
             Duration offset = ra.getOffsetDuration();
-            relatedActions.add(new RelatedActionInfo(
+            relatedSteps.add(new RelatedStepInfo(
                     ra.getActionId(),
                     ra.getRelationship() != null ? ra.getRelationship().toCode() : null,
                     offset != null ? offset.getValue() : null,
                     offset != null && offset.getUnit() != null ? offset.getUnit() : null
             ));
         }
-        return relatedActions;
+        return relatedSteps;
     }
 
     private TimingInfo extractTimingInfo(PlanDefinition.PlanDefinitionActionComponent action) {
@@ -407,16 +407,16 @@ public class PlanDefinitionParser {
 
     // ── Inner record types for structured extraction ──
 
-    public record ActionMetadata(
+    public record StepMetadata(
             String id,
             String title,
             List<TriggerInfo> triggers,
-            List<RelatedActionInfo> relatedActions,
+            List<RelatedStepInfo> relatedSteps,
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
             List<IntelligenceActionInfo> intelligenceActions,
-            List<ActionMetadata> subSteps
+            List<StepMetadata> subSteps
     ) {
         /** Returns true if this action has nested sub-steps. */
         public boolean hasSubSteps() {
@@ -449,7 +449,7 @@ public class PlanDefinitionParser {
             String expression
     ) {}
 
-    public record RelatedActionInfo(
+    public record RelatedStepInfo(
             String actionId,
             String relationship,
             java.math.BigDecimal offsetValue,

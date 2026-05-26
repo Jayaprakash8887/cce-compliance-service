@@ -174,10 +174,10 @@ class ComplianceEngineTest {
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                    new PlanDefinitionParser.ActionMetadata("action-a", "Action A",
+                    new PlanDefinitionParser.StepMetadata("action-a", "Action A",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
                             List.of(), null, null, null, List.of(), List.of()),
-                    new PlanDefinitionParser.ActionMetadata("action-b", "Action B",
+                    new PlanDefinitionParser.StepMetadata("action-b", "Action B",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
                             List.of(), null, null, null, List.of(), List.of())));
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef1), any()))
@@ -414,7 +414,7 @@ class ComplianceEngineTest {
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                    new PlanDefinitionParser.ActionMetadata("first-step", "First Step",
+                    new PlanDefinitionParser.StepMetadata("first-step", "First Step",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
                             List.of(), null, 5, "must", List.of(), List.of())));
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef), any()))
@@ -528,7 +528,7 @@ class ComplianceEngineTest {
         var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
         when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                new PlanDefinitionParser.ActionMetadata(actionId, "Test Action",
+                new PlanDefinitionParser.StepMetadata(actionId, "Test Action",
                         List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
                         List.of(), null, null, null, List.of(), List.of())));
     }
@@ -541,7 +541,7 @@ class ComplianceEngineTest {
         var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
         when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                new PlanDefinitionParser.ActionMetadata(actionId, "Conditional Action",
+                new PlanDefinitionParser.StepMetadata(actionId, "Conditional Action",
                         List.of(new PlanDefinitionParser.TriggerInfo(List.of(),
                                 new PlanDefinitionParser.ConditionInfo(language, expression))),
                         List.of(), null, null, null, List.of(), List.of())));
@@ -555,7 +555,7 @@ class ComplianceEngineTest {
         var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
         when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                new PlanDefinitionParser.ActionMetadata(actionId, "Test Action",
+                new PlanDefinitionParser.StepMetadata(actionId, "Test Action",
                         List.of(), List.of(), null, toleranceDays, requiredBehavior, List.of(), List.of())));
     }
 }

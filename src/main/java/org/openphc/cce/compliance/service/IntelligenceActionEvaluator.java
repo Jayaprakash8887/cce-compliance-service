@@ -161,12 +161,12 @@ public class IntelligenceActionEvaluator {
 
     /**
      * Find intelligence actions for a step. Handles both:
-     * - Top-level steps (parentStepId == null) → returns ActionMetadata.intelligenceActions()
+     * - Top-level steps (parentStepId == null) → returns StepMetadata.intelligenceActions()
      * - Sub-steps (parentStepId != null) → finds the parent, then the matching sub-step's intelligenceActions()
      */
     private List<PlanDefinitionParser.IntelligenceActionInfo> findIntelligenceActions(
             StepInstance step, PlanDefinition planDefinition) {
-        List<PlanDefinitionParser.ActionMetadata> actions = planDefinitionParser.extractActions(planDefinition);
+        List<PlanDefinitionParser.StepMetadata> actions = planDefinitionParser.extractActions(planDefinition);
         String actionId = step.getActionId();
 
         // Sub-step: step has a parentStepId → derive parent's actionId and search recursively
@@ -176,7 +176,7 @@ public class IntelligenceActionEvaluator {
                     .orElse(null);
             if (parentActionId != null) {
                 // Search top-level actions for the parent, then find this sub-step within it
-                for (PlanDefinitionParser.ActionMetadata protocolStep : actions) {
+                for (PlanDefinitionParser.StepMetadata protocolStep : actions) {
                     List<PlanDefinitionParser.IntelligenceActionInfo> result =
                             findIntelligenceActionsInSubSteps(actionId, parentActionId, protocolStep);
                     if (result != null) {
@@ -190,7 +190,7 @@ public class IntelligenceActionEvaluator {
         }
 
         // Top-level action lookup
-        for (PlanDefinitionParser.ActionMetadata protocolStep : actions) {
+        for (PlanDefinitionParser.StepMetadata protocolStep : actions) {
             if (actionId.equals(protocolStep.id())) {
                 return protocolStep.intelligenceActions();
             }
@@ -204,10 +204,10 @@ public class IntelligenceActionEvaluator {
      * intelligence actions for a given sub-step identified by actionId and parentActionId.
      */
     private List<PlanDefinitionParser.IntelligenceActionInfo> findIntelligenceActionsInSubSteps(
-            String targetActionId, String targetParentId, PlanDefinitionParser.ActionMetadata topAction) {
+            String targetActionId, String targetParentId, PlanDefinitionParser.StepMetadata topAction) {
         // If top-level is the parent, search its sub-steps
         if (targetParentId.equals(topAction.id())) {
-            for (PlanDefinitionParser.ActionMetadata subStep : topAction.subSteps()) {
+            for (PlanDefinitionParser.StepMetadata subStep : topAction.subSteps()) {
                 if (targetActionId.equals(subStep.id())) {
                     return subStep.intelligenceActions();
                 }
@@ -221,13 +221,13 @@ public class IntelligenceActionEvaluator {
 
     private List<PlanDefinitionParser.IntelligenceActionInfo> findIntelligenceActionsRecursive(
             String targetActionId, String targetParentId,
-            List<PlanDefinitionParser.ActionMetadata> subSteps) {
+            List<PlanDefinitionParser.StepMetadata> subSteps) {
         if (subSteps == null) return null;
-        for (PlanDefinitionParser.ActionMetadata subStep : subSteps) {
+        for (PlanDefinitionParser.StepMetadata subStep : subSteps) {
             // Is this sub-step the parent we're looking for?
             if (targetParentId.equals(subStep.id())) {
                 if (subStep.subSteps() != null) {
-                    for (PlanDefinitionParser.ActionMetadata nested : subStep.subSteps()) {
+                    for (PlanDefinitionParser.StepMetadata nested : subStep.subSteps()) {
                         if (targetActionId.equals(nested.id())) {
                             return nested.intelligenceActions();
                         }

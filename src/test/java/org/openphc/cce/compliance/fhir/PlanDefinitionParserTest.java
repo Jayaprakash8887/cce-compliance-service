@@ -59,25 +59,25 @@ class PlanDefinitionParserTest {
     @Test
     void extractActions_returnsAllActionsWithMetadata() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         assertEquals(6, actions.size());
 
         // Verify first action (initial-enrollment)
-        PlanDefinitionParser.ActionMetadata enrollment = actions.get(0);
+        PlanDefinitionParser.StepMetadata enrollment = actions.get(0);
         assertEquals("initial-enrollment", enrollment.id());
         assertEquals("Initial Enrollment on ANC Encounter", enrollment.title());
         assertEquals(1, enrollment.triggers().size());
-        assertEquals(1, enrollment.relatedActions().size());
+        assertEquals(1, enrollment.relatedSteps().size());
     }
 
     @Test
     void extractActions_extractsConditionCorrectly() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // initial-enrollment has a JSONLogic condition
-        PlanDefinitionParser.ActionMetadata enrollment = actions.get(0);
+        PlanDefinitionParser.StepMetadata enrollment = actions.get(0);
         PlanDefinitionParser.ConditionInfo condition = enrollment.triggers().get(0).condition();
         assertNotNull(condition);
         assertEquals("text/jsonlogic", condition.language());
@@ -87,21 +87,21 @@ class PlanDefinitionParserTest {
     @Test
     void extractActions_extractsRelatedActionsCorrectly() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // initial-enrollment → blood-pressure-check after 7 days
-        PlanDefinitionParser.ActionMetadata enrollment = actions.get(0);
-        assertEquals(1, enrollment.relatedActions().size());
+        PlanDefinitionParser.StepMetadata enrollment = actions.get(0);
+        assertEquals(1, enrollment.relatedSteps().size());
 
-        PlanDefinitionParser.RelatedActionInfo ra = enrollment.relatedActions().get(0);
+        PlanDefinitionParser.RelatedStepInfo ra = enrollment.relatedSteps().get(0);
         assertEquals("blood-pressure-check", ra.actionId());
         assertEquals("after-end", ra.relationship());
         assertEquals(0, new BigDecimal("7").compareTo(ra.offsetValue()));
         assertEquals("d", ra.offsetUnit());
 
         // blood-pressure-check → lab-work after 14 days
-        PlanDefinitionParser.ActionMetadata bp = actions.get(1);
-        PlanDefinitionParser.RelatedActionInfo bpRa = bp.relatedActions().get(0);
+        PlanDefinitionParser.StepMetadata bp = actions.get(1);
+        PlanDefinitionParser.RelatedStepInfo bpRa = bp.relatedSteps().get(0);
         assertEquals("lab-work", bpRa.actionId());
         assertEquals(0, new BigDecimal("14").compareTo(bpRa.offsetValue()));
     }
@@ -109,7 +109,7 @@ class PlanDefinitionParserTest {
     @Test
     void extractActions_extractsTimingCorrectly() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // initial-enrollment timing
         PlanDefinitionParser.TimingInfo enrollTiming = actions.get(0).timing();
@@ -264,10 +264,10 @@ class PlanDefinitionParserTest {
     @Test
     void extractActions_extractsFhirPathCondition() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // encounter-condition-only has FHIRPath condition
-        PlanDefinitionParser.ActionMetadata ecAction = actions.get(4);
+        PlanDefinitionParser.StepMetadata ecAction = actions.get(4);
         assertEquals("encounter-condition-only", ecAction.id());
         PlanDefinitionParser.ConditionInfo cond = ecAction.triggers().get(0).condition();
         assertNotNull(cond);
@@ -278,21 +278,21 @@ class PlanDefinitionParserTest {
     @Test
     void extractActions_actionWithNoRelatedActions() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // lab-work has no relatedAction
-        PlanDefinitionParser.ActionMetadata labWork = actions.get(2);
+        PlanDefinitionParser.StepMetadata labWork = actions.get(2);
         assertEquals("lab-work", labWork.id());
-        assertTrue(labWork.relatedActions().isEmpty());
+        assertTrue(labWork.relatedSteps().isEmpty());
     }
 
     @Test
     void extractActions_actionWithNoTiming() {
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // lab-work has no timing
-        PlanDefinitionParser.ActionMetadata labWork = actions.get(2);
+        PlanDefinitionParser.StepMetadata labWork = actions.get(2);
         assertNull(labWork.timing());
     }
 
@@ -366,10 +366,10 @@ class PlanDefinitionParserTest {
     void extractActions_rmnch_ancVisitsMandatory() throws IOException {
         String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
         PlanDefinition pd = parser.parse(rmnchJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         for (String ancId : List.of("anc-visit-1", "anc-visit-2", "anc-visit-3")) {
-            PlanDefinitionParser.ActionMetadata anc = actions.stream()
+            PlanDefinitionParser.StepMetadata anc = actions.stream()
                     .filter(a -> ancId.equals(a.id()))
                     .findFirst().orElseThrow();
             assertEquals("must", anc.requiredBehavior(), ancId + " should be mandatory");
@@ -380,14 +380,14 @@ class PlanDefinitionParserTest {
     void extractActions_rmnch_pregnancyProfileTriggersAncChain() throws IOException {
         String rmnchJson = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
         PlanDefinition pd = parser.parse(rmnchJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
-        PlanDefinitionParser.ActionMetadata pwProfile = actions.stream()
+        PlanDefinitionParser.StepMetadata pwProfile = actions.stream()
                 .filter(a -> "pregnancy-profile".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals(1, pwProfile.relatedActions().size());
-        assertEquals("anc-visit-1", pwProfile.relatedActions().get(0).actionId());
-        assertEquals("after-end", pwProfile.relatedActions().get(0).relationship());
+        assertEquals(1, pwProfile.relatedSteps().size());
+        assertEquals("anc-visit-1", pwProfile.relatedSteps().get(0).actionId());
+        assertEquals("after-end", pwProfile.relatedSteps().get(0).relationship());
     }
 
     // ── Intelligence Actions Tests ──
@@ -396,10 +396,10 @@ class PlanDefinitionParserTest {
     void extractActions_extractsIntelligenceActions() throws IOException {
         String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
         PlanDefinition pd = parser.parse(actionsJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // blood-pressure-check has 2 intelligence actions
-        PlanDefinitionParser.ActionMetadata bpAction = actions.get(0);
+        PlanDefinitionParser.StepMetadata bpAction = actions.get(0);
         assertEquals("blood-pressure-check", bpAction.id());
         assertEquals(2, bpAction.intelligenceActions().size());
 
@@ -423,10 +423,10 @@ class PlanDefinitionParserTest {
     void extractActions_actionWithNoIntelligenceActions_emptyList() throws IOException {
         String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
         PlanDefinition pd = parser.parse(actionsJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // no-sub-actions has no intelligence actions → empty list
-        PlanDefinitionParser.ActionMetadata noSubs = actions.get(1);
+        PlanDefinitionParser.StepMetadata noSubs = actions.get(1);
         assertEquals("no-sub-actions", noSubs.id());
         assertTrue(noSubs.intelligenceActions().isEmpty());
     }
@@ -435,11 +435,11 @@ class PlanDefinitionParserTest {
     void extractActions_intelligenceActionMissingCondition_skipped() throws IOException {
         String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
         PlanDefinition pd = parser.parse(actionsJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // partial-actions has 3 intelligence actions: missing-condition, missing-definition, no-extensions-action
         // Only no-extensions-action passes both condition + definitionCanonical checks
-        PlanDefinitionParser.ActionMetadata partial = actions.get(2);
+        PlanDefinitionParser.StepMetadata partial = actions.get(2);
         assertEquals("partial-actions", partial.id());
         assertEquals(1, partial.intelligenceActions().size());
         assertEquals("no-extensions-action", partial.intelligenceActions().get(0).actionId());
@@ -449,10 +449,10 @@ class PlanDefinitionParserTest {
     void extractActions_intelligenceActionMissingDefinitionCanonical_skipped() throws IOException {
         String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
         PlanDefinition pd = parser.parse(actionsJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // Verify missing-definition intelligence action was skipped
-        PlanDefinitionParser.ActionMetadata partial = actions.get(2);
+        PlanDefinitionParser.StepMetadata partial = actions.get(2);
         boolean hasMissingDef = partial.intelligenceActions().stream()
                 .anyMatch(a -> "missing-definition".equals(a.actionId()));
         assertFalse(hasMissingDef);
@@ -462,9 +462,9 @@ class PlanDefinitionParserTest {
     void extractActions_intelligenceActionWithExtensions_extractsSeverityAndDestination() throws IOException {
         String actionsJson = loadFixture("/fhir/plan-definition-with-intelligence-actions.json");
         PlanDefinition pd = parser.parse(actionsJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
-        PlanDefinitionParser.ActionMetadata partial = actions.get(2);
+        PlanDefinitionParser.StepMetadata partial = actions.get(2);
         PlanDefinitionParser.IntelligenceActionInfo action = partial.intelligenceActions().get(0);
         assertEquals("no-extensions-action", action.actionId());
         assertEquals("http://openphc.org/ActivityDefinition/no-ext-action|1.0.0", action.definitionCanonical());
@@ -476,9 +476,9 @@ class PlanDefinitionParserTest {
     void extractActions_existingFixture_hasEmptyIntelligenceActions() {
         // Existing fixture has no intelligence actions → all actions should have empty intelligence actions
         PlanDefinition pd = parser.parse(fixtureJson);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
-        for (PlanDefinitionParser.ActionMetadata action : actions) {
+        for (PlanDefinitionParser.StepMetadata action : actions) {
             assertTrue(action.intelligenceActions().isEmpty(),
                     "Action " + action.id() + " should have empty intelligence actions");
         }
@@ -588,13 +588,13 @@ class PlanDefinitionParserTest {
     void extractActions_subStepsPlanDefinition_parsesStepsWithSubSteps() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // Should have 8 top-level actions (no group wrappers)
         assertEquals(8, actions.size());
 
         // anc-visit-1 is a step with triggers AND sub-steps
-        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+        PlanDefinitionParser.StepMetadata visit1 = actions.stream()
                 .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
         assertTrue(visit1.hasSubSteps());
@@ -611,14 +611,14 @@ class PlanDefinitionParserTest {
     void extractActions_subStepsPlanDefinition_subStepHasIntelligenceActions() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
-        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+        PlanDefinitionParser.StepMetadata visit1 = actions.stream()
                 .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
 
         // anc-visit-1-referral sub-step has 1 intelligence action (escalation)
-        PlanDefinitionParser.ActionMetadata referralSubStep = visit1.subSteps().stream()
+        PlanDefinitionParser.StepMetadata referralSubStep = visit1.subSteps().stream()
                 .filter(s -> "anc-visit-1-referral".equals(s.id()))
                 .findFirst().orElseThrow();
         assertEquals(1, referralSubStep.intelligenceActions().size());
@@ -626,7 +626,7 @@ class PlanDefinitionParserTest {
         assertEquals("CRITICAL", referralSubStep.intelligenceActions().get(0).severity());
 
         // anc-visit-1-referral-ack sub-step has 1 intelligence action (overdue notification)
-        PlanDefinitionParser.ActionMetadata ackSubStep = visit1.subSteps().stream()
+        PlanDefinitionParser.StepMetadata ackSubStep = visit1.subSteps().stream()
                 .filter(s -> "anc-visit-1-referral-ack".equals(s.id()))
                 .findFirst().orElseThrow();
         assertEquals(1, ackSubStep.intelligenceActions().size());
@@ -638,17 +638,17 @@ class PlanDefinitionParserTest {
     void extractActions_subStepsPlanDefinition_subStepRelatedActions() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
-        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+        PlanDefinitionParser.StepMetadata visit1 = actions.stream()
                 .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
 
         // anc-visit-1-referral → anc-visit-1-referral-ack (progressive instantiation)
-        PlanDefinitionParser.ActionMetadata referral = visit1.subSteps().get(0);
-        assertEquals(1, referral.relatedActions().size());
-        assertEquals("anc-visit-1-referral-ack", referral.relatedActions().get(0).actionId());
-        assertEquals("after-end", referral.relatedActions().get(0).relationship());
+        PlanDefinitionParser.StepMetadata referral = visit1.subSteps().get(0);
+        assertEquals(1, referral.relatedSteps().size());
+        assertEquals("anc-visit-1-referral-ack", referral.relatedSteps().get(0).actionId());
+        assertEquals("after-end", referral.relatedSteps().get(0).relationship());
     }
 
     @Test
@@ -690,10 +690,10 @@ class PlanDefinitionParserTest {
     void extractActions_subStepsPlanDefinition_stepHasTriggersAndSubSteps() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // anc-visit-1 has BOTH triggers and sub-steps (step-inside-step)
-        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+        PlanDefinitionParser.StepMetadata visit1 = actions.stream()
                 .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
         assertFalse(visit1.triggers().isEmpty(), "Step should have triggers");
@@ -708,21 +708,21 @@ class PlanDefinitionParserTest {
     void extractActions_subStepsPlanDefinition_progressiveChainBetweenSteps() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
-        List<PlanDefinitionParser.ActionMetadata> actions = parser.extractActions(pd);
+        List<PlanDefinitionParser.StepMetadata> actions = parser.extractActions(pd);
 
         // anc-visit-1 → anc-visit-2 (30 days)
-        PlanDefinitionParser.ActionMetadata visit1 = actions.stream()
+        PlanDefinitionParser.StepMetadata visit1 = actions.stream()
                 .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals(1, visit1.relatedActions().size());
-        assertEquals("anc-visit-2", visit1.relatedActions().get(0).actionId());
-        assertEquals(BigDecimal.valueOf(30), visit1.relatedActions().get(0).offsetValue());
+        assertEquals(1, visit1.relatedSteps().size());
+        assertEquals("anc-visit-2", visit1.relatedSteps().get(0).actionId());
+        assertEquals(BigDecimal.valueOf(30), visit1.relatedSteps().get(0).offsetValue());
 
         // anc-visit-2 → anc-visit-3 (30 days)
-        PlanDefinitionParser.ActionMetadata visit2 = actions.stream()
+        PlanDefinitionParser.StepMetadata visit2 = actions.stream()
                 .filter(a -> "anc-visit-2".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals(1, visit2.relatedActions().size());
-        assertEquals("anc-visit-3", visit2.relatedActions().get(0).actionId());
+        assertEquals(1, visit2.relatedSteps().size());
+        assertEquals("anc-visit-3", visit2.relatedSteps().get(0).actionId());
     }
 }

@@ -29,9 +29,9 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 - Duplicate creation guard in progressive sub-step instantiation
 
 ### PlanDefinition Parser Enhancements
-- `classifyNestedActions()` — recursively routes nested actions to either `ActionMetadata` (sub-steps) or `IntelligenceActionInfo` at every nesting level
+- `classifyNestedActions()` — recursively routes nested actions to either `StepMetadata` (sub-steps) or `IntelligenceActionInfo` at every nesting level
 - Classification by explicit `type.coding[0]` (system + code): `"step"` requires system `http://openphc.org/fhir/CodeSystem/action-type`, `"fire-event"` requires system `http://terminology.hl7.org/CodeSystem/action-type` (enforced by `PlanDefinitionActionType` enum with `getSystem()`)
-- `ActionMetadata` record (self-referencing): id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps — reused for both top-level actions and nested sub-steps
+- `StepMetadata` record (self-referencing): id, title, triggers, relatedSteps, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps — reused for both top-level actions and nested sub-steps
 - `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for plain sub-step ID indexing
 - `validateTriggers()` uses recursive `validateActionTriggers()` for nested validation
 

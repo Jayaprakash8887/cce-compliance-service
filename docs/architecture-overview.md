@@ -637,7 +637,7 @@ All execution and evaluation context is stored in a single row — no FK constra
 
 A **step with sub-steps** is a `PlanDefinition.action` with type coding system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"` that contains nested `action.action[]` entries of type `"step"` (sub-steps) and/or `"fire-event"` (intelligence actions). Steps can have **both** their own triggers **and** nested sub-steps. Sub-steps are created after the parent step completes — they represent follow-up work triggered by the parent's completion.
 
-**Multi-level nesting:** Sub-steps can themselves contain nested sub-steps. The data model is self-referencing (`ActionMetadata` contains `List<ActionMetadata> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation) are recursive.
+**Multi-level nesting:** Sub-steps can themselves contain nested sub-steps. The data model is self-referencing (`StepMetadata` contains `List<StepMetadata> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation) are recursive.
 
 #### Classification Rules
 

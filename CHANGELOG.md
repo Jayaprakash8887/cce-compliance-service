@@ -21,9 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`
 - `StepInstanceService.findStepByProtocolAndActionId()` — parent step lookup (any state, prefers COMPLETED)
 - `ComplianceEngine.processSubStepMatch()` — handles sub-step routing (derives parent from PD tree, finds completed parent)
-- `ComplianceEngine.resolveSubStepInfo()` — recursive lookup of `ActionMetadata` at any depth in the action tree
+- `ComplianceEngine.resolveSubStepInfo()` — recursive lookup of `StepMetadata` at any depth in the action tree
 - `ComplianceEngine.findAncestryPath()` — derives parent hierarchy from PlanDefinition tree for sub-step detection
-- `ComplianceEngine.findSubStepInTree()` — locates ActionMetadata by plain ID anywhere in the action tree
+- `ComplianceEngine.findSubStepInTree()` — locates StepMetadata by plain ID anywhere in the action tree
 - `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal via parentStepId
 - Duplicate creation guard in progressive sub-step instantiation
 - Flyway V5 migration: `parent_step_id` (UUID FK → step_instance) + index on `step_instance`
@@ -34,8 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Parser & Metadata
-- `ActionMetadata` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing) — with `hasSubSteps()` method
-- `buildActionMetadata()` reused for both top-level actions and nested sub-steps via `classifyNestedActions()`
+- `StepMetadata` record: id, title, triggers, relatedSteps, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing) — with `hasSubSteps()` method
+- `buildStepMetadata()` reused for both top-level actions and nested sub-steps via `classifyNestedActions()`
 - `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for sub-step trigger indexing (plain IDs)
 - `validateTriggers()` uses recursive `validateActionTriggers()` to validate nested sub-steps at all levels
 - Only two valid action types: `"step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) and `"fire-event"` (system: `http://terminology.hl7.org/CodeSystem/action-type`) — parser validates both system URI and code via `hasTypeCoding()`; unrecognized system+code combinations rejected at parse time
@@ -96,7 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Performance Optimizations
 - `IntelligenceActionEvaluator` — bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects, avoiding FHIR re-parsing on every deviation/completion evaluation
-- `PlanDefinitionParser.ActionMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
+- `PlanDefinitionParser.StepMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
 
 ### Testing
 - 370 unit tests (was 351 in v1.1.0) — 19 new tests for sub-step parsing and multi-level nesting
