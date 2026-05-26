@@ -104,13 +104,13 @@ public class StepInstanceService {
      * Sub-steps are created in PENDING state with a reference to the parent step.
      */
     public List<StepInstance> createSubSteps(StepInstance parentStep,
-                                             List<PlanDefinitionParser.SubStepActionInfo> subStepInfos) {
+                                             List<PlanDefinitionParser.ActionMetadata> subStepInfos) {
         List<StepInstance> subSteps = new ArrayList<>();
         OffsetDateTime parentDueDate = parentStep.getDueDate() != null
                 ? parentStep.getDueDate()
                 : OffsetDateTime.now(ZoneOffset.UTC);
 
-        for (PlanDefinitionParser.SubStepActionInfo subStepInfo : subStepInfos) {
+        for (PlanDefinitionParser.ActionMetadata subStepInfo : subStepInfos) {
             // Only create entry-point sub-steps (those that don't depend on a sibling).
             // Dependent sub-steps are created progressively when their prerequisite completes.
             boolean dependsOnSibling = subStepInfo.relatedActions().stream()
@@ -518,13 +518,13 @@ public class StepInstanceService {
         String parentActionId = parentStep.getActionId();
 
         // Find the sub-steps list for the parent action (may be top-level or nested)
-        List<PlanDefinitionParser.SubStepActionInfo> parentSubSteps = resolveSubSteps(parentActionId, actions);
+        List<PlanDefinitionParser.ActionMetadata> parentSubSteps = resolveSubSteps(parentActionId, actions);
         if (parentSubSteps == null || parentSubSteps.isEmpty()) {
             return;
         }
 
         // Find the completed sub-step's metadata
-        PlanDefinitionParser.SubStepActionInfo completedSubStepInfo = parentSubSteps.stream()
+        PlanDefinitionParser.ActionMetadata completedSubStepInfo = parentSubSteps.stream()
                 .filter(s -> completedSubStep.getActionId().equals(s.id()))
                 .findFirst()
                 .orElse(null);
@@ -556,7 +556,7 @@ public class StepInstanceService {
             OffsetDateTime dueDate = calculateDueDate(baseTime, relatedAction);
 
             // Find target sub-step info for tolerance
-            PlanDefinitionParser.SubStepActionInfo targetSubStep = parentSubSteps.stream()
+            PlanDefinitionParser.ActionMetadata targetSubStep = parentSubSteps.stream()
                     .filter(s -> relatedAction.actionId().equals(s.id()))
                     .findFirst()
                     .orElse(null);
@@ -600,64 +600,23 @@ public class StepInstanceService {
      */
     private void createEntryPointSubStepsForAction(StepInstance completedStep, String actionId,
                                                     List<PlanDefinitionParser.ActionMetadata> actions) {
-        // Try top-level actions first
-        for (PlanDefinitionParser.ActionMetadata action : actions) {
-            if (actionId.equals(action.id())) {
-                if (action.hasSubSteps()) {
-                    createSubSteps(completedStep, action.subSteps());
-                }
-                return;
-            }
+        List<PlanDefinitionParser.ActionMetadata> subSteps = resolveSubSteps(actionId, actions);
+        if (subSteps != null && !subSteps.isEmpty()) {
+            createSubSteps(completedStep, subSteps);
         }
-        // Search recursively in sub-steps
-        List<PlanDefinitionParser.SubStepActionInfo> subStepInfo = resolveSubStepById(actionId, actions);
-        if (subStepInfo != null && !subStepInfo.isEmpty()) {
-            createSubSteps(completedStep, subStepInfo);
-        }
-    }
-
-    /**
-     * Resolve the sub-steps of a given action by its ID, searching recursively.
-     */
-    private List<PlanDefinitionParser.SubStepActionInfo> resolveSubStepById(
-            String actionId, List<PlanDefinitionParser.ActionMetadata> actions) {
-        for (PlanDefinitionParser.ActionMetadata action : actions) {
-            List<PlanDefinitionParser.SubStepActionInfo> result =
-                    findSubStepsOfAction(actionId, action.subSteps());
-            if (result != null) {
-                return result;
-            }
-        }
-        return null;
-    }
-
-    private List<PlanDefinitionParser.SubStepActionInfo> findSubStepsOfAction(
-            String actionId, List<PlanDefinitionParser.SubStepActionInfo> subSteps) {
-        if (subSteps == null) return null;
-        for (PlanDefinitionParser.SubStepActionInfo subStep : subSteps) {
-            if (actionId.equals(subStep.id())) {
-                return subStep.subSteps();
-            }
-            List<PlanDefinitionParser.SubStepActionInfo> result =
-                    findSubStepsOfAction(actionId, subStep.subSteps());
-            if (result != null) {
-                return result;
-            }
-        }
-        return null;
     }
 
     /**
      * Resolve the sub-steps list for a given action ID by searching top-level
      * actions and recursively through nested sub-steps.
      */
-    private List<PlanDefinitionParser.SubStepActionInfo> resolveSubSteps(
+    private List<PlanDefinitionParser.ActionMetadata> resolveSubSteps(
             String actionId, List<PlanDefinitionParser.ActionMetadata> actions) {
         for (PlanDefinitionParser.ActionMetadata action : actions) {
             if (actionId.equals(action.id())) {
                 return action.subSteps();
             }
-            List<PlanDefinitionParser.SubStepActionInfo> result =
+            List<PlanDefinitionParser.ActionMetadata> result =
                     resolveSubStepsRecursive(actionId, action.subSteps());
             if (result != null) {
                 return result;
@@ -666,14 +625,14 @@ public class StepInstanceService {
         return null;
     }
 
-    private List<PlanDefinitionParser.SubStepActionInfo> resolveSubStepsRecursive(
-            String actionId, List<PlanDefinitionParser.SubStepActionInfo> subSteps) {
+    private List<PlanDefinitionParser.ActionMetadata> resolveSubStepsRecursive(
+            String actionId, List<PlanDefinitionParser.ActionMetadata> subSteps) {
         if (subSteps == null) return null;
-        for (PlanDefinitionParser.SubStepActionInfo subStep : subSteps) {
+        for (PlanDefinitionParser.ActionMetadata subStep : subSteps) {
             if (actionId.equals(subStep.id())) {
                 return subStep.subSteps();
             }
-            List<PlanDefinitionParser.SubStepActionInfo> result =
+            List<PlanDefinitionParser.ActionMetadata> result =
                     resolveSubStepsRecursive(actionId, subStep.subSteps());
             if (result != null) {
                 return result;

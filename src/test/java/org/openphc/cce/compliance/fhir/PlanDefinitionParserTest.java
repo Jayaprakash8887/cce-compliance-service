@@ -618,7 +618,7 @@ class PlanDefinitionParserTest {
                 .findFirst().orElseThrow();
 
         // anc-visit-1-referral sub-step has 1 intelligence action (escalation)
-        PlanDefinitionParser.SubStepActionInfo referralSubStep = visit1.subSteps().stream()
+        PlanDefinitionParser.ActionMetadata referralSubStep = visit1.subSteps().stream()
                 .filter(s -> "anc-visit-1-referral".equals(s.id()))
                 .findFirst().orElseThrow();
         assertEquals(1, referralSubStep.intelligenceActions().size());
@@ -626,7 +626,7 @@ class PlanDefinitionParserTest {
         assertEquals("CRITICAL", referralSubStep.intelligenceActions().get(0).severity());
 
         // anc-visit-1-referral-ack sub-step has 1 intelligence action (overdue notification)
-        PlanDefinitionParser.SubStepActionInfo ackSubStep = visit1.subSteps().stream()
+        PlanDefinitionParser.ActionMetadata ackSubStep = visit1.subSteps().stream()
                 .filter(s -> "anc-visit-1-referral-ack".equals(s.id()))
                 .findFirst().orElseThrow();
         assertEquals(1, ackSubStep.intelligenceActions().size());
@@ -645,7 +645,7 @@ class PlanDefinitionParserTest {
                 .findFirst().orElseThrow();
 
         // anc-visit-1-referral → anc-visit-1-referral-ack (progressive instantiation)
-        PlanDefinitionParser.SubStepActionInfo referral = visit1.subSteps().get(0);
+        PlanDefinitionParser.ActionMetadata referral = visit1.subSteps().get(0);
         assertEquals(1, referral.relatedActions().size());
         assertEquals("anc-visit-1-referral-ack", referral.relatedActions().get(0).actionId());
         assertEquals("after-end", referral.relatedActions().get(0).relationship());
@@ -658,19 +658,24 @@ class PlanDefinitionParserTest {
         UUID protocolDefId = UUID.randomUUID();
         List<TriggerIndex> entries = parser.buildTriggerIndexEntries(pd, protocolDefId);
 
-        // Sub-step triggers should use composite actionId: "parentStepId/subStepId"
-        boolean hasReferralComposite = entries.stream()
-                .anyMatch(e -> "anc-visit-1/anc-visit-1-referral".equals(e.getId().getActionId()));
-        assertTrue(hasReferralComposite, "Should have composite trigger index for anc-visit-1-referral");
+        // Sub-step triggers should use plain actionId (no composite path)
+        boolean hasReferral = entries.stream()
+                .anyMatch(e -> "anc-visit-1-referral".equals(e.getId().getActionId()));
+        assertTrue(hasReferral, "Should have trigger index for anc-visit-1-referral");
 
-        boolean hasAckComposite = entries.stream()
-                .anyMatch(e -> "anc-visit-1/anc-visit-1-referral-ack".equals(e.getId().getActionId()));
-        assertTrue(hasAckComposite, "Should have composite trigger index for anc-visit-1-referral-ack");
+        boolean hasAck = entries.stream()
+                .anyMatch(e -> "anc-visit-1-referral-ack".equals(e.getId().getActionId()));
+        assertTrue(hasAck, "Should have trigger index for anc-visit-1-referral-ack");
 
-        // Parent step itself should have a direct (non-composite) trigger index
+        // Parent step itself should also have a trigger index
         boolean hasVisit1Direct = entries.stream()
                 .anyMatch(e -> "anc-visit-1".equals(e.getId().getActionId()));
         assertTrue(hasVisit1Direct, "Should have direct trigger index for anc-visit-1");
+
+        // Should NOT have composite actionIds (no '/' in any actionId)
+        boolean hasComposite = entries.stream()
+                .anyMatch(e -> e.getId().getActionId().contains("/"));
+        assertFalse(hasComposite, "Should not have any composite actionIds with '/'");
     }
 
     @Test

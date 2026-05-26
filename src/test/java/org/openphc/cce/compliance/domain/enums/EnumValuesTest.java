@@ -73,11 +73,11 @@ class EnumValuesTest {
     }
 
     @Test
-    void actionType_hasCorrectValues() {
-        assertEquals(3, ActionType.values().length);
-        assertNotNull(ActionType.valueOf("CommunicationRequest"));
-        assertNotNull(ActionType.valueOf("Task"));
-        assertNotNull(ActionType.valueOf("ServiceRequest"));
+    void actionDefinitionKind_hasCorrectValues() {
+        assertEquals(3, ActionDefinitionKind.values().length);
+        assertNotNull(ActionDefinitionKind.valueOf("CommunicationRequest"));
+        assertNotNull(ActionDefinitionKind.valueOf("Task"));
+        assertNotNull(ActionDefinitionKind.valueOf("ServiceRequest"));
     }
 
     @Test
@@ -87,5 +87,15 @@ class EnumValuesTest {
         assertNotNull(IntelligenceSeverity.valueOf("MEDIUM"));
         assertNotNull(IntelligenceSeverity.valueOf("HIGH"));
         assertNotNull(IntelligenceSeverity.valueOf("CRITICAL"));
+    }
+
+    @Test
+    void actionType_hasCorrectValues() {
+        assertEquals(2, ActionType.values().length);
+        assertEquals("step", ActionType.STEP.getCode());
+        assertEquals("fire-event", ActionType.FIRE_EVENT.getCode());
+        assertEquals(ActionType.STEP, ActionType.fromCode("step"));
+        assertEquals(ActionType.FIRE_EVENT, ActionType.fromCode("fire-event"));
+        assertNull(ActionType.fromCode("unknown"));
     }
 }

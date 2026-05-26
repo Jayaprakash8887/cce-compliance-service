@@ -13,17 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PlanDefinition.action.action[]` with `type.coding[0].code = "step"` creates child step instances within a parent step
 - **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
 - Parent steps can have BOTH triggers AND sub-steps — sub-steps are created after parent completes
-- `SubStepActionInfo` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing)
 - `PlanDefinitionParser.classifyNestedActions()` — recursively routes nested actions to either sub-step or intelligence action builders at every nesting level
-- Sub-step trigger indexing with composite actionId format (`parentStepId/subStepId`) in `TriggerIndex`
-- Recursive trigger indexing via `indexNestedSubStepTriggers()` — builds composite IDs at any nesting level
+- Sub-step trigger indexing with plain action IDs in `TriggerIndex` (parent derived from PlanDefinition tree at runtime)
+- Recursive trigger indexing via `indexNestedSubStepTriggers()` — indexes sub-steps at any nesting level
 - Recursive trigger validation via `validateActionTriggers()` — validates nested sub-steps at all levels
 - `StepInstanceService.createEntryPointSubStepsForAction()` — creates entry-point sub-steps after parent step completion
 - `StepInstanceService.createDependentSubSteps()` — progressive sibling instantiation via `relatedAction`
 - `StepInstanceService.findStepByProtocolAndActionId()` — parent step lookup (any state, prefers COMPLETED)
-- `ComplianceEngine.processSubStepMatch()` — handles composite actionId routing (finds completed parent)
-- `ComplianceEngine.resolveSubStepInfo()` — recursive lookup of `SubStepActionInfo` at any depth in the action tree
-- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal for composite IDs
+- `ComplianceEngine.processSubStepMatch()` — handles sub-step routing (derives parent from PD tree, finds completed parent)
+- `ComplianceEngine.resolveSubStepInfo()` — recursive lookup of `ActionMetadata` at any depth in the action tree
+- `ComplianceEngine.findAncestryPath()` — derives parent hierarchy from PlanDefinition tree for sub-step detection
+- `ComplianceEngine.findSubStepInTree()` — locates ActionMetadata by plain ID anywhere in the action tree
+- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal via parentStepId
 - Duplicate creation guard in progressive sub-step instantiation
 - Flyway V5 migration: `parent_step_id` (UUID FK → step_instance) + index on `step_instance`
 
@@ -33,20 +34,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 #### Parser & Metadata
-- `ActionMetadata` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps — with `hasSubSteps()` method
-- `SubStepActionInfo` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing) — with `hasSubSteps()` method
-- `buildSubStepActionInfo()` now calls `classifyNestedActions()` recursively on child actions at every nesting level
-- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for composite actionId construction
+- `ActionMetadata` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps (self-referencing) — with `hasSubSteps()` method
+- `buildActionMetadata()` reused for both top-level actions and nested sub-steps via `classifyNestedActions()`
+- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for sub-step trigger indexing (plain IDs)
 - `validateTriggers()` uses recursive `validateActionTriggers()` to validate nested sub-steps at all levels
 - Only two valid action types: `"step"` and `"fire-event"` — all others rejected at parse time
 
 #### Engine Flow
-- `ComplianceEngine.processMatch()` — detects composite actionId (contains "/") and routes to sub-step processing
-- `ComplianceEngine.processSubStepMatch()` — finds completed parent step, resolves sub-step, creates/completes it
-- `performTwoTierMatching()` — uses `resolveSubStepInfo()` for composite actionId condition evaluation
+- `ComplianceEngine.processMatch()` — detects sub-steps via PD tree lookup (`findAncestryPath()`) and routes to sub-step processing
+- `ComplianceEngine.processSubStepMatch()` — uses ancestry path to find completed parent step, resolves sub-step, creates/completes it
+- `performTwoTierMatching()` — uses `findSubStepInTree()` for sub-step condition evaluation
 - `StepInstanceService.completeStep()` — creates entry-point sub-steps via `createEntryPointSubStepsForAction()` on both top-level and sub-step completion
 - `StepInstanceService.createDependentSubSteps()` — progressive sibling creation when sub-step completes
-- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal for composite IDs
+- `IntelligenceActionEvaluator.findIntelligenceActions()` — recursive tree traversal via parentStepId (composite fallback removed)
 
 #### Bug Fixes
 - Dead code removal: unused `hasDependency` variable in `createDependentSubSteps()`
@@ -71,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### New Enums
 - `ActionDefinitionStatus` (ACTIVE, RETIRED)
-- `ActionType` (CommunicationRequest, Task, ServiceRequest)
+- `ActionDefinitionKind` (CommunicationRequest, Task, ServiceRequest)
+- `ActionType` (STEP, FIRE_EVENT) — PlanDefinition action type codings
 - `IntelligenceSeverity` (LOW, MEDIUM, HIGH, CRITICAL)
 
 #### REST API

@@ -351,7 +351,7 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. For sub-step triggers, this is a composite path: `"parentStepId/subStepId"` (e.g., `"anc-visit-1/anc-visit-1-referral"`). |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. For sub-step triggers, this is the sub-step's own plain ID (e.g., `"anc-visit-1-referral"`); parent relationship is derived from PlanDefinition at runtime. |
 
 ### Constraints & Indexes
 
@@ -480,7 +480,7 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | `name` | `VARCHAR` | Yes | — | Computer-friendly name. |
 | `title` | `VARCHAR` | Yes | — | Human-readable title. |
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. See [ActionDefinitionStatus](#actiondefinitionstatus). |
-| `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionType](#actiontype). |
+| `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionDefinitionKind](#actiondefinitionkind). |
 | `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 ActivityDefinition resource JSON. Contains message template, routing config, and action-specific properties. See [JSONB: action_definition](#action_definition--definition). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
@@ -615,7 +615,7 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 | `ACTIVE` | Action definition available for intelligence action execution. |
 | `RETIRED` | Deactivated. Existing intelligence events unaffected but no new events created. |
 
-### ActionType
+### ActionDefinitionKind
 
 Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](http://hl7.org/fhir/R4/valueset-request-resource-types.html)). Stored as-is from the ActivityDefinition resource at load time.
 
@@ -625,7 +625,7 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 | `Task` | [Task](http://hl7.org/fhir/R4/task.html) | Work items routed to target systems via Receiver Adaptors |
 | `ServiceRequest` | [ServiceRequest](http://hl7.org/fhir/R4/servicerequest.html) | Referrals, lab orders, coordination requests |
 
-> **Future enhancement:** The supported `kind` values are currently limited to the three above. As new intelligence action patterns emerge (e.g., `MedicationRequest` for prescription alerts), additional values can be added by extending the DB check constraint and the `ActionType` enum. The behavioral distinction (e.g., notification vs. escalation vs. reminder) is derived from `severity` + `target` at routing time in the Intelligence Service.
+> **Future enhancement:** The supported `kind` values are currently limited to the three above. As new intelligence action patterns emerge (e.g., `MedicationRequest` for prescription alerts), additional values can be added by extending the DB check constraint and the `ActionDefinitionKind` enum. The behavioral distinction (e.g., notification vs. escalation vs. reminder) is derived from `severity` + `target` at routing time in the Intelligence Service.
 
 ### IntelligenceSeverity
 

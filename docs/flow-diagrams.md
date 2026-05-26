@@ -470,59 +470,24 @@ flowchart TD
     N --> O["Log DLQ routing"]
 ```
 
-## 9. Sub-Step Processing
+## 9. Parent-Child Step Relationship
 
-This diagram shows how the engine processes an inbound event that matches a sub-step trigger (e.g., composite actionId `"anc-visit-1/anc-visit-1-referral"`).
+Sub-step processing follows the same flow as regular step processing (Section 1). The only additional behavior is **parent derivation**: when a matched actionId is not a top-level action, the engine derives its parent from the PlanDefinition tree and ensures the parent step exists before completing the child.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant Consumer as InboundEventConsumer
-    participant Engine as ComplianceEngine
-    participant SIS as StepInstanceService
-    participant DB as PostgreSQL
-
-    Consumer->>Engine: processInboundEvent(cloudEvent)
-    Note over Engine: Tier 1 match returns composite actionId<br/>"anc-visit-1/anc-visit-1-referral"
-
-    Engine->>Engine: Detect composite actionId (contains "/")
-    Engine->>Engine: Extract parentActionId = "anc-visit-1"
-
-    rect rgb(240, 248, 255)
-        Note over Engine,DB: Find completed parent step
-        Engine->>SIS: findStepByProtocolAndActionId(protocolId, "anc-visit-1")
-        alt Parent not found or not completed
-            Engine->>SIS: createStep(parent) + completeStep(parent)
-            SIS->>DB: INSERT + UPDATE step_instance
-        end
-    end
-
-    rect rgb(245, 255, 245)
-        Note over Engine,DB: Find or create the sub-step
-        Engine->>SIS: findActionableStep(protocolId, compositeActionId)
-        alt Sub-step exists (created on parent completion)
-            Engine->>SIS: completeStep(subStep)
-        else Sub-step doesn't exist
-            Engine->>SIS: createStep(subStep, parentStepId)
-            Engine->>SIS: completeStep(subStep)
-        end
-        SIS->>DB: UPDATE sub-step state=COMPLETED
-    end
-
-    rect rgb(255, 248, 240)
-        Note over SIS,DB: Progressive instantiation + entry-point sub-steps
-        SIS->>SIS: createDependentSubSteps(subStep)
-        SIS->>DB: INSERT dependent sibling sub-steps (if any)
-
-        SIS->>SIS: createEntryPointSubStepsForAction(subStep)
-        Note over SIS: Creates nested sub-steps if subStep has children
-        SIS->>DB: INSERT nested sub-step instances (if any)
-    end
+flowchart TD
+    MATCH["Tier 1/2 match returns actionId"] --> CHECK{"findAncestryPath(actionId, actions)"}
+    CHECK -->|"null (top-level action)"| NORMAL["Normal step processing<br/>(Section 1, Step 6)"]
+    CHECK -->|"ancestry path found"| PARENT["Ensure parent step exists<br/>(find or create + complete)"]
+    PARENT --> SUBSTEP["Find or create sub-step<br/>(with parentStepId reference)"]
+    SUBSTEP --> COMPLETE["completeStep(subStep)"]
+    COMPLETE --> PROGRESSIVE["Progressive instantiation<br/>(same as top-level steps)"]
+    PROGRESSIVE --> ENTRY["createEntryPointSubStepsForAction(subStep)<br/>(if sub-step itself has nested children)"]
 ```
 
 ### Sub-Step Creation on Parent Completion
 
-Shows how `createEntryPointSubStepsForAction()` creates entry-point sub-steps when a parent step completes.
+When any step completes, `createEntryPointSubStepsForAction()` checks if it has nested sub-steps and creates entry-point instances.
 
 ```mermaid
 flowchart TD

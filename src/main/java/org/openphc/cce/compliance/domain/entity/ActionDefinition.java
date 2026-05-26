@@ -6,7 +6,7 @@ import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
-import org.openphc.cce.compliance.domain.enums.ActionType;
+import org.openphc.cce.compliance.domain.enums.ActionDefinitionKind;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -41,7 +41,7 @@ public class ActionDefinition {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "action_type", nullable = false)
-    private ActionType actionType;
+    private ActionDefinitionKind actionType;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(nullable = false, columnDefinition = "jsonb")

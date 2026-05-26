@@ -560,7 +560,7 @@ class IntelligenceActionEvaluatorTest {
                 .name("alert")
                 .title("Alert Action")
                 .status(ActionDefinitionStatus.ACTIVE)
-                .actionType(ActionType.CommunicationRequest)
+                .actionType(ActionDefinitionKind.CommunicationRequest)
                 .definition(objectMapper.createObjectNode())
                 .build();
     }

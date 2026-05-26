@@ -637,7 +637,7 @@ All execution and evaluation context is stored in a single row — no FK constra
 
 A **step with sub-steps** is a `PlanDefinition.action` with `type.coding[0].code = "step"` that contains nested `action.action[]` entries of type `"step"` (sub-steps) and/or `"fire-event"` (intelligence actions). Steps can have **both** their own triggers **and** nested sub-steps. Sub-steps are created after the parent step completes — they represent follow-up work triggered by the parent's completion.
 
-**Multi-level nesting:** Sub-steps can themselves contain nested sub-steps. The data model is self-referencing (`SubStepActionInfo` contains `List<SubStepActionInfo> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation) are recursive.
+**Multi-level nesting:** Sub-steps can themselves contain nested sub-steps. The data model is self-referencing (`ActionMetadata` contains `List<ActionMetadata> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation) are recursive.
 
 #### Classification Rules
 
@@ -657,7 +657,7 @@ Sub-steps are created **after the parent step completes** — not at enrollment 
 
 #### Trigger Indexing
 
-Sub-step triggers are indexed in `trigger_index` using a **composite actionId** format that encodes the parent path: `"parentStepId/subStepId"`. For example, a nested referral step under ANC Visit 1 produces: `"anc-visit-1/anc-visit-1-referral"`. This is built recursively by `indexNestedSubStepTriggers()` and enables the Tier 1 query to match sub-step triggers and route them correctly through the engine.
+Sub-step triggers are indexed in `trigger_index` using the sub-step's **plain action ID** — the same `id` value from the PlanDefinition. For example, a nested referral step under ANC Visit 1 is indexed as `"anc-visit-1-referral"` (not as a composite path). The parent relationship is derived at runtime from the PlanDefinition tree structure via `findAncestryPath()`. This avoids fragile string-based parent encoding and leverages the fact that PlanDefinitions are already parsed in the match flow.
 
 #### Sub-Step Lifecycle
 
@@ -672,9 +672,10 @@ sequenceDiagram
     SIS->>SIS: createEntryPointSubStepsForAction(parentStep)
     SIS->>DB: Create entry-point sub-steps (PENDING)
     
-    Note over Engine: Later — event matches composite actionId "anc-visit-1/referral"
-    Engine->>Engine: Detect composite actionId (contains "/")
-    Engine->>SIS: findStepByProtocolAndActionId(protocolId, compositeId)
+    Note over Engine: Later — event matches sub-step actionId "anc-visit-1-referral"
+    Engine->>Engine: findAncestryPath() derives parent from PD tree
+    Engine->>SIS: findStepByProtocolAndActionId(protocolId, topLevelActionId)
+    Engine->>SIS: findActionableStep(protocolId, subStepActionId)
     Engine->>SIS: completeStep(subStep)
     SIS->>SIS: createDependentSubSteps(subStep) [progressive siblings]
     SIS->>SIS: createEntryPointSubStepsForAction(subStep) [nested sub-steps if any]

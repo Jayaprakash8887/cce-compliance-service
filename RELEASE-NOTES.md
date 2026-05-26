@@ -8,7 +8,7 @@
 
 ## Overview
 
-Release 1.2.0 adds **step-inside-step support with multi-level nesting** — the ability to nest independently-triggerable child steps within a parent step. Sub-steps are modeled as nested `PlanDefinition.action.action[]` entries with `type.coding[0].code = "step"`, indexed in `trigger_index` with composite actionIds (`"parentId/subStepId"`), and tracked in `step_instance` with parent references. Parent steps can have **both** triggers and sub-steps — sub-steps are created after the parent step completes.
+Release 1.2.0 adds **step-inside-step support with multi-level nesting** — the ability to nest independently-triggerable child steps within a parent step. Sub-steps are modeled as nested `PlanDefinition.action.action[]` entries with `type.coding[0].code = "step"`, indexed in `trigger_index` with their plain action IDs (parent derived from PlanDefinition tree at runtime), and tracked in `step_instance` with parent references. Parent steps can have **both** triggers and sub-steps — sub-steps are created after the parent step completes.
 
 Additionally, this release includes core schema optimizations (V4 migration) for production workloads.
 
@@ -20,20 +20,19 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 - `PlanDefinition.action.action[]` with `type = "step"` creates child step instances within a parent step
 - **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
 - Parent steps can have BOTH triggers AND sub-steps (sub-steps are created after parent completes)
-- Sub-step triggers indexed in `trigger_index` with composite actionId format: `"parentStepId/subStepId"`
+- Sub-step triggers indexed in `trigger_index` with their plain action ID (parent derived from PD tree via `findAncestryPath()`)
 - Entry-point sub-steps (no `relatedAction` dependency on siblings) created immediately on parent completion
 - Progressive instantiation within sub-steps: sub-steps with `relatedAction` pointing to siblings are created when the sibling completes
 - Sub-steps can have their own intelligence actions (nested fire-event)
-- `ComplianceEngine.processSubStepMatch()` handles composite actionId routing (finds completed parent, resolves sub-step)
+- `ComplianceEngine.processSubStepMatch()` handles sub-step routing (derives parent from PD tree, finds completed parent, resolves sub-step)
 - Tier 2 condition evaluation extended for sub-step triggers
 - Duplicate creation guard in progressive sub-step instantiation
 
 ### PlanDefinition Parser Enhancements
-- `classifyNestedActions()` — recursively routes nested actions to either `SubStepActionInfo` or `IntelligenceActionInfo` at every nesting level
-- Classification by explicit `type.coding[0].code`: only `"step"` and `"fire-event"` are valid
-- `ActionMetadata` record: id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps
-- New `SubStepActionInfo` record (self-referencing): id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps
-- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for composite actionId construction
+- `classifyNestedActions()` — recursively routes nested actions to either `ActionMetadata` (sub-steps) or `IntelligenceActionInfo` at every nesting level
+- Classification by explicit `type.coding[0].code`: only `"step"` and `"fire-event"` are valid (enforced by `ActionType` enum)
+- `ActionMetadata` record (self-referencing): id, title, triggers, relatedActions, timing, toleranceDays, requiredBehavior, intelligenceActions, subSteps — reused for both top-level actions and nested sub-steps
+- `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for plain sub-step ID indexing
 - `validateTriggers()` uses recursive `validateActionTriggers()` for nested validation
 
 ### Step Instance Lifecycle
