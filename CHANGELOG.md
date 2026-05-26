@@ -5,6 +5,56 @@ All notable changes to the CCE Compliance Service will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-05
+
+### Added
+
+#### Flat Sub-Step Model
+- `PlanDefinition.action.action[]` with `type.coding[0]` system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"` are flattened into peer-level steps by `extractSteps()`
+- Entry-point sub-steps (no sibling `relatedAction`) automatically get a `relatedStep` to their parent action (relationship: `after-end`, no offset)
+- Sub-steps with `relatedAction` pointing to siblings are flattened as-is — progressive instantiation via standard `createDependentSteps()`
+- All trigger indexing uses the step's plain action ID (no composite path encoding)
+- Intelligence actions found via flat lookup by `actionId` — no tree traversal needed
+
+#### actionId Validation
+- `PlanDefinitionParser.validateActionIds()` — validates mandatory and unique action IDs across all nesting levels
+- `collectActionIds()` — recursive helper collecting all IDs for uniqueness check
+- Violations rejected with `IllegalArgumentException` at protocol load time
+
+#### Schema Optimization
+- Flyway V4 migration: Performance indexes and constraints for production workloads
+
+### Changed
+
+#### Parser & Metadata
+- `StepMetadata` record (8 fields): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions` — flat, no self-referencing `subSteps` field
+- `extractSteps()` replaces `extractAllActions()` — returns a flat `List<StepMetadata>` for all steps at all nesting levels
+- `flattenAction()` — recursive helper that classifies nested actions and flattens step-type actions
+- `buildTriggerIndexEntries()` indexes all flattened steps uniformly with their plain action IDs
+- `validateTriggers()` validates all steps in the flat list — no recursive tree traversal needed
+- Only two valid action types: `"step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) and `"fire-event"` (system: `http://terminology.hl7.org/CodeSystem/action-type`) — parser validates both system URI and code via `hasTypeCoding()`
+
+#### Engine Flow
+- `ComplianceEngine` — no sub-step-specific routing; all matched steps (top-level or nested) are processed uniformly
+- `StepInstanceService.completeStep()` — parses PlanDefinition **once** and passes `List<StepMetadata>` to `detectOrderViolations()`, `createDependentSteps()`, `autoSkipPrecedingOptionalSteps()`
+- `IntelligenceActionEvaluator.findIntelligenceActions()` — flat lookup by actionId (no tree traversal or `parentStepId` usage)
+
+#### Removed
+- `StepInstance.parentStepId` field — no parent-child hierarchy in domain model
+- `EventLog.matchedStepInstanceId` field — dead field never written to
+- `StepInstanceService.findStepByProtocolAndActionId()` — removed (was sub-step-specific)
+- `StepInstanceService.createEntryPointSubStepsForAction()` — replaced by flat `createDependentSteps()`
+- `StepInstanceService.createDependentSubSteps()` — replaced by flat `createDependentSteps()`
+- `ComplianceEngine.processSubStepMatch()` — removed (flat model processes all steps uniformly)
+- `ComplianceEngine.findAncestryPath()` — removed (no parent derivation needed)
+- `ComplianceEngine.findSubStepInTree()` — removed (flat list replaces tree)
+- `ComplianceEngine.resolveSubStepInfo()` — removed
+- `StepInstanceRepository.findByParentStepId()` — removed
+- `StepInstanceRepository.findByProtocolInstanceIdAndActionId()` — removed (dead code)
+- Flyway V5 migration (`parent_step_id` column) — never applied, deleted
+
+---
+
 ## [1.1.0] - 2026
 
 ### Added
@@ -21,7 +71,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### New Enums
 - `ActionDefinitionStatus` (ACTIVE, RETIRED)
-- `ActionType` (CommunicationRequest, Task, ServiceRequest)
+- `ActionDefinitionKind` (CommunicationRequest, Task, ServiceRequest)
+- `PlanDefinitionActionType` (STEP, FIRE_EVENT) — PlanDefinition action type codings with system URI awareness (`http://openphc.org/fhir/CodeSystem/action-type` for step, `http://terminology.hl7.org/CodeSystem/action-type` for fire-event)
 - `IntelligenceSeverity` (LOW, MEDIUM, HIGH, CRITICAL)
 
 #### REST API
@@ -45,7 +96,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Performance Optimizations
 - `IntelligenceActionEvaluator` — bounded `ConcurrentHashMap` cache for parsed PlanDefinition objects, avoiding FHIR re-parsing on every deviation/completion evaluation
-- `PlanDefinitionParser.ActionMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
+- `PlanDefinitionParser.StepMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
+
+### Testing
+- 370 unit tests (was 351 in v1.1.0) — 19 new tests for sub-step parsing and multi-level nesting
+- 39 integration tests (unchanged from v1.1.0)
+
+---
+
+## [1.1.0] - 2026
 
 ### Testing
 - 351 unit tests (was 254 in v1.0.0) — 97 new tests for intelligence pipeline

@@ -11,8 +11,10 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -41,13 +43,46 @@ public class DeviationService {
     }
 
     /**
+     * Create a deviation with auto-enriched metadata based on deviation type.
+     * Delegates to recordDeviation after building metadata.
+     */
+    public Deviation createDeviation(StepInstance step, DeviationType deviationType) {
+        return createDeviation(step, deviationType, null);
+    }
+
+    /**
+     * Create a deviation with auto-enriched metadata plus additional caller-supplied metadata.
+     */
+    public Deviation createDeviation(StepInstance step, DeviationType deviationType,
+                                     Map<String, Object> additionalMetadata) {
+        ProtocolInstance protocolInstance = step.getProtocolInstance();
+
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        Map<String, Object> metadata = new LinkedHashMap<>();
+        if (deviationType == DeviationType.OVERDUE && step.getDueDate() != null) {
+            metadata.put("daysOverdue",
+                    Duration.between(step.getDueDate(), now).toDays());
+        }
+        if (deviationType == DeviationType.MISSED && step.getMissedDate() != null) {
+            metadata.put("daysPastMissedDate",
+                    Duration.between(step.getMissedDate(), now).toDays());
+        }
+        if (additionalMetadata != null) {
+            metadata.putAll(additionalMetadata);
+        }
+
+        return recordDeviation(protocolInstance, step, deviationType,
+                metadata.isEmpty() ? null : metadata);
+    }
+
+    /**
      * Record a deviation and persist it.
      * Intelligence trigger publishing is not performed here — it will be driven
      * by PlanDefinition-level configuration in a future phase.
      *
      * @return the persisted Deviation entity
      */
-    public Deviation recordDeviation(ProtocolInstance protocolInstance, StepInstance step,
+    private Deviation recordDeviation(ProtocolInstance protocolInstance, StepInstance step,
                                      DeviationType deviationType, Map<String, Object> metadata) {
         OffsetDateTime detectedAt = OffsetDateTime.now(ZoneOffset.UTC);
 

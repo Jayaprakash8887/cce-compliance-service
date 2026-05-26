@@ -9,5 +9,5 @@ import java.util.UUID;
  * @param protocolDefinitionId the matched protocol definition UUID
  * @param actionId             the matched action ID within the protocol
  */
-public record MatchedAction(UUID protocolDefinitionId, String actionId) {
+public record MatchedStep(UUID protocolDefinitionId, String actionId) {
 }

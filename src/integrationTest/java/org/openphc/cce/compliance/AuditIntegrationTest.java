@@ -3,6 +3,7 @@ package org.openphc.cce.compliance;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.entity.AuditLog;
 import org.openphc.cce.compliance.domain.repository.AuditLogRepository;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
@@ -16,6 +17,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -68,7 +70,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
 
         // Audit is @Async — wait for it
         await().atMost(10, SECONDS).untilAsserted(() -> {
-            var auditLogs = auditLogRepository.findByEventCategory("PROTOCOL_MANAGEMENT");
+            List<AuditLog> auditLogs = auditLogRepository.findByEventCategory("PROTOCOL_MANAGEMENT");
             assertThat(auditLogs).anyMatch(log ->
                     "PROTOCOL_LOADED".equals(log.getEventType()) &&
                     protocolId.toString().equals(log.getResourceId()));
@@ -118,7 +120,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
 
         // Verify audit records for enrollment and matching (async)
         await().atMost(10, SECONDS).untilAsserted(() -> {
-            var complianceLogs = auditLogRepository.findByEventCategory("COMPLIANCE");
+            List<AuditLog> complianceLogs = auditLogRepository.findByEventCategory("COMPLIANCE");
             assertThat(complianceLogs).anyMatch(log ->
                     "PROTOCOL_ENROLLED".equals(log.getEventType()));
             assertThat(complianceLogs).anyMatch(log ->
@@ -150,7 +152,7 @@ class AuditIntegrationTest extends IntegrationTestBase {
 
         // Verify audit entry for retire
         await().atMost(10, SECONDS).untilAsserted(() -> {
-            var auditLogs = auditLogRepository.findByEventCategory("PROTOCOL_MANAGEMENT");
+            List<AuditLog> auditLogs = auditLogRepository.findByEventCategory("PROTOCOL_MANAGEMENT");
             assertThat(auditLogs).anyMatch(log ->
                     "PROTOCOL_RETIRED".equals(log.getEventType()) &&
                     protocolId.toString().equals(log.getResourceId()));

@@ -5,7 +5,7 @@ import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
-import org.openphc.cce.compliance.domain.enums.ActionType;
+import org.openphc.cce.compliance.domain.enums.ActionDefinitionKind;
 import org.openphc.cce.compliance.service.ActionDefinitionService;
 import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.GlobalExceptionHandler;
@@ -51,7 +51,7 @@ class ActionDefinitionControllerTest {
         def.setName("escalation-alert");
         def.setTitle("Escalation Alert");
         def.setStatus(ActionDefinitionStatus.ACTIVE);
-        def.setActionType(ActionType.CommunicationRequest);
+        def.setActionType(ActionDefinitionKind.CommunicationRequest);
         def.setDefinition(objectMapper.createObjectNode().put("resourceType", "ActivityDefinition"));
         def.setCreatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC));
         def.setUpdatedAt(OffsetDateTime.of(2026, 4, 1, 10, 0, 0, 0, ZoneOffset.UTC));

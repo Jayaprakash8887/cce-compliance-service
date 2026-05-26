@@ -66,7 +66,4 @@ public class EventLog {
     @Enumerated(EnumType.STRING)
     @Column(name = "processing_status", nullable = false)
     private ProcessingStatus processingStatus;
-
-    @Column(name = "matched_step_instance_id")
-    private UUID matchedStepInstanceId;
 }

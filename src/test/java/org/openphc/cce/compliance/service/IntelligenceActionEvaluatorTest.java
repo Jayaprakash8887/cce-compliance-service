@@ -17,6 +17,7 @@ import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.enums.*;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
+
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -354,10 +355,10 @@ class IntelligenceActionEvaluatorTest {
             StepInstance step = buildStep("nonexistent-action", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            var mockPlanDef = mock(PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                    new PlanDefinitionParser.ActionMetadata("other-action", "Other",
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
+                    new PlanDefinitionParser.StepMetadata("other-action", "Other",
                             List.of(), List.of(), null, null, null, List.of())));
 
             List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
@@ -558,7 +559,7 @@ class IntelligenceActionEvaluatorTest {
                 .name("alert")
                 .title("Alert Action")
                 .status(ActionDefinitionStatus.ACTIVE)
-                .actionType(ActionType.CommunicationRequest)
+                .actionType(ActionDefinitionKind.CommunicationRequest)
                 .definition(objectMapper.createObjectNode())
                 .build();
     }
@@ -571,10 +572,10 @@ class IntelligenceActionEvaluatorTest {
 
     private void mockParserReturnsIntelligenceActions(StepInstance step,
                                                        List<PlanDefinitionParser.IntelligenceActionInfo> actions) {
-        var mockPlanDef = mock(PlanDefinition.class);
+        PlanDefinition mockPlanDef = mock(PlanDefinition.class);
         when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-        when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
-                new PlanDefinitionParser.ActionMetadata(step.getActionId(), "Test Action",
+        when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
+                new PlanDefinitionParser.StepMetadata(step.getActionId(), "Test Action",
                         List.of(), List.of(), null, null, null, actions)));
     }
 }

@@ -2,7 +2,7 @@
 
 > **CCE Compliance Service** — Complete database schema reference  
 > **Database**: PostgreSQL 16 | **Schema**: `public` | **Migration**: Flyway  
-> **Last Updated**: 2026-03-09
+> **Last Updated**: 2026-05-25
 
 ---
 
@@ -108,7 +108,6 @@ erDiagram
         varchar action_id
         varchar facility_id
         varchar processing_status
-        uuid matched_step_instance_id
     }
 
     AUDIT_LOG {
@@ -238,7 +237,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition. Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition (including nested actions that are flattened at parse time). Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Nested sub-steps from FHIR `action.action[]` are flattened to peer-level steps connected via `relatedSteps` references — there is no parent-child column.
 
 ### Columns
 
@@ -246,7 +245,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 |--------|-----------|----------|---------|-------------|
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). Must be unique within a PlanDefinition. |
 | `repeat_index` | `INTEGER` | **NOT NULL** | `0` | Zero-based occurrence counter for repeating actions. Non-repeating actions always have index 0. |
 | `state` | `VARCHAR` | **NOT NULL** | — | Current step state. See [StepState](#stepstate). |
 | `due_date` | `TIMESTAMPTZ` | Yes | — | Scheduled due date. Calculated from `relatedAction.offsetDuration`. `NULL` for event-triggered steps. |
@@ -346,7 +345,7 @@ Only triggers that contain a `data[]` section produce `trigger_index` entries. *
 | `code_system` | `VARCHAR` | **NOT NULL** | `''` | Code system URI. Empty string = no system specified. |
 | `code_value` | `VARCHAR` | **NOT NULL** | `''` | Code value. Empty string = resource-type-only match (no codeFilter). |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
-| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. |
+| `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this trigger belongs to. All steps (including those originally nested in `action.action[]`) use their plain action ID — the flat model treats all steps uniformly. |
 
 ### Constraints & Indexes
 
@@ -417,7 +416,6 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 | `action_id` | `VARCHAR` | Yes | — | Matched protocol definition action. `NULL` for zero-match or duplicate events. |
 | `facility_id` | `VARCHAR` | Yes | — | FOSA ID from CloudEvent `facilityid` extension. |
 | `processing_status` | `VARCHAR` | **NOT NULL** | — | Processing outcome. See [ProcessingStatus](#processingstatus). |
-| `matched_step_instance_id` | `UUID` | Yes | — | Step completed as a result of this event. |
 
 ### Constraints & Indexes
 
@@ -475,7 +473,7 @@ Stores FHIR R4 **ActivityDefinition** resources that define what CCE does when a
 | `name` | `VARCHAR` | Yes | — | Computer-friendly name. |
 | `title` | `VARCHAR` | Yes | — | Human-readable title. |
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. See [ActionDefinitionStatus](#actiondefinitionstatus). |
-| `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionType](#actiontype). |
+| `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` value. Stored from the resource's `kind` field at load time. See [ActionDefinitionKind](#actiondefinitionkind). |
 | `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 ActivityDefinition resource JSON. Contains message template, routing config, and action-specific properties. See [JSONB: action_definition](#action_definition--definition). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
@@ -610,7 +608,7 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 | `ACTIVE` | Action definition available for intelligence action execution. |
 | `RETIRED` | Deactivated. Existing intelligence events unaffected but no new events created. |
 
-### ActionType
+### ActionDefinitionKind
 
 Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](http://hl7.org/fhir/R4/valueset-request-resource-types.html)). Stored as-is from the ActivityDefinition resource at load time.
 
@@ -620,7 +618,7 @@ Values sourced from FHIR R4 `ActivityDefinition.kind` ([RequestResourceType](htt
 | `Task` | [Task](http://hl7.org/fhir/R4/task.html) | Work items routed to target systems via Receiver Adaptors |
 | `ServiceRequest` | [ServiceRequest](http://hl7.org/fhir/R4/servicerequest.html) | Referrals, lab orders, coordination requests |
 
-> **Future enhancement:** The supported `kind` values are currently limited to the three above. As new intelligence action patterns emerge (e.g., `MedicationRequest` for prescription alerts), additional values can be added by extending the DB check constraint and the `ActionType` enum. The behavioral distinction (e.g., notification vs. escalation vs. reminder) is derived from `severity` + `target` at routing time in the Intelligence Service.
+> **Future enhancement:** The supported `kind` values are currently limited to the three above. As new intelligence action patterns emerge (e.g., `MedicationRequest` for prescription alerts), additional values can be added by extending the DB check constraint and the `ActionDefinitionKind` enum. The behavioral distinction (e.g., notification vs. escalation vs. reminder) is derived from `severity` + `target` at routing time in the Intelligence Service.
 
 ### IntelligenceSeverity
 

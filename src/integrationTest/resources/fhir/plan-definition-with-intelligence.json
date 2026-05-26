@@ -34,6 +34,14 @@
         {
           "id": "overdue-escalation",
           "title": "Overdue Escalation Alert",
+          "type": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/action-type",
+                "code": "fire-event"
+              }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -58,6 +66,14 @@
         {
           "id": "missed-critical-alert",
           "title": "Missed Step Critical Alert",
+          "type": {
+            "coding": [
+              {
+                "system": "http://terminology.hl7.org/CodeSystem/action-type",
+                "code": "fire-event"
+              }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -79,7 +95,15 @@
             }
           ]
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     }
   ]
 }
