@@ -1,8 +1,6 @@
 package org.openphc.cce.compliance.service;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityNotFoundException;
-import org.hl7.fhir.r4.model.PlanDefinition;
 import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
@@ -122,13 +120,13 @@ public class StepInstanceService {
         var steps = planDefinitionParser.extractSteps(planDefinition);
 
         // Detect order violations (must-have prerequisites still incomplete)
-        detectOrderViolations(step);
+        detectOrderViolations(step, steps);
 
         // Progressive step instantiation for dependent steps
-        createDependentSteps(step);
+        createDependentSteps(step, steps);
 
         // Auto-skip preceding optional (could) steps that are still actionable
-        autoSkipPrecedingOptionalSteps(step);
+        autoSkipPrecedingOptionalSteps(step, steps);
 
         // Check if protocol is now complete
         protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -187,22 +185,6 @@ public class StepInstanceService {
         return steps.isEmpty() ? null : steps.get(0);
     }
 
-    /**
-     * Find a step by protocol instance and actionId regardless of state.
-     * Returns the most recently relevant step (prefers COMPLETED, then any state).
-     */
-    @Transactional(readOnly = true)
-    public StepInstance findStepByProtocolAndActionId(UUID protocolInstanceId, String actionId) {
-        List<StepInstance> steps = stepInstanceRepository
-                .findByProtocolInstanceIdAndActionId(protocolInstanceId, actionId);
-        if (steps.isEmpty()) return null;
-        // Prefer completed steps (parent steps will be completed when sub-steps are triggered)
-        return steps.stream()
-                .filter(s -> s.getState() == StepState.COMPLETED)
-                .findFirst()
-                .orElse(steps.get(0));
-    }
-
     private void applyTransition(StepInstance step, StepState expectedState, StepState newState) {
         if (step.getState() != expectedState) {
             log.warn("Step {} is in state {} — expected {} for transition to {}. Skipping.",
@@ -225,13 +207,9 @@ public class StepInstanceService {
      * non-terminal incomplete states (PENDING, DUE, OVERDUE).
      * A predecessor of action X is any action whose relatedSteps list contains X.
      */
-    private void detectOrderViolations(StepInstance completedStep) {
+    private void detectOrderViolations(StepInstance completedStep,
+                                       List<PlanDefinitionParser.StepMetadata> steps) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
-
-        JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
-        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
-        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
-
         String completedActionId = completedStep.getActionId();
 
         // Find immediate predecessors: actions whose relatedSteps contain this action's id
@@ -281,13 +259,9 @@ public class StepInstanceService {
      * Progressive step instantiation: when a step completes, create dependent PENDING
      * steps from relatedStep definitions with calculated due dates.
      */
-    private void createDependentSteps(StepInstance completedStep) {
+    private void createDependentSteps(StepInstance completedStep,
+                                      List<PlanDefinitionParser.StepMetadata> steps) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
-
-        // Parse the protocol definition to get relatedStep info
-        JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
-        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
-        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
         // Find the completed step's metadata to get its relatedSteps
         PlanDefinitionParser.StepMetadata completedStepMetadata = steps.stream()
@@ -364,13 +338,9 @@ public class StepInstanceService {
      * (i.e., completing that action would create X). This is computed transitively
      * to cover the full ancestor chain.
      */
-    private void autoSkipPrecedingOptionalSteps(StepInstance completedStep) {
+    private void autoSkipPrecedingOptionalSteps(StepInstance completedStep,
+                                                List<PlanDefinitionParser.StepMetadata> steps) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
-
-        // Parse protocol to determine the dependency graph
-        JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
-        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
-        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
         // Compute all ancestor actionIds of the completed step (transitive predecessors)
         Set<String> ancestorActionIds = computeAncestors(completedStep.getActionId(), steps);
