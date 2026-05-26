@@ -635,21 +635,21 @@ All execution and evaluation context is stored in a single row — no FK constra
 
 ### 6.4 Sub-Steps (Step-Inside-Step Nesting)
 
-A **step with sub-steps** is a `PlanDefinition.action` with `type.coding[0].code = "step"` that contains nested `action.action[]` entries of type `"step"` (sub-steps) and/or `"fire-event"` (intelligence actions). Steps can have **both** their own triggers **and** nested sub-steps. Sub-steps are created after the parent step completes — they represent follow-up work triggered by the parent's completion.
+A **step with sub-steps** is a `PlanDefinition.action` with type coding system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"` that contains nested `action.action[]` entries of type `"step"` (sub-steps) and/or `"fire-event"` (intelligence actions). Steps can have **both** their own triggers **and** nested sub-steps. Sub-steps are created after the parent step completes — they represent follow-up work triggered by the parent's completion.
 
 **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps. The data model is self-referencing (`ActionMetadata` contains `List<ActionMetadata> subSteps`), enabling arbitrary nesting depth. All operations (parsing, trigger indexing, validation, step creation) are recursive.
 
 #### Classification Rules
 
-Actions at ALL levels are classified by type (`type.coding[0].code`):
+Actions at ALL levels are classified by type (`type.coding[0]` — both `system` and `code` are validated):
 
-| Type Code | Classification | Description |
-|---|---|---|
-| `"step"` | Step | Trigger-based action (has triggers, tracked as step instance). May also contain nested sub-steps. |
-| `"fire-event"` | Intelligence Action | Conditional intelligence evaluation (nested only) |
-| *(missing)* | **Rejected** | `IllegalArgumentException` at load time |
+| System URI | Code | Classification | Description |
+|---|---|---|---|
+| `http://openphc.org/fhir/CodeSystem/action-type` | `"step"` | Step | Trigger-based action (has triggers, tracked as step instance). May also contain nested sub-steps. |
+| `http://terminology.hl7.org/CodeSystem/action-type` | `"fire-event"` | Intelligence Action | Conditional intelligence evaluation (nested only) |
+| *(missing or unrecognized)* | | **Rejected** | `IllegalArgumentException` at load time |
 
-Every action **must** have an explicit `type` coding — `"step"` or `"fire-event"`.
+Every action **must** have an explicit `type` coding with the correct system URI — `"step"` uses the CCE custom CodeSystem, `"fire-event"` uses the HL7 standard CodeSystem (extensible binding per FHIR R4 `PlanDefinition.action.type`).
 
 #### Sub-Step Creation Timing
 

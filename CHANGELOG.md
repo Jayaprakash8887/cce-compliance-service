@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 #### Sub-Steps (Step-Inside-Step Nesting)
-- `PlanDefinition.action.action[]` with `type.coding[0].code = "step"` creates child step instances within a parent step
+- `PlanDefinition.action.action[]` with `type.coding[0]` system `http://openphc.org/fhir/CodeSystem/action-type` + code `"step"` creates child step instances within a parent step
 - **Multi-level nesting:** Sub-steps can themselves contain nested sub-steps — recursive to arbitrary depth
 - Parent steps can have BOTH triggers AND sub-steps — sub-steps are created after parent completes
 - `PlanDefinitionParser.classifyNestedActions()` — recursively routes nested actions to either sub-step or intelligence action builders at every nesting level
@@ -38,7 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `buildActionMetadata()` reused for both top-level actions and nested sub-steps via `classifyNestedActions()`
 - `buildTriggerIndexEntries()` uses recursive `indexNestedSubStepTriggers()` for sub-step trigger indexing (plain IDs)
 - `validateTriggers()` uses recursive `validateActionTriggers()` to validate nested sub-steps at all levels
-- Only two valid action types: `"step"` and `"fire-event"` — all others rejected at parse time
+- Only two valid action types: `"step"` (system: `http://openphc.org/fhir/CodeSystem/action-type`) and `"fire-event"` (system: `http://terminology.hl7.org/CodeSystem/action-type`) — parser validates both system URI and code via `hasTypeCoding()`; unrecognized system+code combinations rejected at parse time
 
 #### Engine Flow
 - `ComplianceEngine.processMatch()` — detects sub-steps via PD tree lookup (`findAncestryPath()`) and routes to sub-step processing
@@ -72,7 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### New Enums
 - `ActionDefinitionStatus` (ACTIVE, RETIRED)
 - `ActionDefinitionKind` (CommunicationRequest, Task, ServiceRequest)
-- `ActionType` (STEP, FIRE_EVENT) — PlanDefinition action type codings
+- `PlanDefinitionActionType` (STEP, FIRE_EVENT) — PlanDefinition action type codings with system URI awareness (`http://openphc.org/fhir/CodeSystem/action-type` for step, `http://terminology.hl7.org/CodeSystem/action-type` for fire-event)
 - `IntelligenceSeverity` (LOW, MEDIUM, HIGH, CRITICAL)
 
 #### REST API
@@ -99,7 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `PlanDefinitionParser.ActionMetadata` record — extended with `List<IntelligenceActionInfo> intelligenceActions` field
 
 ### Testing
-- 368 unit tests (was 351 in v1.1.0) — 17 new tests for sub-step parsing and multi-level nesting
+- 370 unit tests (was 351 in v1.1.0) — 19 new tests for sub-step parsing and multi-level nesting
 - 39 integration tests (unchanged from v1.1.0)
 
 ---
