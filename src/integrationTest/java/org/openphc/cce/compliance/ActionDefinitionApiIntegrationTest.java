@@ -2,6 +2,7 @@ package org.openphc.cce.compliance;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
@@ -200,7 +201,7 @@ class ActionDefinitionApiIntegrationTest extends IntegrationTestBase {
                 .andExpect(jsonPath("$.status").value("RETIRED"));
 
         // Verify in DB
-        var retired = actionDefinitionRepository.findById(id).orElseThrow();
+        ActionDefinition retired = actionDefinitionRepository.findById(id).orElseThrow();
         assertThat(retired.getStatus().name()).isEqualTo("RETIRED");
     }
 

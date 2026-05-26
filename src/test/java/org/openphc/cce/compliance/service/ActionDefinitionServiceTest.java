@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -425,7 +426,7 @@ class ActionDefinitionServiceTest {
         node.put("title", title);
         node.put("kind", kind);
 
-        var extensions = node.putArray("extension");
+        ArrayNode extensions = node.putArray("extension");
 
         ObjectNode sevExt = extensions.addObject();
         sevExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-severity");

@@ -1,6 +1,8 @@
 package org.openphc.cce.compliance.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityNotFoundException;
+import org.hl7.fhir.r4.model.PlanDefinition;
 import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
@@ -115,9 +117,9 @@ public class StepInstanceService {
                 step.getId(), step.getActionId(), step.getCompletionStatus());
 
         // Parse protocol definition once — reused by progressive instantiation
-        var definition = step.getProtocolInstance().getProtocolDefinition().getDefinition();
-        var planDefinition = planDefinitionParser.parse(definition.toString());
-        var steps = planDefinitionParser.extractSteps(planDefinition);
+        JsonNode definition = step.getProtocolInstance().getProtocolDefinition().getDefinition();
+        PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
         // Detect order violations (must-have prerequisites still incomplete)
         detectOrderViolations(step, steps);

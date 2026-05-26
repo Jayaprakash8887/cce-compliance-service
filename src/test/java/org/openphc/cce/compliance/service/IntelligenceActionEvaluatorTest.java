@@ -355,7 +355,7 @@ class IntelligenceActionEvaluatorTest {
             StepInstance step = buildStep("nonexistent-action", StepState.OVERDUE);
             Deviation deviation = buildDeviation(step, DeviationType.OVERDUE);
 
-            var mockPlanDef = mock(PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                     new PlanDefinitionParser.StepMetadata("other-action", "Other",
@@ -572,7 +572,7 @@ class IntelligenceActionEvaluatorTest {
 
     private void mockParserReturnsIntelligenceActions(StepInstance step,
                                                        List<PlanDefinitionParser.IntelligenceActionInfo> actions) {
-        var mockPlanDef = mock(PlanDefinition.class);
+        PlanDefinition mockPlanDef = mock(PlanDefinition.class);
         when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
         when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(step.getActionId(), "Test Action",

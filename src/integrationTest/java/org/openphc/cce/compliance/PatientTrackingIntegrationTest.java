@@ -3,6 +3,7 @@ package org.openphc.cce.compliance;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -119,7 +121,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-track-detail-" + UUID.randomUUID();
         enrollPatient(patientId);
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         UUID instanceId = instances.get(0).getId();
 
         mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{instanceId}",
@@ -136,7 +138,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-track-steps-" + UUID.randomUUID();
         enrollPatient(patientId);
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         UUID instanceId = instances.get(0).getId();
 
         mockMvc.perform(get("/v1/compliance/patients/{patientId}/protocol-instances/{instanceId}/steps",
@@ -165,7 +167,7 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-track-wrong-" + UUID.randomUUID();
         enrollPatient(patientId);
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         UUID instanceId = instances.get(0).getId();
 
         // Query with a different patient ID → should not find the instance

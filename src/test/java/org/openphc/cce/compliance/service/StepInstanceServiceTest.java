@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.hl7.fhir.r4.model.PlanDefinition;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -183,7 +184,7 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             // Mock parser to return action metadata with relatedActions
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
@@ -231,7 +232,7 @@ class StepInstanceServiceTest {
             });
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
@@ -274,7 +275,7 @@ class StepInstanceServiceTest {
             });
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // Target action has timing: count=3, period=7 days
@@ -486,13 +487,13 @@ class StepInstanceServiceTest {
                     .thenReturn(List.of(optionalStep, completedStep));
 
             // Build dependency graph: optional-lab → mandatory-visit (optional-lab is ancestor)
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            var optionalLabAction = new PlanDefinitionParser.StepMetadata(
+            PlanDefinitionParser.StepMetadata optionalLabAction = new PlanDefinitionParser.StepMetadata(
                     "optional-lab", "Optional Lab", null,
                     List.of(new PlanDefinitionParser.RelatedStepInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
                     null, null, "could", List.of());
-            var mandatoryVisitAction = new PlanDefinitionParser.StepMetadata(
+            PlanDefinitionParser.StepMetadata mandatoryVisitAction = new PlanDefinitionParser.StepMetadata(
                     "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of());
             when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
@@ -532,16 +533,16 @@ class StepInstanceServiceTest {
                     .thenReturn(List.of(parallelSibling, completedStep));
 
             // Graph: registration → family-planning, registration → pregnancy-profile (parallel branches)
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            var registrationAction = new PlanDefinitionParser.StepMetadata(
+            PlanDefinitionParser.StepMetadata registrationAction = new PlanDefinitionParser.StepMetadata(
                     "registration", "Registration", null,
                     List.of(new PlanDefinitionParser.RelatedStepInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
                             new PlanDefinitionParser.RelatedStepInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
                     null, null, "must", List.of());
-            var familyPlanningAction = new PlanDefinitionParser.StepMetadata(
+            PlanDefinitionParser.StepMetadata familyPlanningAction = new PlanDefinitionParser.StepMetadata(
                     "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of());
-            var pregnancyProfileAction = new PlanDefinitionParser.StepMetadata(
+            PlanDefinitionParser.StepMetadata pregnancyProfileAction = new PlanDefinitionParser.StepMetadata(
                     "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of());
             when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
@@ -580,7 +581,7 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(mustStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
@@ -617,7 +618,7 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(completedOptional, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
@@ -746,7 +747,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(predecessorStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // vitals-recording has relatedAction pointing to chief-complaints
@@ -805,7 +806,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(predecessorStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
@@ -853,7 +854,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(predecessorStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // history-assessment (could) → lab-order
@@ -893,7 +894,7 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // visit-encounter has relatedAction but no one points TO it
