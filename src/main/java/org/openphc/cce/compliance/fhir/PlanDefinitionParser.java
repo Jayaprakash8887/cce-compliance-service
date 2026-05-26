@@ -5,7 +5,7 @@ import ca.uhn.fhir.parser.IParser;
 import org.hl7.fhir.r4.model.*;
 import org.openphc.cce.compliance.domain.entity.TriggerIndex;
 import org.openphc.cce.compliance.domain.entity.TriggerIndexId;
-import org.openphc.cce.compliance.domain.enums.ActionType;
+import org.openphc.cce.compliance.domain.enums.PlanDefinitionActionType;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -213,11 +213,11 @@ public class PlanDefinitionParser {
     }
 
     private boolean isStepAction(PlanDefinition.PlanDefinitionActionComponent action) {
-        return hasTypeCoding(action, ActionType.STEP);
+        return hasTypeCoding(action, PlanDefinitionActionType.STEP);
     }
 
     private boolean isIntelligenceAction(PlanDefinition.PlanDefinitionActionComponent action) {
-        return hasTypeCoding(action, ActionType.FIRE_EVENT);
+        return hasTypeCoding(action, PlanDefinitionActionType.FIRE_EVENT);
     }
 
     /**
@@ -235,7 +235,7 @@ public class PlanDefinitionParser {
         }
     }
 
-    private boolean hasTypeCoding(PlanDefinition.PlanDefinitionActionComponent action, ActionType planActionType) {
+    private boolean hasTypeCoding(PlanDefinition.PlanDefinitionActionComponent action, PlanDefinitionActionType planActionType) {
         if (!action.hasType()) {
             return false;
         }

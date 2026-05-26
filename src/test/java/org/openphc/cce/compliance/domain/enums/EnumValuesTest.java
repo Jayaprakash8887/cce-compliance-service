@@ -91,11 +91,11 @@ class EnumValuesTest {
 
     @Test
     void actionType_hasCorrectValues() {
-        assertEquals(2, ActionType.values().length);
-        assertEquals("step", ActionType.STEP.getCode());
-        assertEquals("fire-event", ActionType.FIRE_EVENT.getCode());
-        assertEquals(ActionType.STEP, ActionType.fromCode("step"));
-        assertEquals(ActionType.FIRE_EVENT, ActionType.fromCode("fire-event"));
-        assertNull(ActionType.fromCode("unknown"));
+        assertEquals(2, PlanDefinitionActionType.values().length);
+        assertEquals("step", PlanDefinitionActionType.STEP.getCode());
+        assertEquals("fire-event", PlanDefinitionActionType.FIRE_EVENT.getCode());
+        assertEquals(PlanDefinitionActionType.STEP, PlanDefinitionActionType.fromCode("step"));
+        assertEquals(PlanDefinitionActionType.FIRE_EVENT, PlanDefinitionActionType.fromCode("fire-event"));
+        assertNull(PlanDefinitionActionType.fromCode("unknown"));
     }
 }
