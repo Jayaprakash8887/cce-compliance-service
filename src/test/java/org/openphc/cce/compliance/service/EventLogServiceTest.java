@@ -149,7 +149,6 @@ class EventLogServiceTest {
         assertNull(captor.getValue().getProtocolInstanceId());
         assertNull(captor.getValue().getProtocolDefinitionId());
         assertNull(captor.getValue().getActionId());
-        assertNull(captor.getValue().getMatchedStepInstanceId());
     }
 
     @Test

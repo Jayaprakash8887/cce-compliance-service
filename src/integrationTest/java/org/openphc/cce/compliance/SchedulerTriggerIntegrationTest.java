@@ -2,8 +2,9 @@ package org.openphc.cce.compliance;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.entity.Deviation;
+import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
 import org.openphc.cce.compliance.domain.enums.StepState;
@@ -23,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -46,9 +48,6 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
 
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;
-
-    @Autowired
-    private EventLogRepository eventLogRepository;
 
     @Autowired
     private ProtocolInstanceRepository protocolInstanceRepository;
@@ -105,14 +104,14 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
 
         // Wait for enrollment + step creation
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            var instances = protocolInstanceRepository.findByPatientId(patientId);
+            List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
             assertThat(instances).isNotEmpty();
-            var steps = stepInstanceRepository.findByProtocolInstanceId(instances.get(0).getId());
+            List<StepInstance> steps = stepInstanceRepository.findByProtocolInstanceId(instances.get(0).getId());
             assertThat(steps).isNotEmpty();
         });
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
-        var steps = stepInstanceRepository.findByProtocolInstanceId(instances.get(0).getId());
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<StepInstance> steps = stepInstanceRepository.findByProtocolInstanceId(instances.get(0).getId());
         // Return the first step (any-encounter-log) in PENDING or COMPLETED state
         return steps.get(0);
     }
@@ -135,7 +134,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         // But initial-enrollment requires type+serviceType matching which won't work due to extractor limitations.
 
         // Alternative: manually insert a PENDING step using repositories.
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         StepInstance pendingStep = StepInstance.builder()
                 .protocolInstance(instances.get(0))
                 .actionId("test-scheduler-action")
@@ -171,7 +170,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-sched-overdue-" + UUID.randomUUID();
         enrollAndGetStep(patientId);
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         StepInstance dueStep = StepInstance.builder()
                 .protocolInstance(instances.get(0))
                 .actionId("test-overdue-action")
@@ -201,7 +200,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         });
 
         // Verify deviation was created
-        var deviations = deviationRepository.findByProtocolInstanceId(instances.get(0).getId());
+        List<Deviation> deviations = deviationRepository.findByProtocolInstanceId(instances.get(0).getId());
         assertThat(deviations).anyMatch(d ->
                 d.getStepInstance().getId().equals(stepId) &&
                 d.getDeviationType() == DeviationType.OVERDUE);
@@ -212,7 +211,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-sched-missed-" + UUID.randomUUID();
         enrollAndGetStep(patientId);
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         StepInstance overdueStep = StepInstance.builder()
                 .protocolInstance(instances.get(0))
                 .actionId("test-missed-action")
@@ -242,7 +241,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         });
 
         // Verify deviation
-        var deviations = deviationRepository.findByProtocolInstanceId(instances.get(0).getId());
+        List<Deviation> deviations = deviationRepository.findByProtocolInstanceId(instances.get(0).getId());
         assertThat(deviations).anyMatch(d ->
                 d.getStepInstance().getId().equals(stepId) &&
                 d.getDeviationType() == DeviationType.MISSED);
@@ -253,7 +252,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         String patientId = "patient-sched-skip-" + UUID.randomUUID();
         enrollAndGetStep(patientId);
 
-        var instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
         StepInstance optionalStep = StepInstance.builder()
                 .protocolInstance(instances.get(0))
                 .actionId("test-optional-action")

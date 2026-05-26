@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
@@ -12,7 +13,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
-import org.openphc.cce.compliance.domain.enums.ActionType;
+import org.openphc.cce.compliance.domain.enums.ActionDefinitionKind;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 
@@ -70,7 +71,7 @@ class ActionDefinitionServiceTest {
             assertEquals("test-action", result.getName());
             assertEquals("Test Action", result.getTitle());
             assertEquals(ActionDefinitionStatus.ACTIVE, result.getStatus());
-            assertEquals(ActionType.CommunicationRequest, result.getActionType());
+            assertEquals(ActionDefinitionKind.CommunicationRequest, result.getActionType());
             assertEquals(definition, result.getDefinition());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_CREATED"),
@@ -92,7 +93,7 @@ class ActionDefinitionServiceTest {
 
             ActionDefinition result = service.createActionDefinition(definition);
 
-            assertEquals(ActionType.Task, result.getActionType());
+            assertEquals(ActionDefinitionKind.Task, result.getActionType());
         }
 
         @Test
@@ -168,7 +169,7 @@ class ActionDefinitionServiceTest {
             assertEquals("http://openphc.org/ActivityDefinition/updated", result.getCanonicalUrl());
             assertEquals("2.0", result.getVersion());
             assertEquals("updated-action", result.getName());
-            assertEquals(ActionType.ServiceRequest, result.getActionType());
+            assertEquals(ActionDefinitionKind.ServiceRequest, result.getActionType());
 
             verify(auditService).audit(eq("ACTION_DEFINITION"), eq("ACTION_DEFINITION_UPDATED"),
                     eq("system"), eq("ActionDefinition"), eq(id.toString()), anyMap());
@@ -410,7 +411,7 @@ class ActionDefinitionServiceTest {
                 .name("test-action")
                 .title("Test Action")
                 .status(ActionDefinitionStatus.ACTIVE)
-                .actionType(ActionType.CommunicationRequest)
+                .actionType(ActionDefinitionKind.CommunicationRequest)
                 .definition(objectMapper.createObjectNode())
                 .build();
     }
@@ -425,7 +426,7 @@ class ActionDefinitionServiceTest {
         node.put("title", title);
         node.put("kind", kind);
 
-        var extensions = node.putArray("extension");
+        ArrayNode extensions = node.putArray("extension");
 
         ObjectNode sevExt = extensions.addObject();
         sevExt.put("url", "http://openphc.org/fhir/StructureDefinition/intelligence-severity");

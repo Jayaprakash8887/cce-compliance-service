@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.openphc.cce.compliance.domain.entity.Deviation;
+import org.openphc.cce.compliance.domain.entity.IntelligenceEventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
@@ -23,6 +25,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -131,7 +134,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, event);
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            var instances = protocolInstanceRepository.findByPatientId(patientId);
+            List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
             assertThat(instances).anyMatch(i -> i.getProtocolCanonical().equals(expectedCanonical));
         });
 
@@ -183,21 +186,21 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             });
 
             // Verify deviation was created
-            var deviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
+            List<Deviation> deviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
             assertThat(deviations).anyMatch(d ->
                     d.getStepInstance().getId().equals(stepId) &&
                             d.getDeviationType() == DeviationType.OVERDUE);
 
             // Verify IntelligenceEventLog was created by intelligence evaluation
             await().atMost(10, SECONDS).untilAsserted(() -> {
-                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
                 assertThat(eventLogs).isNotEmpty();
             });
 
-            var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+            List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
             assertThat(eventLogs).hasSize(1);
 
-            var eventLog = eventLogs.get(0);
+            IntelligenceEventLog eventLog = eventLogs.get(0);
             assertThat(eventLog.isPublished()).isTrue();
             assertThat(eventLog.getPublishedAt()).isNotNull();
 
@@ -213,8 +216,8 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .andExpect(jsonPath("$.evaluationContext").isNotEmpty());
 
             // Verify deviation.intelligenceEventId was set
-            var updatedDeviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
-            var deviation = updatedDeviations.stream()
+            List<Deviation> updatedDeviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
+            Deviation deviation = updatedDeviations.stream()
                     .filter(d -> d.getStepInstance().getId().equals(stepId))
                     .findFirst().orElseThrow();
             assertThat(deviation.getIntelligenceEventId()).isNotNull();
@@ -257,14 +260,14 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
 
             // The "missed-critical-alert" intelligence action matches deviationType == "missed"
             await().atMost(10, SECONDS).untilAsserted(() -> {
-                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
                 assertThat(eventLogs).isNotEmpty();
             });
 
-            var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+            List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
             assertThat(eventLogs).hasSize(1);
 
-            var eventLog = eventLogs.get(0);
+            IntelligenceEventLog eventLog = eventLogs.get(0);
             assertThat(eventLog.isPublished()).isTrue();
             assertThat(eventLog.getTriggerReason()).isEqualTo("missed");
             assertThat(eventLog.getStepActionId()).isEqualTo("missed-critical-alert");
@@ -305,7 +308,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             });
 
             // PENDING→DUE does not create a deviation, so no intelligence actions should fire
-            var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+            List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
             assertThat(eventLogs).isEmpty();
         }
     }
@@ -345,11 +348,11 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             kafkaTemplate.send(schedulerTopic, trigger);
 
             await().atMost(30, SECONDS).untilAsserted(() -> {
-                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
                 assertThat(eventLogs).isNotEmpty();
             });
 
-            var eventLog = intelligenceEventLogRepository.findByStepInstanceId(stepId).get(0);
+            IntelligenceEventLog eventLog = intelligenceEventLogRepository.findByStepInstanceId(stepId).get(0);
 
             // GET by ID
             mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", eventLog.getId()))
@@ -392,7 +395,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             kafkaTemplate.send(schedulerTopic, trigger);
 
             await().atMost(30, SECONDS).untilAsserted(() -> {
-                var eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
+                List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
                 assertThat(eventLogs).isNotEmpty();
             });
 

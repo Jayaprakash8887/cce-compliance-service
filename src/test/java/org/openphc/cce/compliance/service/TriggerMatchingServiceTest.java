@@ -45,7 +45,7 @@ class TriggerMatchingServiceTest {
             List<CodePathTriple> codes = List.of(
                     new CodePathTriple("code", "http://loinc.org", "85354-9")
             );
-            List<MatchedAction> matches = service.findStructuralMatches("Observation", codes);
+            List<MatchedStep> matches = service.findStructuralMatches("Observation", codes);
 
             assertEquals(1, matches.size());
             assertEquals(protDefId, matches.get(0).protocolDefinitionId());
@@ -64,7 +64,7 @@ class TriggerMatchingServiceTest {
                     new CodePathTriple("code", "http://loinc.org", "85354-9"),
                     new CodePathTriple("category", "http://terminology.hl7.org/CodeSystem/observation-category", "laboratory")
             );
-            List<MatchedAction> matches = service.findStructuralMatches("Observation", codes);
+            List<MatchedStep> matches = service.findStructuralMatches("Observation", codes);
 
             assertEquals(1, matches.size());
             assertEquals(actionId, matches.get(0).actionId());
@@ -78,21 +78,21 @@ class TriggerMatchingServiceTest {
             List<CodePathTriple> codes = List.of(
                     new CodePathTriple("code", "http://unknown.org", "unknown")
             );
-            List<MatchedAction> matches = service.findStructuralMatches("Observation", codes);
+            List<MatchedStep> matches = service.findStructuralMatches("Observation", codes);
 
             assertTrue(matches.isEmpty());
         }
 
         @Test
         void nullResourceType_returnsEmptyList() {
-            List<MatchedAction> matches = service.findStructuralMatches(null, List.of());
+            List<MatchedStep> matches = service.findStructuralMatches(null, List.of());
             assertTrue(matches.isEmpty());
             verifyNoInteractions(triggerIndexRepository);
         }
 
         @Test
         void blankResourceType_returnsEmptyList() {
-            List<MatchedAction> matches = service.findStructuralMatches("  ", List.of());
+            List<MatchedStep> matches = service.findStructuralMatches("  ", List.of());
             assertTrue(matches.isEmpty());
             verifyNoInteractions(triggerIndexRepository);
         }
@@ -143,7 +143,7 @@ class TriggerMatchingServiceTest {
                             new Object[]{protDefId2, "action-b"}
                     ));
 
-            List<MatchedAction> matches = service.findStructuralMatches("Encounter",
+            List<MatchedStep> matches = service.findStructuralMatches("Encounter",
                     List.of(new CodePathTriple("type", "http://snomed.info/sct", "11429006")));
 
             assertEquals(2, matches.size());

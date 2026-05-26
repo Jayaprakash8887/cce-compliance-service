@@ -469,7 +469,6 @@ All errors follow a consistent structure:
 | `processingStatus` | String | No | `matched`, `zero_match`, `duplicate` |
 | `protocolInstanceId` | UUID | Yes | Matched protocol instance |
 | `protocolDefinitionId` | UUID | Yes | Matched protocol definition |
-| `matchedStepInstanceId` | UUID | Yes | Matched step instance |
 
 ---
 

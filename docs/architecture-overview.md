@@ -191,8 +191,8 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog)
-│   ├── enums/                                 # 10 value-based enums
+│   ├── entity/                                # 9 JPA entities (incl. ActionDefinition, IntelligenceEventLog)
+│   ├── enums/                                 # 11 value-based enums
 │   └── repository/                            # 9 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
@@ -515,24 +515,29 @@ The table below maps CCE domain concepts to their FHIR PlanDefinition counterpar
 | CCE Domain Concept | FHIR PlanDefinition Element | Description |
 |---|---|---|
 | **Protocol Definition** | `PlanDefinition` | The clinical protocol (e.g., ANC High-Risk Monitoring) |
-| **Protocol Step** | `PlanDefinition.action` | A step in the protocol (e.g., "ANC Visit 2") |
-| **Intelligence Action** | `PlanDefinition.action.action` | A nested action that defines a conditional intelligence evaluation |
+| **Protocol Step** | `PlanDefinition.action` (type=step) | A step in the protocol with its own trigger (e.g., "ANC Visit 2"). Nested actions of type "step" are flattened to peer-level steps. |
+| **Flattened Sub-Step** | `PlanDefinition.action.action` (type=step) | A nested step flattened into a peer-level step linked to its parent via `relatedSteps`. |
+| **Intelligence Action** | `PlanDefinition.action.action` (type=fire-event) | A nested action that defines a conditional intelligence evaluation |
 
 ```mermaid
 flowchart LR
     subgraph "FHIR PlanDefinition Structure"
         PD["PlanDefinition"]
-        A1["action"]
-        A2["action"]
-        IA1["action.action"]
-        IA2["action.action"]  
-        IA3["action.action"]
+        A1["action<br/>type=step"]
+        A2["action<br/>type=step<br/>(with nested actions)"]
+        IA1["action.action<br/>type=fire-event"]
+        IA2["action.action<br/>type=fire-event"]  
+        SS1["action.action<br/>type=step"]
+        SS2["action.action<br/>type=step"]
+        IA3["action.action.action<br/>type=fire-event"]
 
         PD --> A1
         PD --> A2
         A1 --> IA1
         A1 --> IA2
-        A2 --> IA3
+        A2 --> SS1
+        A2 --> SS2
+        SS1 --> IA3
     end
 
     subgraph "CCE Domain Model"
@@ -541,13 +546,17 @@ flowchart LR
         S2["Step: anc-visit-2"]
         R1["Intelligence Action:<br/>overdue-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
-        R3["Intelligence Action:<br/>late-completion-alert"]
+        SUB1["Step: referral<br/>(flattened, relatedStep→anc-visit-2)"]
+        SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral)"]
+        R3["Intelligence Action:<br/>referral-escalation"]
 
         PROTO --> S1
         PROTO --> S2
+        PROTO --> SUB1
+        PROTO --> SUB2
         S1 --> R1
         S1 --> R2
-        S2 --> R3
+        SUB1 --> R3
     end
 
     PD -.- PROTO
@@ -555,6 +564,8 @@ flowchart LR
     A2 -.- S2
     IA1 -.- R1
     IA2 -.- R2
+    SS1 -.- SUB1
+    SS2 -.- SUB2
     IA3 -.- R3
 ```
 
@@ -621,6 +632,103 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 | `evaluation_context` | Runtime variables passed to the condition evaluator |
 
 All execution and evaluation context is stored in a single row — no FK constraints, no joins required. See [Data Dictionary §11](data-dictionary.md#11-intelligence_event_log).
+
+### 6.4 Flat Step Model (Nested Actions Flattened)
+
+Nested `PlanDefinition.action.action[]` entries with type `"step"` are **flattened** into peer-level steps at parse time by `extractSteps()`. There is no parent-child hierarchy in the domain model — all steps (top-level and nested) are stored uniformly in `step_instance` without any `parent_step_id`. Relationships between steps are expressed exclusively via `relatedSteps` (derived from FHIR `relatedAction`).
+
+**Key design decisions:**
+- `StepMetadata` is a flat record with 8 fields (no `subSteps` list): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`
+- Entry-point sub-steps (those with no `relatedAction` dependency on siblings) automatically get a `relatedStep` reference to their parent action (relationship: `after-end`, no offset) added by the parser — this ensures they are created when the parent completes
+- Sub-steps with `relatedAction` pointing to siblings are flattened as-is and created progressively via standard `createDependentSteps()` logic
+- All trigger indexing uses the step's **plain action ID** (e.g., `"anc-visit-1-referral"`)
+- Intelligence actions are found via flat lookup by `actionId` (no tree traversal needed)
+
+#### actionId Validation
+
+All action IDs in a PlanDefinition are validated at load time via `validateActionIds()`:
+- **Mandatory:** Every action at every nesting level must have a non-blank `id`
+- **Unique:** No two actions (at any level) may share the same `id`
+
+Violations are rejected with `IllegalArgumentException` at protocol load time.
+
+#### Classification Rules
+
+Actions at ALL levels are classified by type (`type.coding[0]` — both `system` and `code` are validated):
+
+| System URI | Code | Classification | Description |
+|---|---|---|---|
+| `http://openphc.org/fhir/CodeSystem/action-type` | `"step"` | Step | Trigger-based action (has triggers, tracked as step instance) |
+| `http://terminology.hl7.org/CodeSystem/action-type` | `"fire-event"` | Intelligence Action | Conditional intelligence evaluation (nested only) |
+| *(missing or unrecognized)* | | **Rejected** | `IllegalArgumentException` at load time |
+
+Every action **must** have an explicit `type` coding with the correct system URI — `"step"` uses the CCE custom CodeSystem, `"fire-event"` uses the HL7 standard CodeSystem (extensible binding per FHIR R4 `PlanDefinition.action.type`).
+
+#### Flattening Example
+
+Given this PlanDefinition structure:
+```json
+{
+  "id": "anc-visit-1",
+  "type": { "coding": [{ "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }] },
+  "trigger": [{ "data": [{ "type": "Encounter", "codeFilter": ["..."] }] }],
+  "action": [
+    {
+      "id": "anc-visit-1-referral",
+      "type": { "coding": [{ "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }] },
+      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }],
+      "relatedAction": [{ "actionId": "anc-visit-1-referral-ack", "relationship": "after-end" }]
+    },
+    {
+      "id": "anc-visit-1-referral-ack",
+      "type": { "coding": [{ "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }] },
+      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }]
+    },
+    {
+      "id": "anc-visit-1-escalation",
+      "type": { "coding": [{ "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }] },
+      "condition": [{ "kind": "applicability", "expression": { "language": "text/jsonlogic", "expression": "..." } }],
+      "definitionCanonical": "ActivityDefinition/anc-escalation|1.0"
+    }
+  ]
+}
+```
+
+`extractSteps()` produces 3 flat `StepMetadata` entries:
+1. `anc-visit-1` — top-level step with its trigger
+2. `anc-visit-1-referral` — flattened with `relatedSteps: [{actionId: "anc-visit-1", relationship: "after-end"}]` (auto-added parent ref, since it has no sibling dependency) + `relatedSteps: [{actionId: "anc-visit-1-referral-ack", relationship: "after-end"}]`
+3. `anc-visit-1-referral-ack` — flattened with `relatedSteps: [{actionId: "anc-visit-1", relationship: "after-end"}]` (auto-added parent ref; its sibling dependency via `relatedAction` to the `-ack` step is on the referral step, not this one)
+
+The intelligence action (`anc-visit-1-escalation`) is extracted into `anc-visit-1`'s `intelligenceActions` list.
+
+#### Step Lifecycle (Flat)
+
+```mermaid
+sequenceDiagram
+    participant Engine as ComplianceEngine
+    participant SIS as StepInstanceService
+    participant DB as step_instance
+
+    Note over Engine: Event matches "anc-visit-1" → step created & completed
+    Engine->>SIS: completeStep(anc-visit-1)
+    SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral"<br/>(has relatedStep to anc-visit-1, relationship after-end)
+    SIS->>DB: Create anc-visit-1-referral (PENDING)
+
+    Note over Engine: Later — event matches "anc-visit-1-referral" → completed
+    Engine->>SIS: completeStep(anc-visit-1-referral)
+    SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral-ack"<br/>(has relatedStep to anc-visit-1-referral, relationship after-end)
+    SIS->>DB: Create anc-visit-1-referral-ack (PENDING)
+```
+
+#### Trigger Indexing
+
+All steps (regardless of original nesting level) are indexed in `trigger_index` with their plain action ID:
+
+| `action_id` | Source |
+|---|---|
+| `anc-visit-1` | Top-level action |
+| `anc-visit-1-referral` | Originally nested under anc-visit-1, now a peer |
+| `anc-visit-1-referral-ack` | Originally nested under anc-visit-1, now a peer |
 
 ## 7. Security
 

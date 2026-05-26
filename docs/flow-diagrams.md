@@ -130,6 +130,9 @@ sequenceDiagram
     Parser->>Parser: FhirContext.parseResource()
     Parser-->>Service: PlanDefinition
 
+    Service->>Parser: validateActionIds(planDefinition)
+    Note over Service,Parser: Validates all actionIds are<br/>mandatory (non-blank) and unique
+
     Service->>Validator: validateOrThrow(planDefinition, "PlanDefinition")
     alt Validation Fails
         Validator-->>Service: throw FhirValidationException
@@ -255,7 +258,7 @@ flowchart TD
     U --> V
 
     V --> W["Set matchedEventId"]
-    W --> X["Update Event Log<br/>matchedStepInstanceId"]
+    W --> X["Update Event Log"]
 ```
 
 ## 5. Deviation Detection & Recording
@@ -468,4 +471,37 @@ flowchart TD
     K -->|"No"| M["Publish to &lt;topic&gt;.dlq"]
     M --> N["Acknowledge original offset"]
     N --> O["Log DLQ routing"]
+```
+
+## 9. Flat Sub-Step Processing
+
+All steps (including those originally nested in `action.action[]`) are treated as peers. Nested step-type actions are flattened at parse time with `relatedSteps` linking them to their parent. No separate sub-step routing is needed — the standard matching and completion flow handles them uniformly.
+
+```mermaid
+flowchart TD
+    MATCH["Tier 1/2 match returns actionId"] --> NORMAL["Standard step processing<br/>(Section 1, Step 6)"]
+    NORMAL --> COMPLETE["completeStep(step)"]
+    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this actionId)"]
+    DEPS --> CREATED["Create dependent steps (PENDING)"]
+    CREATED --> CHECK["Check protocol completion"]
+```
+
+### Dependent Step Creation on Completion
+
+When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's `actionId` and creates them with appropriate due dates.
+
+```mermaid
+flowchart TD
+    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → completedStep.actionId"]
+    FIND --> LOOP{"For each dependent step"}
+    LOOP --> CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt, after-start → dueDate)"]
+    CALC --> RECURRING{"TimingInfo.count > 1?"}
+
+    RECURRING -->|"Yes"| MULTI["Create N recurring instances with staggered due dates"]
+    RECURRING -->|"No"| SINGLE["createStep(dependent, dueDate)"]
+
+    MULTI --> NEXT["Continue to next"]
+    SINGLE --> NEXT
+    NEXT --> LOOP
+    LOOP -->|"Done"| END["Return"]
 ```

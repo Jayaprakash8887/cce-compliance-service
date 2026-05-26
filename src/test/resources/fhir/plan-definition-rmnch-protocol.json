@@ -4,15 +4,15 @@
   "url": "http://mdtlabs.com/PlanDefinition/rmnch-protocol",
   "version": "1.0.0",
   "name": "RMNCHProtocol",
-  "title": "RMNCH — Reproductive, Maternal, Newborn & Child Health Protocol",
+  "title": "RMNCH \u2014 Reproductive, Maternal, Newborn & Child Health Protocol",
   "status": "active",
   "date": "2026-05-14",
-  "description": "Tracks RMNCH workflow from household member registration through family planning, antenatal care, pregnancy outcome, and postnatal care. Registration enrolls the patient and creates three optional pending tracks: (a) Family Planning, (b) Pregnancy Profile → mandatory ANC chain, (c) Pregnancy Outcome → PNC. ANC visits 1–3 become mandatory only when Pregnancy Profile is completed. Referrals (ServiceRequest) are informational side-events — not tracked as protocol steps.",
+  "description": "Tracks RMNCH workflow from household member registration through family planning, antenatal care, pregnancy outcome, and postnatal care. Registration enrolls the patient and creates three optional pending tracks: (a) Family Planning, (b) Pregnancy Profile \u2192 mandatory ANC chain, (c) Pregnancy Outcome \u2192 PNC. ANC visits 1\u20133 become mandatory only when Pregnancy Profile is completed. Referrals (ServiceRequest) are informational side-events \u2014 not tracked as protocol steps.",
   "action": [
     {
       "id": "registration",
       "title": "Patient Registration",
-      "description": "Enrollment trigger — matches any RelatedPerson resource (household member registration). On completion, creates pending steps for family planning, pregnancy profile, and pregnancy outcome.",
+      "description": "Enrollment trigger \u2014 matches any RelatedPerson resource (household member registration). On completion, creates pending steps for family planning, pregnancy profile, and pregnancy outcome.",
       "trigger": [
         {
           "type": "named-event",
@@ -64,12 +64,20 @@
           "period": 1,
           "periodUnit": "d"
         }
+      },
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
       }
     },
     {
       "id": "family-planning",
       "title": "Family Planning",
-      "description": "Family planning assessment. Optional — may or may not occur after registration.",
+      "description": "Family planning assessment. Optional \u2014 may or may not occur after registration.",
       "trigger": [
         {
           "type": "named-event",
@@ -106,12 +114,20 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 30
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "pregnancy-profile",
       "title": "Pregnancy Profile",
-      "description": "Pregnancy registration. Optional from registration — not every enrolled woman becomes pregnant. When completed, triggers the mandatory ANC visit chain (visits 1 → 2 → 3).",
+      "description": "Pregnancy registration. Optional from registration \u2014 not every enrolled woman becomes pregnant. When completed, triggers the mandatory ANC visit chain (visits 1 \u2192 2 \u2192 3).",
       "trigger": [
         {
           "type": "named-event",
@@ -160,7 +176,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 14
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "anc-visit-1",
@@ -233,7 +257,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 7
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "anc-visit-2",
@@ -296,12 +328,20 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 7
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "anc-visit-3",
       "title": "ANC Visit 3",
-      "description": "Third antenatal care visit. Mandatory after ANC Visit 2. Terminal in the ANC chain — pregnancy outcome is tracked independently (pending from registration).",
+      "description": "Third antenatal care visit. Mandatory after ANC Visit 2. Terminal in the ANC chain \u2014 pregnancy outcome is tracked independently (pending from registration).",
       "trigger": [
         {
           "type": "named-event",
@@ -347,7 +387,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 7
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "anc-referral",
@@ -398,12 +446,20 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 7
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "pregnancy-outcome",
       "title": "Pregnancy Outcome",
-      "description": "Pregnancy outcome recording (delivery). Pending from registration — available regardless of whether the ANC chain was completed, skipped, or never started. When completed, triggers PNC.",
+      "description": "Pregnancy outcome recording (delivery). Pending from registration \u2014 available regardless of whether the ANC chain was completed, skipped, or never started. When completed, triggers PNC.",
       "trigger": [
         {
           "type": "named-event",
@@ -452,7 +508,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 14
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     },
     {
       "id": "pnc",
@@ -494,7 +558,15 @@
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 7
         }
-      ]
+      ],
+      "type": {
+        "coding": [
+          {
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
+            "code": "step"
+          }
+        ]
+      }
     }
   ]
 }

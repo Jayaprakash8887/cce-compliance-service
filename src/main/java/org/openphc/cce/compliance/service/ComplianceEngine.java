@@ -120,14 +120,14 @@ public class ComplianceEngine {
         }
 
         // Steps 5-7: Two-tier matching
-        Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache = new HashMap<>();
-        List<MatchedAction> finalMatches = matchingDurationTimer.record(() ->
-                performTwoTierMatching(resourceType, codes, data, actionCache));
+        Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache = new HashMap<>();
+        List<MatchedStep> finalMatches = matchingDurationTimer.record(() ->
+                performTwoTierMatching(resourceType, codes, data, stepCache));
 
         // Step 8: Result classification
         if (finalMatches != null && !finalMatches.isEmpty()) {
-            for (MatchedAction match : finalMatches) {
-                processMatch(match, event, eventLog, actionCache);
+            for (MatchedStep match : finalMatches) {
+                processMatch(match, event, eventLog, stepCache);
             }
             eventLogService.updateStatus(eventLog, ProcessingStatus.MATCHED);
             eventsMatchedCounter.increment();
@@ -157,7 +157,7 @@ public class ComplianceEngine {
 
         UUID protocolInstanceId = UUID.fromString(protocolInstanceIdStr);
         ProtocolInstance protocolInstance = protocolInstanceService.findById(protocolInstanceId);
-        Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache = new HashMap<>();
+        Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache = new HashMap<>();
 
         // Link event_log to the matched protocol instance
         eventLog.setProtocolInstanceId(protocolInstanceId);
@@ -166,7 +166,7 @@ public class ComplianceEngine {
 
         StepInstance step = stepInstanceService.findActionableStep(protocolInstanceId, actionId);
         if (step == null) {
-            step = createInitialStep(protocolInstance, actionId, actionCache);
+            step = createInitialStep(protocolInstance, actionId, stepCache);
         }
 
         stepInstanceService.completeStep(step, eventLog.getId(), event.getSource());
@@ -181,13 +181,13 @@ public class ComplianceEngine {
                 event.getId(), actionId, protocolInstanceId);
     }
 
-    private List<MatchedAction> performTwoTierMatching(String resourceType, List<CodePathTriple> codes,
+    private List<MatchedStep> performTwoTierMatching(String resourceType, List<CodePathTriple> codes,
                                                        JsonNode eventData,
-                                                       Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache) {
-        List<MatchedAction> finalMatches = new ArrayList<>();
+                                                       Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache) {
+        List<MatchedStep> finalMatches = new ArrayList<>();
 
         // Step 5: Tier 1 structural match
-        List<MatchedAction> tier1Matches = triggerMatchingService.findStructuralMatches(resourceType, codes);
+        List<MatchedStep> tier1Matches = triggerMatchingService.findStructuralMatches(resourceType, codes);
 
         // Step 6: Collect condition-only triggers
         List<ConditionOnlyTrigger> conditionOnlyTriggers = triggerMatchingService.getConditionOnlyTriggers();
@@ -195,28 +195,28 @@ public class ComplianceEngine {
         // Step 7: Tier 2 condition evaluation
 
         // Evaluate Tier 1 results — check if they have conditions
-        for (MatchedAction match : tier1Matches) {
-            List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(match.protocolDefinitionId(), actionCache);
+        for (MatchedStep match : tier1Matches) {
+            List<PlanDefinitionParser.StepMetadata> steps = getStepsForProtocol(match.protocolDefinitionId(), stepCache);
 
-            PlanDefinitionParser.ActionMetadata actionMetadata = actions.stream()
-                    .filter(a -> match.actionId().equals(a.id()))
+            String actionId = match.actionId();
+
+            PlanDefinitionParser.StepMetadata stepMetadata = steps.stream()
+                    .filter(a -> actionId.equals(a.id()))
                     .findFirst()
                     .orElse(null);
 
-            if (actionMetadata == null) {
+            if (stepMetadata == null) {
                 continue;
             }
 
             // Check if this action's trigger has a condition
-            boolean hasCondition = actionMetadata.triggers().stream()
+            boolean hasCondition = stepMetadata.triggers().stream()
                     .anyMatch(t -> t.condition() != null);
 
             if (!hasCondition) {
-                // Scenario 1 (F1) or Scenario 2 (F1,F2) — no condition, pass directly
                 finalMatches.add(match);
             } else {
-                // Scenario 3 (F1,F3) or Scenario 4 (F1,F2,F3) — evaluate condition
-                boolean conditionMet = evaluateActionConditions(actionMetadata, eventData);
+                boolean conditionMet = evaluateTriggerConditions(stepMetadata, eventData);
                 if (conditionMet) {
                     finalMatches.add(match);
                 }
@@ -228,17 +228,16 @@ public class ComplianceEngine {
             boolean result = expressionEvaluationService.evaluate(
                     trigger.conditionLanguage(), trigger.conditionExpression(), eventData);
             if (result) {
-                finalMatches.add(new MatchedAction(trigger.protocolDefinitionId(), trigger.actionId()));
+                finalMatches.add(new MatchedStep(trigger.protocolDefinitionId(), trigger.actionId()));
             }
         }
 
         return finalMatches;
     }
 
-    private boolean evaluateActionConditions(PlanDefinitionParser.ActionMetadata actionMetadata,
-                                             JsonNode eventData) {
-
-        for (PlanDefinitionParser.TriggerInfo trigger : actionMetadata.triggers()) {
+    private boolean evaluateTriggerConditions(PlanDefinitionParser.StepMetadata stepMetadata,
+                                               JsonNode eventData) {
+        for (PlanDefinitionParser.TriggerInfo trigger : stepMetadata.triggers()) {
             if (trigger.condition() != null) {
                 boolean result = expressionEvaluationService.evaluate(
                         trigger.condition().language(),
@@ -252,8 +251,8 @@ public class ComplianceEngine {
         return false;
     }
 
-    private void processMatch(MatchedAction match, CloudEventMessage event, EventLog eventLog,
-                              Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache) {
+    private void processMatch(MatchedStep match, CloudEventMessage event, EventLog eventLog,
+                              Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache) {
         ProtocolDefinition protocolDef = protocolDefinitionService.findById(match.protocolDefinitionId());
         String patientId = event.getSubject();
 
@@ -261,16 +260,18 @@ public class ComplianceEngine {
         ProtocolInstance protocolInstance = protocolInstanceService.enrollPatient(
                 patientId, protocolDef, OffsetDateTime.now(ZoneOffset.UTC));
 
+        String actionId = match.actionId();
+
         // Link event_log to the matched protocol instance
         eventLog.setProtocolInstanceId(protocolInstance.getId());
         eventLog.setProtocolDefinitionId(protocolDef.getId());
-        eventLog.setActionId(match.actionId());
+        eventLog.setActionId(actionId);
 
         // Find or create an actionable step
         StepInstance step = stepInstanceService.findActionableStep(
-                protocolInstance.getId(), match.actionId());
+                protocolInstance.getId(), actionId);
         if (step == null) {
-            step = createInitialStep(protocolInstance, match.actionId(), actionCache);
+            step = createInitialStep(protocolInstance, actionId, stepCache);
         }
 
         // Complete the step
@@ -282,17 +283,17 @@ public class ComplianceEngine {
         auditService.audit("COMPLIANCE", "EVENT_MATCHED", "system",
                 "EventLog", eventLog.getId().toString(),
                 Map.of("protocolDefinitionId", match.protocolDefinitionId().toString(),
-                        "actionId", match.actionId(),
+                        "actionId", actionId,
                         "protocolInstanceId", protocolInstance.getId().toString(),
                         "patientId", patientId));
     }
 
     private StepInstance createInitialStep(ProtocolInstance protocolInstance, String actionId,
-                                           Map<UUID, List<PlanDefinitionParser.ActionMetadata>> actionCache) {
+                                           Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache) {
         UUID protocolDefId = protocolInstance.getProtocolDefinition().getId();
-        List<PlanDefinitionParser.ActionMetadata> actions = getActionsForProtocol(protocolDefId, actionCache);
+        List<PlanDefinitionParser.StepMetadata> steps = getStepsForProtocol(protocolDefId, stepCache);
 
-        PlanDefinitionParser.ActionMetadata actionMetadata = actions.stream()
+        PlanDefinitionParser.StepMetadata stepMetadata = steps.stream()
                 .filter(a -> actionId.equals(a.id()))
                 .findFirst()
                 .orElse(null);
@@ -302,11 +303,11 @@ public class ComplianceEngine {
         OffsetDateTime missedDate = null;
         String requiredBehavior = null;
 
-        if (actionMetadata != null) {
-            requiredBehavior = actionMetadata.requiredBehavior();
-            if (actionMetadata.toleranceDays() != null) {
-                overdueDate = now.plusDays(actionMetadata.toleranceDays());
-                missedDate = overdueDate.plusDays(actionMetadata.toleranceDays());
+        if (stepMetadata != null) {
+            requiredBehavior = stepMetadata.requiredBehavior();
+            if (stepMetadata.toleranceDays() != null) {
+                overdueDate = now.plusDays(stepMetadata.toleranceDays());
+                missedDate = overdueDate.plusDays(stepMetadata.toleranceDays());
             }
         }
 
@@ -318,12 +319,12 @@ public class ComplianceEngine {
      * Cache-backed lookup of parsed action metadata for a protocol definition.
      * Avoids redundant PlanDefinition JSON parsing within a single event processing cycle.
      */
-    private List<PlanDefinitionParser.ActionMetadata> getActionsForProtocol(
-            UUID protocolDefId, Map<UUID, List<PlanDefinitionParser.ActionMetadata>> cache) {
+    private List<PlanDefinitionParser.StepMetadata> getStepsForProtocol(
+            UUID protocolDefId, Map<UUID, List<PlanDefinitionParser.StepMetadata>> cache) {
         return cache.computeIfAbsent(protocolDefId, id -> {
             ProtocolDefinition protocolDef = protocolDefinitionService.findById(id);
             PlanDefinition planDefinition = planDefinitionParser.parse(protocolDef.getDefinition().toString());
-            return planDefinitionParser.extractActions(planDefinition);
+            return planDefinitionParser.extractSteps(planDefinition);
         });
     }
 }

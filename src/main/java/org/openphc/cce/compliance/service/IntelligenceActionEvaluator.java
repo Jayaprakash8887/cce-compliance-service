@@ -8,6 +8,7 @@ import jakarta.persistence.EntityNotFoundException;
 import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
+
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -83,16 +84,13 @@ public class IntelligenceActionEvaluator {
 
         List<IntelligenceEventLog> eventLogs = new ArrayList<>();
 
-        // Iterate over protocol steps (PlanDefinition.action) to find the matching step
-        for (PlanDefinitionParser.ActionMetadata protocolStep : planDefinitionParser.extractActions(planDefinition)) {
-            if (!step.getActionId().equals(protocolStep.id())) continue;
+        List<PlanDefinitionParser.IntelligenceActionInfo> intelligenceActions =
+                findIntelligenceActions(step, planDefinition);
 
-            // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
-            for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
-                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, deviation, context, triggerReason, eventPayload);
-                if (eventLog != null) {
-                    eventLogs.add(eventLog);
-                }
+        for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : intelligenceActions) {
+            IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, deviation, context, triggerReason, eventPayload);
+            if (eventLog != null) {
+                eventLogs.add(eventLog);
             }
         }
 
@@ -123,16 +121,13 @@ public class IntelligenceActionEvaluator {
 
         List<IntelligenceEventLog> eventLogs = new ArrayList<>();
 
-        // Iterate over protocol steps (PlanDefinition.action) to find the matching step
-        for (PlanDefinitionParser.ActionMetadata protocolStep : planDefinitionParser.extractActions(planDefinition)) {
-            if (!step.getActionId().equals(protocolStep.id())) continue;
+        List<PlanDefinitionParser.IntelligenceActionInfo> intelligenceActions =
+                findIntelligenceActions(step, planDefinition);
 
-            // Evaluate each intelligence action (PlanDefinition.action.action) defined under this step
-            for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : protocolStep.intelligenceActions()) {
-                IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, null, context, "completion", eventPayload);
-                if (eventLog != null) {
-                    eventLogs.add(eventLog);
-                }
+        for (PlanDefinitionParser.IntelligenceActionInfo intelligenceAction : intelligenceActions) {
+            IntelligenceEventLog eventLog = evaluateAction(intelligenceAction, step, null, context, "completion", eventPayload);
+            if (eventLog != null) {
+                eventLogs.add(eventLog);
             }
         }
 
@@ -157,6 +152,25 @@ public class IntelligenceActionEvaluator {
 
     public void evictPlanDefinitionCache(UUID protocolDefinitionId) {
         parsedPlanDefinitionCache.remove(protocolDefinitionId);
+    }
+
+    // ── Intelligence action lookup ──
+
+    /**
+     * Find intelligence actions for a step by matching actionId in the flat step list.
+     */
+    private List<PlanDefinitionParser.IntelligenceActionInfo> findIntelligenceActions(
+            StepInstance step, PlanDefinition planDefinition) {
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
+        String actionId = step.getActionId();
+
+        for (PlanDefinitionParser.StepMetadata protocolStep : steps) {
+            if (actionId.equals(protocolStep.id())) {
+                return protocolStep.intelligenceActions();
+            }
+        }
+        log.debug("No intelligence actions found for action: actionId={}", actionId);
+        return List.of();
     }
 
     // ── Per intelligence action evaluation ──

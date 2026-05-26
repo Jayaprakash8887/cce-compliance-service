@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.hl7.fhir.r4.model.PlanDefinition;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -183,18 +184,18 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             // Mock parser to return action metadata with relatedActions
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("initial-enrollment", "Enrollment",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("bp-check", "after-end",
+                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
                                     BigDecimal.valueOf(7), "d")),
                             null, null, "must", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("bp-check", "BP Check",
+                    new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
                             List.of(), List.of(), null, 3, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -231,18 +232,18 @@ class StepInstanceServiceTest {
             });
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("initial-enrollment", "Enrollment",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("bp-check", "after-start",
+                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-start",
                                     BigDecimal.valueOf(14), "d")),
                             null, null, "must", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("bp-check", "BP Check",
+                    new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
                             List.of(), List.of(), null, 3, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -274,22 +275,22 @@ class StepInstanceServiceTest {
             });
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // Target action has timing: count=3, period=7 days
             PlanDefinitionParser.TimingInfo timing = new PlanDefinitionParser.TimingInfo(
                     3, 1, BigDecimal.valueOf(7), "d");
 
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("initial-enrollment", "Enrollment",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("bp-check", "after-end",
+                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
                                     BigDecimal.valueOf(7), "d")),
                             null, null, "must", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("bp-check", "BP Check",
+                    new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
                             List.of(), List.of(), timing, 3, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -486,15 +487,15 @@ class StepInstanceServiceTest {
                     .thenReturn(List.of(optionalStep, completedStep));
 
             // Build dependency graph: optional-lab → mandatory-visit (optional-lab is ancestor)
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            var optionalLabAction = new PlanDefinitionParser.ActionMetadata(
+            PlanDefinitionParser.StepMetadata optionalLabAction = new PlanDefinitionParser.StepMetadata(
                     "optional-lab", "Optional Lab", null,
-                    List.of(new PlanDefinitionParser.RelatedActionInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
+                    List.of(new PlanDefinitionParser.RelatedStepInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
                     null, null, "could", List.of());
-            var mandatoryVisitAction = new PlanDefinitionParser.ActionMetadata(
+            PlanDefinitionParser.StepMetadata mandatoryVisitAction = new PlanDefinitionParser.StepMetadata(
                     "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of());
-            when(planDefinitionParser.extractActions(mockPlanDef))
+            when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
@@ -532,18 +533,18 @@ class StepInstanceServiceTest {
                     .thenReturn(List.of(parallelSibling, completedStep));
 
             // Graph: registration → family-planning, registration → pregnancy-profile (parallel branches)
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            var registrationAction = new PlanDefinitionParser.ActionMetadata(
+            PlanDefinitionParser.StepMetadata registrationAction = new PlanDefinitionParser.StepMetadata(
                     "registration", "Registration", null,
-                    List.of(new PlanDefinitionParser.RelatedActionInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
-                            new PlanDefinitionParser.RelatedActionInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
+                    List.of(new PlanDefinitionParser.RelatedStepInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
+                            new PlanDefinitionParser.RelatedStepInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
                     null, null, "must", List.of());
-            var familyPlanningAction = new PlanDefinitionParser.ActionMetadata(
+            PlanDefinitionParser.StepMetadata familyPlanningAction = new PlanDefinitionParser.StepMetadata(
                     "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of());
-            var pregnancyProfileAction = new PlanDefinitionParser.ActionMetadata(
+            PlanDefinitionParser.StepMetadata pregnancyProfileAction = new PlanDefinitionParser.StepMetadata(
                     "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of());
-            when(planDefinitionParser.extractActions(mockPlanDef))
+            when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
@@ -580,9 +581,9 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(mustStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
 
@@ -617,9 +618,9 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(completedOptional, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
 
@@ -746,19 +747,19 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(predecessorStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // vitals-recording has relatedAction pointing to chief-complaints
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("vitals-recording", "Vitals",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("chief-complaints", "after-end",
+                            new PlanDefinitionParser.RelatedStepInfo("chief-complaints", "after-end",
                                     BigDecimal.ZERO, "d")),
                             null, 1, "must", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("chief-complaints", "Chief Complaints",
+                    new PlanDefinitionParser.StepMetadata("chief-complaints", "Chief Complaints",
                             List.of(), List.of(), null, 1, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
             when(deviationService.createDeviation(any(), eq(DeviationType.ORDER_VIOLATION), any()))
@@ -805,18 +806,18 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(predecessorStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("vitals-recording", "Vitals",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("chief-complaints", "after-end",
+                            new PlanDefinitionParser.RelatedStepInfo("chief-complaints", "after-end",
                                     BigDecimal.ZERO, "d")),
                             null, 1, "must", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("chief-complaints", "Chief Complaints",
+                    new PlanDefinitionParser.StepMetadata("chief-complaints", "Chief Complaints",
                             List.of(), List.of(), null, 1, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
@@ -853,19 +854,19 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(predecessorStep, completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // history-assessment (could) → lab-order
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("history-assessment", "History",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("history-assessment", "History",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("lab-order", "after-end",
+                            new PlanDefinitionParser.RelatedStepInfo("lab-order", "after-end",
                                     BigDecimal.ZERO, "d")),
                             null, 1, "could", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("lab-order", "Lab Order",
+                    new PlanDefinitionParser.StepMetadata("lab-order", "Lab Order",
                             List.of(), List.of(), null, 1, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
@@ -893,19 +894,19 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(completedStep));
 
-            var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
             // visit-encounter has relatedAction but no one points TO it
-            List<PlanDefinitionParser.ActionMetadata> actions = List.of(
-                    new PlanDefinitionParser.ActionMetadata("visit-encounter", "Visit",
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("visit-encounter", "Visit",
                             List.of(), List.of(
-                            new PlanDefinitionParser.RelatedActionInfo("vitals-recording", "after-start",
+                            new PlanDefinitionParser.RelatedStepInfo("vitals-recording", "after-start",
                                     BigDecimal.ZERO, "d")),
                             null, 1, "must", List.of()),
-                    new PlanDefinitionParser.ActionMetadata("vitals-recording", "Vitals",
+                    new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
                             List.of(), List.of(), null, 1, "must", List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 

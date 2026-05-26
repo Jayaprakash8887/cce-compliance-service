@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
-import org.openphc.cce.compliance.domain.enums.ActionType;
+import org.openphc.cce.compliance.domain.enums.ActionDefinitionKind;
 import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.slf4j.Logger;
@@ -54,7 +54,7 @@ public class ActionDefinitionService {
 
         String name = textField(definition, "name");
         String title = textField(definition, "title");
-        ActionType actionType = extractActionType(definition);
+        ActionDefinitionKind actionType = extractActionType(definition);
 
         ActionDefinition actionDef = ActionDefinition.builder()
                 .canonicalUrl(url)
@@ -197,10 +197,10 @@ public class ActionDefinitionService {
                 .orElseThrow(() -> new EntityNotFoundException("Action definition not found: " + id));
     }
 
-    private ActionType extractActionType(JsonNode definition) {
+    private ActionDefinitionKind extractActionType(JsonNode definition) {
         String kind = requireTextField(definition, "kind");
         try {
-            return ActionType.valueOf(kind);
+            return ActionDefinitionKind.valueOf(kind);
         } catch (IllegalArgumentException e) {
             throw new IllegalArgumentException("Unsupported ActivityDefinition.kind: " + kind);
         }

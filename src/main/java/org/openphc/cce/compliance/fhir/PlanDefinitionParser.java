@@ -5,11 +5,13 @@ import ca.uhn.fhir.parser.IParser;
 import org.hl7.fhir.r4.model.*;
 import org.openphc.cce.compliance.domain.entity.TriggerIndex;
 import org.openphc.cce.compliance.domain.entity.TriggerIndexId;
-import org.openphc.cce.compliance.fhir.PlanDefinitionParser.IntelligenceActionInfo;
+import org.openphc.cce.compliance.domain.enums.PlanDefinitionActionType;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -30,12 +32,16 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Extract all actions from a PlanDefinition with their metadata.
+     * Extract all steps from a PlanDefinition with their metadata.
+     * Flattens nested sub-steps into a single list — all steps are treated uniformly.
+     * Sub-steps that don't already have a relatedStep to their parent get one added
+     * automatically (relationship: "after-end", no offset).
      */
-    public List<ActionMetadata> extractActions(PlanDefinition planDefinition) {
-        List<ActionMetadata> result = new ArrayList<>();
+    public List<StepMetadata> extractSteps(PlanDefinition planDefinition) {
+        List<StepMetadata> result = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
-            result.add(buildActionMetadata(action));
+            validateActionType(action);
+            flattenAction(action, null, result);
         }
         return result;
     }
@@ -43,39 +49,63 @@ public class PlanDefinitionParser {
     /**
      * Build TriggerIndex entries from a PlanDefinition by decomposing each action's
      * trigger data[].codeFilter[] into individual rows.
+     * Sub-step triggers are indexed with their own action ID (flat model).
      */
     public List<TriggerIndex> buildTriggerIndexEntries(PlanDefinition planDefinition, UUID protocolDefinitionId) {
         List<TriggerIndex> entries = new ArrayList<>();
 
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
-            String actionId = action.getId();
+            // Index top-level action triggers
+            indexActionTriggers(action, protocolDefinitionId, entries);
 
-            for (TriggerDefinition trigger : action.getTrigger()) {
-                for (DataRequirement dataReq : trigger.getData()) {
-                    String resourceType = dataReq.getType();
-                    if (resourceType == null) continue;
+            // Recursively index sub-step triggers at all nesting levels
+            indexNestedSubStepTriggers(action, protocolDefinitionId, entries);
+        }
+        return entries;
+    }
 
-                    List<DataRequirement.DataRequirementCodeFilterComponent> codeFilters = dataReq.getCodeFilter();
-                    if (codeFilters == null || codeFilters.isEmpty()) {
-                        // Scenario 1 (F1 only) or Scenario 3 (F1,F3) — resource type match only
-                        // Index with empty path/system/code to mark presence
-                        entries.add(buildTriggerIndex(resourceType, "", "", "", protocolDefinitionId, actionId));
-                        continue;
-                    }
+    /**
+     * Recursively index sub-step triggers using each sub-step's own action ID.
+     */
+    private void indexNestedSubStepTriggers(PlanDefinition.PlanDefinitionActionComponent parentAction,
+                                            UUID protocolDefinitionId,
+                                            List<TriggerIndex> entries) {
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
+            if (isStepAction(nestedAction)) {
+                indexActionTriggers(nestedAction, protocolDefinitionId, entries);
 
-                    for (DataRequirement.DataRequirementCodeFilterComponent cf : codeFilters) {
-                        String path = cf.getPath() != null ? cf.getPath() : "";
-                        for (Coding coding : cf.getCode()) {
-                            String system = coding.getSystem() != null ? coding.getSystem() : "";
-                            String code = coding.getCode() != null ? coding.getCode()
-                                    : (coding.getDisplay() != null ? coding.getDisplay() : "");
-                            entries.add(buildTriggerIndex(resourceType, path, system, code, protocolDefinitionId, actionId));
-                        }
+                // Recurse for deeper nesting levels
+                indexNestedSubStepTriggers(nestedAction, protocolDefinitionId, entries);
+            }
+        }
+    }
+
+    private void indexActionTriggers(PlanDefinition.PlanDefinitionActionComponent action, 
+                                     UUID protocolDefinitionId, List<TriggerIndex> entries) {
+        String actionId = action.getId();
+
+        for (TriggerDefinition trigger : action.getTrigger()) {
+            for (DataRequirement dataReq : trigger.getData()) {
+                String resourceType = dataReq.getType();
+                if (resourceType == null) continue;
+
+                List<DataRequirement.DataRequirementCodeFilterComponent> codeFilters = dataReq.getCodeFilter();
+                if (codeFilters == null || codeFilters.isEmpty()) {
+                    entries.add(buildTriggerIndex(resourceType, "", "", "", protocolDefinitionId, actionId));
+                    continue;
+                }
+
+                for (DataRequirement.DataRequirementCodeFilterComponent cf : codeFilters) {
+                    String path = cf.getPath() != null ? cf.getPath() : "";
+                    for (Coding coding : cf.getCode()) {
+                        String system = coding.getSystem() != null ? coding.getSystem() : "";
+                        String code = coding.getCode() != null ? coding.getCode()
+                                : (coding.getDisplay() != null ? coding.getDisplay() : "");
+                        entries.add(buildTriggerIndex(resourceType, path, system, code, protocolDefinitionId, actionId));
                     }
                 }
             }
         }
-        return entries;
     }
 
     /**
@@ -111,18 +141,163 @@ public class PlanDefinitionParser {
      */
     public void validateTriggers(PlanDefinition planDefinition) {
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
-            for (TriggerDefinition trigger : action.getTrigger()) {
-                if (!hasData(trigger) && getCondition(trigger) == null) {
-                    throw new IllegalArgumentException(
-                            "Action '" + action.getId() + "' has a trigger with no data[] and no condition. " +
-                                    "At least one of data[] or condition must be present.");
-                }
+            validateActionTriggers(action);
+        }
+    }
+
+    /**
+     * Validate that all actions (including nested sub-steps) have a non-blank actionId
+     * and that all actionIds are unique across the entire PlanDefinition.
+     *
+     * @throws IllegalArgumentException if an actionId is missing/blank or duplicated
+     */
+    public void validateActionIds(PlanDefinition planDefinition) {
+        List<String> allIds = new ArrayList<>();
+        collectActionIds(planDefinition.getAction(), allIds);
+
+        // Check for duplicates
+        Set<String> seen = new HashSet<>();
+        for (String id : allIds) {
+            if (!seen.add(id)) {
+                throw new IllegalArgumentException(
+                        "Duplicate actionId '" + id + "' found in PlanDefinition. " +
+                                "All action IDs must be unique across all levels.");
             }
         }
     }
 
-    private ActionMetadata buildActionMetadata(PlanDefinition.PlanDefinitionActionComponent action) {
-        // Extract triggers info
+    private void collectActionIds(List<PlanDefinition.PlanDefinitionActionComponent> actions,
+                                  List<String> ids) {
+        for (PlanDefinition.PlanDefinitionActionComponent action : actions) {
+            String id = action.getId();
+            if (id == null || id.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Action with title '" + (action.hasTitle() ? action.getTitle() : "<untitled>")
+                                + "' is missing a required actionId.");
+            }
+            ids.add(id);
+            // Recurse into nested actions (both step and fire-event types have IDs)
+            if (action.hasAction()) {
+                collectActionIds(action.getAction(), ids);
+            }
+        }
+    }
+
+    private void validateActionTriggers(PlanDefinition.PlanDefinitionActionComponent action) {
+        for (TriggerDefinition trigger : action.getTrigger()) {
+            if (!hasData(trigger) && getCondition(trigger) == null) {
+                throw new IllegalArgumentException(
+                        "Action '" + action.getId() + "' has a trigger with no data[] and no condition. " +
+                                "At least one of data[] or condition must be present.");
+            }
+        }
+
+        // Recursively validate nested steps
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
+            if (isStepAction(nestedAction)) {
+                validateActionTriggers(nestedAction);
+            }
+        }
+    }
+
+    /**
+     * Recursively flatten an action and its nested sub-steps into the result list.
+     * Each nested step-type action becomes a peer entry. If a nested step has no explicit
+     * relatedStep pointing to its parent, one is added (after-end, no offset) to preserve
+     * the progressive instantiation relationship.
+     */
+    private void flattenAction(PlanDefinition.PlanDefinitionActionComponent action,
+                               String parentActionId, List<StepMetadata> result) {
+        List<TriggerInfo> triggers = extractTriggerInfos(action);
+        List<RelatedStepInfo> relatedSteps = extractRelatedSteps(action);
+        TimingInfo timingInfo = extractTimingInfo(action);
+        Integer toleranceDays = extractToleranceDays(action);
+
+        // Extract requiredBehavior
+        String requiredBehavior = action.hasRequiredBehavior()
+                ? action.getRequiredBehavior().toCode()
+                : null;
+
+        // Extract intelligence actions from nested fire-event actions
+        List<IntelligenceActionInfo> intelligenceActions = new ArrayList<>();
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
+            if (isIntelligenceAction(nestedAction)) {
+                IntelligenceActionInfo intelligenceAction = buildIntelligenceActionInfo(nestedAction);
+                if (intelligenceAction != null) {
+                    intelligenceActions.add(intelligenceAction);
+                }
+            } else if (!isStepAction(nestedAction)) {
+                throw new IllegalArgumentException(
+                        "Nested action '" + nestedAction.getId()
+                                + "' must have explicit type coding: 'step' or 'fire-event'");
+            }
+        }
+
+        // If this is a nested step and has no explicit relatedStep to its parent, add one
+        if (parentActionId != null && relatedSteps.stream()
+                .noneMatch(rs -> parentActionId.equals(rs.actionId()))) {
+            relatedSteps = new ArrayList<>(relatedSteps);
+            relatedSteps.add(new RelatedStepInfo(parentActionId, "after-end", null, null));
+        }
+
+        result.add(new StepMetadata(
+                action.getId(),
+                action.getTitle(),
+                triggers,
+                relatedSteps,
+                timingInfo,
+                toleranceDays,
+                requiredBehavior,
+                intelligenceActions
+        ));
+
+        // Recursively flatten nested step-type actions
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
+            if (isStepAction(nestedAction)) {
+                flattenAction(nestedAction, action.getId(), result);
+            }
+        }
+    }
+
+    private boolean isStepAction(PlanDefinition.PlanDefinitionActionComponent action) {
+        return hasTypeCoding(action, PlanDefinitionActionType.STEP);
+    }
+
+    private boolean isIntelligenceAction(PlanDefinition.PlanDefinitionActionComponent action) {
+        return hasTypeCoding(action, PlanDefinitionActionType.FIRE_EVENT);
+    }
+
+    /**
+     * Validate that an action has a required type coding.
+     * Valid types: "step" (trigger-based, may contain sub-steps) or "fire-event" (intelligence).
+     */
+    private void validateActionType(PlanDefinition.PlanDefinitionActionComponent action) {
+        if (!action.hasType()) {
+            throw new IllegalArgumentException(
+                    "Action '" + action.getId() + "' must have explicit type coding: 'step' or 'fire-event'");
+        }
+        if (!isStepAction(action) && !isIntelligenceAction(action)) {
+            throw new IllegalArgumentException(
+                    "Action '" + action.getId() + "' has unsupported type coding. Must be 'step' or 'fire-event'");
+        }
+    }
+
+    private boolean hasTypeCoding(PlanDefinition.PlanDefinitionActionComponent action, PlanDefinitionActionType planActionType) {
+        if (!action.hasType()) {
+            return false;
+        }
+        CodeableConcept type = action.getType();
+        for (Coding coding : type.getCoding()) {
+            if (planActionType.getCode().equals(coding.getCode())
+                    && planActionType.getSystem().equals(coding.getSystem())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+
+    private List<TriggerInfo> extractTriggerInfos(PlanDefinition.PlanDefinitionActionComponent action) {
         List<TriggerInfo> triggers = new ArrayList<>();
         for (TriggerDefinition trigger : action.getTrigger()) {
             List<DataRequirementInfo> dataReqs = new ArrayList<>();
@@ -145,29 +320,30 @@ public class PlanDefinitionParser {
             if (cond != null) {
                 conditionInfo = new ConditionInfo(cond.getLanguage(), cond.getExpression());
             }
-
             triggers.add(new TriggerInfo(dataReqs, conditionInfo));
         }
+        return triggers;
+    }
 
-        // Extract related actions
-        List<RelatedActionInfo> relatedActions = new ArrayList<>();
+    private List<RelatedStepInfo> extractRelatedSteps(PlanDefinition.PlanDefinitionActionComponent action) {
+        List<RelatedStepInfo> relatedSteps = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionRelatedActionComponent ra : action.getRelatedAction()) {
             Duration offset = ra.getOffsetDuration();
-            RelatedActionInfo info = new RelatedActionInfo(
+            relatedSteps.add(new RelatedStepInfo(
                     ra.getActionId(),
                     ra.getRelationship() != null ? ra.getRelationship().toCode() : null,
                     offset != null ? offset.getValue() : null,
                     offset != null && offset.getUnit() != null ? offset.getUnit() : null
-            );
-            relatedActions.add(info);
+            ));
         }
+        return relatedSteps;
+    }
 
-        // Extract timing
-        TimingInfo timingInfo = null;
+    private TimingInfo extractTimingInfo(PlanDefinition.PlanDefinitionActionComponent action) {
         if (action.hasTiming() && action.getTiming() instanceof Timing timing) {
             Timing.TimingRepeatComponent repeat = timing.getRepeat();
             if (repeat != null) {
-                timingInfo = new TimingInfo(
+                return new TimingInfo(
                         repeat.hasCount() ? repeat.getCount() : null,
                         repeat.hasFrequency() ? repeat.getFrequency() : null,
                         repeat.hasPeriod() ? repeat.getPeriod() : null,
@@ -175,88 +351,61 @@ public class PlanDefinitionParser {
                 );
             }
         }
-
-        // Extract tolerance-days extension
-        Integer toleranceDays = extractToleranceDays(action);
-
-        // Extract requiredBehavior
-        String requiredBehavior = action.hasRequiredBehavior()
-                ? action.getRequiredBehavior().toCode()
-                : null;
-
-        // Extract intelligence actions
-        List<IntelligenceActionInfo> intelligenceActions = extractIntelligenceActions(action);
-
-        return new ActionMetadata(
-                action.getId(),
-                action.getTitle(),
-                triggers,
-                relatedActions,
-                timingInfo,
-                toleranceDays,
-                requiredBehavior,
-                intelligenceActions
-        );
+        return null;
     }
 
-    private List<IntelligenceActionInfo> extractIntelligenceActions(PlanDefinition.PlanDefinitionActionComponent action) {
-        List<IntelligenceActionInfo> actions = new ArrayList<>();
-
-        for (PlanDefinition.PlanDefinitionActionComponent intelligenceAction : action.getAction()) {
-            // Extract condition (kind=applicability)
-            String condLanguage = null;
-            String condExpression = null;
-            for (PlanDefinition.PlanDefinitionActionConditionComponent cond : intelligenceAction.getCondition()) {
-                if (cond.getKind() == PlanDefinition.ActionConditionKind.APPLICABILITY
-                        && cond.hasExpression()
-                        && cond.getExpression().hasExpression()) {
-                    condLanguage = cond.getExpression().getLanguage();
-                    condExpression = cond.getExpression().getExpression();
-                    break;
-                }
+    private IntelligenceActionInfo buildIntelligenceActionInfo(PlanDefinition.PlanDefinitionActionComponent intelligenceAction) {
+        // Extract condition (kind=applicability)
+        String condLanguage = null;
+        String condExpression = null;
+        for (PlanDefinition.PlanDefinitionActionConditionComponent cond : intelligenceAction.getCondition()) {
+            if (cond.getKind() == PlanDefinition.ActionConditionKind.APPLICABILITY
+                    && cond.hasExpression()
+                    && cond.getExpression().hasExpression()) {
+                condLanguage = cond.getExpression().getLanguage();
+                condExpression = cond.getExpression().getExpression();
+                break;
             }
-
-            // Skip intelligence actions without a condition
-            if (condLanguage == null || condExpression == null) continue;
-
-            // Extract definitionCanonical
-            String definitionCanonical = null;
-            if (intelligenceAction.hasDefinition() && intelligenceAction.getDefinition() instanceof CanonicalType canonical) {
-                definitionCanonical = canonical.getValue();
-            }
-
-            // Skip intelligence actions without a definitionCanonical
-            if (definitionCanonical == null) continue;
-
-            // Extract required severity and destination extensions
-            String severity = extractCodeExtension(intelligenceAction,
-                    "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
-            String intelligenceDestination = extractCodeExtension(intelligenceAction,
-                    "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
-
-            // Reject intelligence actions missing required extensions
-            if (severity == null) {
-                throw new IllegalArgumentException(
-                        "Intelligence action '" + intelligenceAction.getId()
-                                + "' is missing required extension: intelligence-severity");
-            }
-            if (intelligenceDestination == null) {
-                throw new IllegalArgumentException(
-                        "Intelligence action '" + intelligenceAction.getId()
-                                + "' is missing required extension: intelligence-destination");
-            }
-
-            actions.add(new IntelligenceActionInfo(
-                    intelligenceAction.getId(),
-                    condLanguage,
-                    condExpression,
-                    definitionCanonical,
-                    severity,
-                    intelligenceDestination
-            ));
         }
 
-        return actions;
+        // Skip intelligence actions without a condition
+        if (condLanguage == null || condExpression == null) return null;
+
+        // Extract definitionCanonical
+        String definitionCanonical = null;
+        if (intelligenceAction.hasDefinition() && intelligenceAction.getDefinition() instanceof CanonicalType canonical) {
+            definitionCanonical = canonical.getValue();
+        }
+
+        // Skip intelligence actions without a definitionCanonical
+        if (definitionCanonical == null) return null;
+
+        // Extract required severity and destination extensions
+        String severity = extractCodeExtension(intelligenceAction,
+                "http://openphc.org/fhir/StructureDefinition/intelligence-severity");
+        String intelligenceDestination = extractCodeExtension(intelligenceAction,
+                "http://openphc.org/fhir/StructureDefinition/intelligence-destination");
+
+        // Reject intelligence actions missing required extensions
+        if (severity == null) {
+            throw new IllegalArgumentException(
+                    "Intelligence action '" + intelligenceAction.getId()
+                            + "' is missing required extension: intelligence-severity");
+        }
+        if (intelligenceDestination == null) {
+            throw new IllegalArgumentException(
+                    "Intelligence action '" + intelligenceAction.getId()
+                            + "' is missing required extension: intelligence-destination");
+        }
+
+        return new IntelligenceActionInfo(
+                intelligenceAction.getId(),
+                condLanguage,
+                condExpression,
+                definitionCanonical,
+                severity,
+                intelligenceDestination
+        );
     }
 
     private Integer extractToleranceDays(PlanDefinition.PlanDefinitionActionComponent action) {
@@ -305,11 +454,11 @@ public class PlanDefinitionParser {
 
     // ── Inner record types for structured extraction ──
 
-    public record ActionMetadata(
+    public record StepMetadata(
             String id,
             String title,
             List<TriggerInfo> triggers,
-            List<RelatedActionInfo> relatedActions,
+            List<RelatedStepInfo> relatedSteps,
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
@@ -341,7 +490,7 @@ public class PlanDefinitionParser {
             String expression
     ) {}
 
-    public record RelatedActionInfo(
+    public record RelatedStepInfo(
             String actionId,
             String relationship,
             java.math.BigDecimal offsetValue,
@@ -369,4 +518,6 @@ public class PlanDefinitionParser {
             String severity,
             String intelligenceDestination
     ) {}
+
+
 }
