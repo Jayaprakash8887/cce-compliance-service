@@ -64,6 +64,7 @@ public class ProtocolDefinitionService {
     public ProtocolDefinition loadProtocol(String planDefinitionJson) {
         // Parse and validate
         PlanDefinition planDefinition = planDefinitionParser.parse(planDefinitionJson);
+        planDefinitionParser.validateActionIds(planDefinition);
         planDefinitionParser.validateTriggers(planDefinition);
 
         String url = planDefinition.getUrl();

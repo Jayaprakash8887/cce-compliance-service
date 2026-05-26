@@ -3,9 +3,7 @@ package org.openphc.cce.compliance;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
-import org.openphc.cce.compliance.domain.repository.EventLogRepository;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
-import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,11 +44,6 @@ class PatientTrackingIntegrationTest extends IntegrationTestBase {
     @Autowired
     private ProtocolInstanceRepository protocolInstanceRepository;
 
-    @Autowired
-    private EventLogRepository eventLogRepository;
-
-    @Autowired
-    private StepInstanceRepository stepInstanceRepository;
 
     @Value("${cce.kafka.topics.inbound-events}")
     private String inboundTopic;

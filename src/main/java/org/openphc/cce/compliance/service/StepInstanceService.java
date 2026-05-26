@@ -67,17 +67,6 @@ public class StepInstanceService {
                                    int repeatIndex, OffsetDateTime dueDate,
                                    OffsetDateTime overdueDate, OffsetDateTime missedDate,
                                    String requiredBehavior) {
-        return createStep(protocolInstance, actionId, repeatIndex, dueDate,
-                overdueDate, missedDate, requiredBehavior, null);
-    }
-
-    /**
-     * Create a new step instance in PENDING state with parent reference (for sub-steps).
-     */
-    public StepInstance createStep(ProtocolInstance protocolInstance, String actionId,
-                                   int repeatIndex, OffsetDateTime dueDate,
-                                   OffsetDateTime overdueDate, OffsetDateTime missedDate,
-                                   String requiredBehavior, UUID parentStepId) {
         StepInstance step = StepInstance.builder()
                 .protocolInstance(protocolInstance)
                 .actionId(actionId)
@@ -87,73 +76,14 @@ public class StepInstanceService {
                 .overdueDate(overdueDate)
                 .missedDate(missedDate)
                 .requiredBehavior(requiredBehavior)
-                .parentStepId(parentStepId)
                 .build();
 
         step = stepInstanceRepository.save(step);
 
-        log.info("Created step instance: actionId={}, repeatIndex={}, instanceId={}, stepId={}{}",
-                actionId, repeatIndex, protocolInstance.getId(), step.getId(),
-                parentStepId != null ? ", parentStepId=" + parentStepId : "");
+        log.info("Created step instance: actionId={}, repeatIndex={}, instanceId={}, stepId={}",
+                actionId, repeatIndex, protocolInstance.getId(), step.getId());
 
         return step;
-    }
-
-    /**
-     * Create sub-step instances for a parent step that acts as a group.
-     * Sub-steps are created in PENDING state with a reference to the parent step.
-     */
-    public List<StepInstance> createSubSteps(StepInstance parentStep,
-                                             List<PlanDefinitionParser.StepMetadata> subStepInfos) {
-        List<StepInstance> subSteps = new ArrayList<>();
-        OffsetDateTime parentDueDate = parentStep.getDueDate() != null
-                ? parentStep.getDueDate()
-                : OffsetDateTime.now(ZoneOffset.UTC);
-
-        for (PlanDefinitionParser.StepMetadata subStepInfo : subStepInfos) {
-            // Only create entry-point sub-steps (those that don't depend on a sibling).
-            // Dependent sub-steps are created progressively when their prerequisite completes.
-            boolean dependsOnSibling = subStepInfo.relatedSteps().stream()
-                    .anyMatch(ra -> subStepInfos.stream().anyMatch(s -> s.id().equals(ra.actionId())));
-
-            if (dependsOnSibling) {
-                continue;
-            }
-
-            OffsetDateTime dueDate = parentDueDate;
-            OffsetDateTime overdueDate = null;
-            OffsetDateTime missedDate = null;
-
-            if (subStepInfo.toleranceDays() != null) {
-                overdueDate = dueDate.plusDays(subStepInfo.toleranceDays());
-                missedDate = overdueDate.plusDays(subStepInfo.toleranceDays());
-            }
-
-            StepInstance subStep = StepInstance.builder()
-                    .protocolInstance(parentStep.getProtocolInstance())
-                    .actionId(subStepInfo.id())
-                    .repeatIndex(0)
-                    .state(StepState.PENDING)
-                    .dueDate(dueDate)
-                    .overdueDate(overdueDate)
-                    .missedDate(missedDate)
-                    .requiredBehavior(subStepInfo.requiredBehavior())
-                    .parentStepId(parentStep.getId())
-                    .build();
-
-            subStep = stepInstanceRepository.save(subStep);
-            subSteps.add(subStep);
-
-            log.info("Created sub-step: actionId={}, parentStepId={}",
-                    subStepInfo.id(), parentStep.getId());
-
-            // If this sub-step is itself a group (has nested sub-steps), recursively create its entry-point children
-            if (subStepInfo.hasSubSteps()) {
-                createSubSteps(subStep, subStepInfo.subSteps());
-            }
-        }
-
-        return subSteps;
     }
 
     /**
@@ -186,34 +116,22 @@ public class StepInstanceService {
         log.info("Completed step: stepId={}, actionId={}, completionStatus={}",
                 step.getId(), step.getActionId(), step.getCompletionStatus());
 
-        // Parse protocol definition once — reused by sub-step creation and progressive instantiation
+        // Parse protocol definition once — reused by progressive instantiation
         var definition = step.getProtocolInstance().getProtocolDefinition().getDefinition();
         var planDefinition = planDefinitionParser.parse(definition.toString());
-        var actions = planDefinitionParser.extractActions(planDefinition);
+        var steps = planDefinitionParser.extractSteps(planDefinition);
 
-        if (step.getParentStepId() != null) {
-            // Sub-step completion: create dependent siblings via progressive instantiation
-            createDependentSubSteps(step, actions);
+        // Detect order violations (must-have prerequisites still incomplete)
+        detectOrderViolations(step);
 
-            // If this sub-step has its own nested sub-steps, create entry-point children
-            createEntryPointSubStepsForAction(step, step.getActionId(), actions);
-        } else {
-            // Top-level step completion logic
-            // Detect order violations (must-have prerequisites still incomplete)
-            detectOrderViolations(step);
+        // Progressive step instantiation for dependent steps
+        createDependentSteps(step);
 
-            // Progressive step instantiation for dependent top-level steps
-            createDependentSteps(step);
+        // Auto-skip preceding optional (could) steps that are still actionable
+        autoSkipPrecedingOptionalSteps(step);
 
-            // Auto-skip preceding optional (could) steps that are still actionable
-            autoSkipPrecedingOptionalSteps(step);
-
-            // If this step has sub-steps, create entry-point sub-steps
-            createEntryPointSubStepsForAction(step, step.getActionId(), actions);
-
-            // Check if protocol is now complete
-            protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
-        }
+        // Check if protocol is now complete
+        protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
     }
 
     /**
@@ -312,13 +230,13 @@ public class StepInstanceService {
 
         JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
         PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
-        List<PlanDefinitionParser.StepMetadata> actions = planDefinitionParser.extractActions(planDefinition);
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
         String completedActionId = completedStep.getActionId();
 
         // Find immediate predecessors: actions whose relatedSteps contain this action's id
         // and that have requiredBehavior="must"
-        List<String> mustPredecessorIds = actions.stream()
+        List<String> mustPredecessorIds = steps.stream()
                 .filter(a -> "must".equals(a.requiredBehavior()))
                 .filter(a -> a.relatedSteps().stream()
                         .anyMatch(ra -> completedActionId.equals(ra.actionId())))
@@ -369,10 +287,10 @@ public class StepInstanceService {
         // Parse the protocol definition to get relatedStep info
         JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
         PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
-        List<PlanDefinitionParser.StepMetadata> actions = planDefinitionParser.extractActions(planDefinition);
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
         // Find the completed step's metadata to get its relatedSteps
-        PlanDefinitionParser.StepMetadata completedStepMetadata = actions.stream()
+        PlanDefinitionParser.StepMetadata completedStepMetadata = steps.stream()
                 .filter(a -> completedStep.getActionId().equals(a.id()))
                 .findFirst()
                 .orElse(null);
@@ -393,7 +311,7 @@ public class StepInstanceService {
             OffsetDateTime dueDate = calculateDueDate(baseTime, relatedStep);
 
             // Find the target action's timing for overdue/missed dates
-            PlanDefinitionParser.StepMetadata targetAction = actions.stream()
+            PlanDefinitionParser.StepMetadata targetAction = steps.stream()
                     .filter(a -> relatedStep.actionId().equals(a.id()))
                     .findFirst()
                     .orElse(null);
@@ -452,10 +370,10 @@ public class StepInstanceService {
         // Parse protocol to determine the dependency graph
         JsonNode definition = protocolInstance.getProtocolDefinition().getDefinition();
         PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
-        List<PlanDefinitionParser.StepMetadata> actions = planDefinitionParser.extractActions(planDefinition);
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
         // Compute all ancestor actionIds of the completed step (transitive predecessors)
-        Set<String> ancestorActionIds = computeAncestors(completedStep.getActionId(), actions);
+        Set<String> ancestorActionIds = computeAncestors(completedStep.getActionId(), steps);
 
         if (ancestorActionIds.isEmpty()) {
             return;
@@ -486,7 +404,7 @@ public class StepInstanceService {
      * lead to X being created.
      */
     private Set<String> computeAncestors(String actionId,
-                                         List<PlanDefinitionParser.StepMetadata> actions) {
+                                         List<PlanDefinitionParser.StepMetadata> steps) {
         Set<String> ancestors = new HashSet<>();
         Deque<String> queue = new ArrayDeque<>();
         queue.add(actionId);
@@ -494,7 +412,7 @@ public class StepInstanceService {
         while (!queue.isEmpty()) {
             String current = queue.poll();
             // Find all actions whose relatedSteps contain 'current'
-            for (PlanDefinitionParser.StepMetadata action : actions) {
+            for (PlanDefinitionParser.StepMetadata action : steps) {
                 boolean createsTarget = action.relatedSteps().stream()
                         .anyMatch(ra -> current.equals(ra.actionId()));
                 if (createsTarget && !ancestors.contains(action.id())) {
@@ -504,141 +422,6 @@ public class StepInstanceService {
             }
         }
         return ancestors;
-    }
-
-    /**
-     * Create dependent sub-steps within the same parent group when a sibling sub-step completes.
-     * Uses relatedStep definitions scoped within the parent's sub-step list.
-     */
-    private void createDependentSubSteps(StepInstance completedSubStep,
-                                         List<PlanDefinitionParser.StepMetadata> actions) {
-        ProtocolInstance protocolInstance = completedSubStep.getProtocolInstance();
-        UUID parentStepId = completedSubStep.getParentStepId();
-        StepInstance parentStep = findByIdOrThrow(parentStepId);
-        String parentActionId = parentStep.getActionId();
-
-        // Find the sub-steps list for the parent action (may be top-level or nested)
-        List<PlanDefinitionParser.StepMetadata> parentSubSteps = resolveSubSteps(parentActionId, actions);
-        if (parentSubSteps == null || parentSubSteps.isEmpty()) {
-            return;
-        }
-
-        // Find the completed sub-step's metadata
-        PlanDefinitionParser.StepMetadata completedSubStepInfo = parentSubSteps.stream()
-                .filter(s -> completedSubStep.getActionId().equals(s.id()))
-                .findFirst()
-                .orElse(null);
-
-        if (completedSubStepInfo == null || completedSubStepInfo.relatedSteps().isEmpty()) {
-            return;
-        }
-
-        // Create dependent sub-steps
-        for (PlanDefinitionParser.RelatedStepInfo relatedStep : completedSubStepInfo.relatedSteps()) {
-            // Guard: skip if this sub-step already exists for the same parent
-            StepInstance existing = stepInstanceRepository
-                    .findByProtocolInstanceIdAndActionIdAndStateIn(
-                            protocolInstance.getId(), relatedStep.actionId(), ACTIONABLE_STATES)
-                    .stream()
-                    .filter(s -> parentStepId.equals(s.getParentStepId()))
-                    .findFirst()
-                    .orElse(null);
-            if (existing != null) {
-                continue;
-            }
-
-            OffsetDateTime baseTime = "after-start".equals(relatedStep.relationship())
-                    ? completedSubStep.getDueDate()
-                    : completedSubStep.getCompletedAt();
-            if (baseTime == null) {
-                baseTime = completedSubStep.getCompletedAt();
-            }
-            OffsetDateTime dueDate = calculateDueDate(baseTime, relatedStep);
-
-            // Find target sub-step info for tolerance
-            PlanDefinitionParser.StepMetadata targetSubStep = parentSubSteps.stream()
-                    .filter(s -> relatedStep.actionId().equals(s.id()))
-                    .findFirst()
-                    .orElse(null);
-
-            OffsetDateTime overdueDate = null;
-            OffsetDateTime missedDate = null;
-            String requiredBehavior = targetSubStep != null ? targetSubStep.requiredBehavior() : null;
-
-            if (targetSubStep != null && targetSubStep.toleranceDays() != null) {
-                overdueDate = dueDate.plusDays(targetSubStep.toleranceDays());
-                missedDate = overdueDate.plusDays(targetSubStep.toleranceDays());
-            }
-
-            StepInstance subStep = StepInstance.builder()
-                    .protocolInstance(protocolInstance)
-                    .actionId(relatedStep.actionId())
-                    .repeatIndex(0)
-                    .state(StepState.PENDING)
-                    .dueDate(dueDate)
-                    .overdueDate(overdueDate)
-                    .missedDate(missedDate)
-                    .requiredBehavior(requiredBehavior)
-                    .parentStepId(parentStepId)
-                    .build();
-
-            subStep = stepInstanceRepository.save(subStep);
-
-            log.info("Progressive sub-step instantiation: created sub-step {} due at {} " +
-                            "(triggered by sub-step {}, parent={})",
-                    relatedStep.actionId(), dueDate,
-                    completedSubStep.getActionId(), parentActionId);
-
-            // If the newly created sub-step has its own nested sub-steps, DON'T create them now —
-            // they'll be created when this sub-step completes (trigger-driven).
-        }
-    }
-
-    /**
-     * Create entry-point sub-steps for a completed step by resolving its sub-step metadata.
-     * Searches top-level actions and recursively through nested sub-steps to find the action.
-     */
-    private void createEntryPointSubStepsForAction(StepInstance completedStep, String actionId,
-                                                    List<PlanDefinitionParser.StepMetadata> actions) {
-        List<PlanDefinitionParser.StepMetadata> subSteps = resolveSubSteps(actionId, actions);
-        if (subSteps != null && !subSteps.isEmpty()) {
-            createSubSteps(completedStep, subSteps);
-        }
-    }
-
-    /**
-     * Resolve the sub-steps list for a given action ID by searching top-level
-     * actions and recursively through nested sub-steps.
-     */
-    private List<PlanDefinitionParser.StepMetadata> resolveSubSteps(
-            String actionId, List<PlanDefinitionParser.StepMetadata> actions) {
-        for (PlanDefinitionParser.StepMetadata action : actions) {
-            if (actionId.equals(action.id())) {
-                return action.subSteps();
-            }
-            List<PlanDefinitionParser.StepMetadata> result =
-                    resolveSubStepsRecursive(actionId, action.subSteps());
-            if (result != null) {
-                return result;
-            }
-        }
-        return null;
-    }
-
-    private List<PlanDefinitionParser.StepMetadata> resolveSubStepsRecursive(
-            String actionId, List<PlanDefinitionParser.StepMetadata> subSteps) {
-        if (subSteps == null) return null;
-        for (PlanDefinitionParser.StepMetadata subStep : subSteps) {
-            if (actionId.equals(subStep.id())) {
-                return subStep.subSteps();
-            }
-            List<PlanDefinitionParser.StepMetadata> result =
-                    resolveSubStepsRecursive(actionId, subStep.subSteps());
-            if (result != null) {
-                return result;
-            }
-        }
-        return null;
     }
 
     private OffsetDateTime calculateDueDate(OffsetDateTime baseTime,

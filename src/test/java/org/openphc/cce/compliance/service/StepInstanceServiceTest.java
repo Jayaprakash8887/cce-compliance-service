@@ -191,10 +191,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
                                     BigDecimal.valueOf(7), "d")),
-                            null, null, "must", List.of(), List.of()),
+                            null, null, "must", List.of()),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), null, 3, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), null, 3, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -239,10 +239,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-start",
                                     BigDecimal.valueOf(14), "d")),
-                            null, null, "must", List.of(), List.of()),
+                            null, null, "must", List.of()),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), null, 3, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), null, 3, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -286,10 +286,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
                                     BigDecimal.valueOf(7), "d")),
-                            null, null, "must", List.of(), List.of()),
+                            null, null, "must", List.of()),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), timing, 3, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), timing, 3, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source");
 
@@ -491,10 +491,10 @@ class StepInstanceServiceTest {
             var optionalLabAction = new PlanDefinitionParser.StepMetadata(
                     "optional-lab", "Optional Lab", null,
                     List.of(new PlanDefinitionParser.RelatedStepInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
-                    null, null, "could", List.of(), List.of());
+                    null, null, "could", List.of());
             var mandatoryVisitAction = new PlanDefinitionParser.StepMetadata(
-                    "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of(), List.of());
-            when(planDefinitionParser.extractActions(mockPlanDef))
+                    "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of());
+            when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
@@ -538,12 +538,12 @@ class StepInstanceServiceTest {
                     "registration", "Registration", null,
                     List.of(new PlanDefinitionParser.RelatedStepInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
                             new PlanDefinitionParser.RelatedStepInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
-                    null, null, "must", List.of(), List.of());
+                    null, null, "must", List.of());
             var familyPlanningAction = new PlanDefinitionParser.StepMetadata(
-                    "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of(), List.of());
+                    "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of());
             var pregnancyProfileAction = new PlanDefinitionParser.StepMetadata(
-                    "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of(), List.of());
-            when(planDefinitionParser.extractActions(mockPlanDef))
+                    "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of());
+            when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
@@ -582,7 +582,7 @@ class StepInstanceServiceTest {
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
 
@@ -619,7 +619,7 @@ class StepInstanceServiceTest {
 
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of());
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
 
@@ -755,10 +755,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("chief-complaints", "after-end",
                                     BigDecimal.ZERO, "d")),
-                            null, 1, "must", List.of(), List.of()),
+                            null, 1, "must", List.of()),
                     new PlanDefinitionParser.StepMetadata("chief-complaints", "Chief Complaints",
-                            List.of(), List.of(), null, 1, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
             when(deviationService.createDeviation(any(), eq(DeviationType.ORDER_VIOLATION), any()))
@@ -813,10 +813,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("chief-complaints", "after-end",
                                     BigDecimal.ZERO, "d")),
-                            null, 1, "must", List.of(), List.of()),
+                            null, 1, "must", List.of()),
                     new PlanDefinitionParser.StepMetadata("chief-complaints", "Chief Complaints",
-                            List.of(), List.of(), null, 1, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
@@ -862,10 +862,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("lab-order", "after-end",
                                     BigDecimal.ZERO, "d")),
-                            null, 1, "could", List.of(), List.of()),
+                            null, 1, "could", List.of()),
                     new PlanDefinitionParser.StepMetadata("lab-order", "Lab Order",
-                            List.of(), List.of(), null, 1, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 
@@ -902,10 +902,10 @@ class StepInstanceServiceTest {
                             List.of(), List.of(
                             new PlanDefinitionParser.RelatedStepInfo("vitals-recording", "after-start",
                                     BigDecimal.ZERO, "d")),
-                            null, 1, "must", List.of(), List.of()),
+                            null, 1, "must", List.of()),
                     new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
-                            List.of(), List.of(), null, 1, "must", List.of(), List.of()));
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(actions);
+                            List.of(), List.of(), null, 1, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 

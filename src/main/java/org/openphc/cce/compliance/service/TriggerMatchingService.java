@@ -40,7 +40,7 @@ public class TriggerMatchingService {
      * @param codes        the coded values extracted from the event payload
      * @return list of matched (protocolDefinitionId, actionId) pairs
      */
-    public List<MatchedAction> findStructuralMatches(String resourceType, List<CodePathTriple> codes) {
+    public List<MatchedStep> findStructuralMatches(String resourceType, List<CodePathTriple> codes) {
         if (resourceType == null || resourceType.isBlank()) {
             return List.of();
         }
@@ -59,7 +59,7 @@ public class TriggerMatchingService {
         List<Object[]> results = triggerIndexRepository.findStructuralMatches(resourceType, codeTriples);
 
         return results.stream()
-                .map(row -> new MatchedAction((UUID) row[0], (String) row[1]))
+                .map(row -> new MatchedStep((UUID) row[0], (String) row[1]))
                 .toList();
     }
 

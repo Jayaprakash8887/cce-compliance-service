@@ -2,7 +2,6 @@ package org.openphc.cce.compliance;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
@@ -46,9 +45,6 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
 
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;
-
-    @Autowired
-    private EventLogRepository eventLogRepository;
 
     @Autowired
     private ProtocolInstanceRepository protocolInstanceRepository;

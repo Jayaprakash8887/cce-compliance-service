@@ -1,11 +1,9 @@
 package org.openphc.cce.compliance;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.openphc.cce.compliance.domain.entity.EventLog;
 import org.openphc.cce.compliance.domain.enums.ProcessingStatus;
 import org.openphc.cce.compliance.domain.repository.EventLogRepository;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
@@ -28,7 +26,6 @@ import static java.util.concurrent.TimeUnit.SECONDS;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
  * Integration tests for the inbound event processing pipeline:

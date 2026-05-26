@@ -17,7 +17,7 @@ import org.openphc.cce.compliance.domain.entity.*;
 import org.openphc.cce.compliance.domain.enums.*;
 import org.openphc.cce.compliance.domain.repository.DeviationRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
-import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
+
 import org.openphc.cce.compliance.fhir.ExpressionEvaluationService;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.openphc.cce.compliance.kafka.model.IntelligenceTriggerEvent;
@@ -43,7 +43,6 @@ class IntelligenceActionEvaluatorTest {
     @Mock private IntelligenceTriggerProducer intelligenceTriggerProducer;
     @Mock private IntelligenceEventLogRepository intelligenceEventLogRepository;
     @Mock private DeviationRepository deviationRepository;
-    @Mock private StepInstanceRepository stepInstanceRepository;
 
     private IntelligenceActionEvaluator evaluator;
     private final ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
@@ -56,7 +55,7 @@ class IntelligenceActionEvaluatorTest {
                 planDefinitionParser, expressionEvaluationService,
                 actionDefinitionService, intelligenceTriggerProducer,
                 intelligenceEventLogRepository,
-                deviationRepository, stepInstanceRepository, objectMapper, meterRegistry, 256);
+                deviationRepository, objectMapper, meterRegistry, 256);
     }
 
     // ── Deviation Tests ──
@@ -358,9 +357,9 @@ class IntelligenceActionEvaluatorTest {
 
             var mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                     new PlanDefinitionParser.StepMetadata("other-action", "Other",
-                            List.of(), List.of(), null, null, null, List.of(), List.of())));
+                            List.of(), List.of(), null, null, null, List.of())));
 
             List<IntelligenceEventLog> result = evaluator.evaluateOnDeviation(step, deviation);
 
@@ -575,8 +574,8 @@ class IntelligenceActionEvaluatorTest {
                                                        List<PlanDefinitionParser.IntelligenceActionInfo> actions) {
         var mockPlanDef = mock(PlanDefinition.class);
         when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-        when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+        when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(step.getActionId(), "Test Action",
-                        List.of(), List.of(), null, null, null, actions, List.of())));
+                        List.of(), List.of(), null, null, null, actions)));
     }
 }

@@ -9,7 +9,9 @@ import org.openphc.cce.compliance.domain.enums.PlanDefinitionActionType;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Component
@@ -30,13 +32,16 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Extract all actions from a PlanDefinition with their metadata.
+     * Extract all steps from a PlanDefinition with their metadata.
+     * Flattens nested sub-steps into a single list — all steps are treated uniformly.
+     * Sub-steps that don't already have a relatedStep to their parent get one added
+     * automatically (relationship: "after-end", no offset).
      */
-    public List<StepMetadata> extractActions(PlanDefinition planDefinition) {
+    public List<StepMetadata> extractSteps(PlanDefinition planDefinition) {
         List<StepMetadata> result = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
             validateActionType(action);
-            result.add(buildStepMetadata(action));
+            flattenAction(action, null, result);
         }
         return result;
     }
@@ -142,6 +147,44 @@ public class PlanDefinitionParser {
         }
     }
 
+    /**
+     * Validate that all actions (including nested sub-steps) have a non-blank actionId
+     * and that all actionIds are unique across the entire PlanDefinition.
+     *
+     * @throws IllegalArgumentException if an actionId is missing/blank or duplicated
+     */
+    public void validateActionIds(PlanDefinition planDefinition) {
+        List<String> allIds = new ArrayList<>();
+        collectActionIds(planDefinition.getAction(), allIds);
+
+        // Check for duplicates
+        Set<String> seen = new HashSet<>();
+        for (String id : allIds) {
+            if (!seen.add(id)) {
+                throw new IllegalArgumentException(
+                        "Duplicate actionId '" + id + "' found in PlanDefinition. " +
+                                "All action IDs must be unique across all levels.");
+            }
+        }
+    }
+
+    private void collectActionIds(List<PlanDefinition.PlanDefinitionActionComponent> actions,
+                                  List<String> ids) {
+        for (PlanDefinition.PlanDefinitionActionComponent action : actions) {
+            String id = action.getId();
+            if (id == null || id.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Action with title '" + (action.hasTitle() ? action.getTitle() : "<untitled>")
+                                + "' is missing a required actionId.");
+            }
+            ids.add(id);
+            // Recurse into nested actions (both step and fire-event types have IDs)
+            if (action.hasAction()) {
+                collectActionIds(action.getAction(), ids);
+            }
+        }
+    }
+
     private void validateActionTriggers(PlanDefinition.PlanDefinitionActionComponent action) {
         for (TriggerDefinition trigger : action.getTrigger()) {
             if (!hasData(trigger) && getCondition(trigger) == null) {
@@ -159,7 +202,14 @@ public class PlanDefinitionParser {
         }
     }
 
-    private StepMetadata buildStepMetadata(PlanDefinition.PlanDefinitionActionComponent action) {
+    /**
+     * Recursively flatten an action and its nested sub-steps into the result list.
+     * Each nested step-type action becomes a peer entry. If a nested step has no explicit
+     * relatedStep pointing to its parent, one is added (after-end, no offset) to preserve
+     * the progressive instantiation relationship.
+     */
+    private void flattenAction(PlanDefinition.PlanDefinitionActionComponent action,
+                               String parentActionId, List<StepMetadata> result) {
         List<TriggerInfo> triggers = extractTriggerInfos(action);
         List<RelatedStepInfo> relatedSteps = extractRelatedSteps(action);
         TimingInfo timingInfo = extractTimingInfo(action);
@@ -170,12 +220,29 @@ public class PlanDefinitionParser {
                 ? action.getRequiredBehavior().toCode()
                 : null;
 
-        // Classify nested actions by type
+        // Extract intelligence actions from nested fire-event actions
         List<IntelligenceActionInfo> intelligenceActions = new ArrayList<>();
-        List<StepMetadata> subSteps = new ArrayList<>();
-        classifyNestedActions(action, intelligenceActions, subSteps);
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
+            if (isIntelligenceAction(nestedAction)) {
+                IntelligenceActionInfo intelligenceAction = buildIntelligenceActionInfo(nestedAction);
+                if (intelligenceAction != null) {
+                    intelligenceActions.add(intelligenceAction);
+                }
+            } else if (!isStepAction(nestedAction)) {
+                throw new IllegalArgumentException(
+                        "Nested action '" + nestedAction.getId()
+                                + "' must have explicit type coding: 'step' or 'fire-event'");
+            }
+        }
 
-        return new StepMetadata(
+        // If this is a nested step and has no explicit relatedStep to its parent, add one
+        if (parentActionId != null && relatedSteps.stream()
+                .noneMatch(rs -> parentActionId.equals(rs.actionId()))) {
+            relatedSteps = new ArrayList<>(relatedSteps);
+            relatedSteps.add(new RelatedStepInfo(parentActionId, "after-end", null, null));
+        }
+
+        result.add(new StepMetadata(
                 action.getId(),
                 action.getTitle(),
                 triggers,
@@ -183,31 +250,13 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                intelligenceActions,
-                subSteps
-        );
-    }
+                intelligenceActions
+        ));
 
-    /**
-     * Classify nested actions into intelligence actions (fire-event) and sub-steps (step).
-     * Every nested action MUST have an explicit type coding: "step" or "fire-event".
-     * Actions without explicit type are rejected at load time.
-     */
-    private void classifyNestedActions(PlanDefinition.PlanDefinitionActionComponent parentAction,
-                                       List<IntelligenceActionInfo> intelligenceActions,
-                                       List<StepMetadata> subSteps) {
-        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : parentAction.getAction()) {
+        // Recursively flatten nested step-type actions
+        for (PlanDefinition.PlanDefinitionActionComponent nestedAction : action.getAction()) {
             if (isStepAction(nestedAction)) {
-                subSteps.add(buildStepMetadata(nestedAction));
-            } else if (isIntelligenceAction(nestedAction)) {
-                IntelligenceActionInfo intelligenceAction = buildIntelligenceActionInfo(nestedAction);
-                if (intelligenceAction != null) {
-                    intelligenceActions.add(intelligenceAction);
-                }
-            } else {
-                throw new IllegalArgumentException(
-                        "Nested action '" + nestedAction.getId()
-                                + "' must have explicit type coding: 'step' or 'fire-event'");
+                flattenAction(nestedAction, action.getId(), result);
             }
         }
     }
@@ -415,14 +464,8 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            List<IntelligenceActionInfo> intelligenceActions,
-            List<StepMetadata> subSteps
-    ) {
-        /** Returns true if this action has nested sub-steps. */
-        public boolean hasSubSteps() {
-            return subSteps != null && !subSteps.isEmpty();
-        }
-    }
+            List<IntelligenceActionInfo> intelligenceActions
+    ) {}
 
     public record TriggerInfo(
             List<DataRequirementInfo> dataRequirements,

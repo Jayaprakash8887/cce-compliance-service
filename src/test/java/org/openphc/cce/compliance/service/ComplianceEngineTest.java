@@ -123,7 +123,7 @@ class ComplianceEngineTest {
             when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(eq("Observation"), any()))
-                    .thenReturn(List.of(new MatchedAction(protocolDefId, "bp-check")));
+                    .thenReturn(List.of(new MatchedStep(protocolDefId, "bp-check")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
             mockParserReturnsNoCondition(protocolDef, "bp-check");
@@ -164,8 +164,8 @@ class ComplianceEngineTest {
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(eq("Encounter"), any()))
                     .thenReturn(List.of(
-                            new MatchedAction(protocolDefId1, "action-a"),
-                            new MatchedAction(protocolDefId2, "action-b")));
+                            new MatchedStep(protocolDefId1, "action-a"),
+                            new MatchedStep(protocolDefId2, "action-b")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId1)).thenReturn(protocolDef1);
             when(protocolDefinitionService.findById(protocolDefId2)).thenReturn(protocolDef2);
@@ -173,13 +173,13 @@ class ComplianceEngineTest {
             // Use anyString() since both definitions have same JSON; return action list covering both
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                     new PlanDefinitionParser.StepMetadata("action-a", "Action A",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                            List.of(), null, null, null, List.of(), List.of()),
+                            List.of(), null, null, null, List.of()),
                     new PlanDefinitionParser.StepMetadata("action-b", "Action B",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                            List.of(), null, null, null, List.of(), List.of())));
+                            List.of(), null, null, null, List.of())));
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef1), any()))
                     .thenReturn(instance1);
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef2), any()))
@@ -314,7 +314,7 @@ class ComplianceEngineTest {
             when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(eq("Observation"), any()))
-                    .thenReturn(List.of(new MatchedAction(protocolDefId, "follow-up")));
+                    .thenReturn(List.of(new MatchedStep(protocolDefId, "follow-up")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
             mockParserReturnsNoCondition(protocolDef, "follow-up");
@@ -347,7 +347,7 @@ class ComplianceEngineTest {
             when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(eq("Observation"), any()))
-                    .thenReturn(List.of(new MatchedAction(protocolDefId, "conditional-action")));
+                    .thenReturn(List.of(new MatchedStep(protocolDefId, "conditional-action")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
 
@@ -407,16 +407,16 @@ class ComplianceEngineTest {
             when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Encounter");
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(eq("Encounter"), any()))
-                    .thenReturn(List.of(new MatchedAction(protocolDefId, "first-step")));
+                    .thenReturn(List.of(new MatchedStep(protocolDefId, "first-step")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
             // Single parser mock that covers both Tier 2 check (needs triggers) and createInitialStep
             var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
             when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                     new PlanDefinitionParser.StepMetadata("first-step", "First Step",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                            List.of(), null, 5, "must", List.of(), List.of())));
+                            List.of(), null, 5, "must", List.of())));
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef), any()))
                     .thenReturn(protocolInstance);
             when(stepInstanceService.findActionableStep(protocolInstance.getId(), "first-step"))
@@ -527,10 +527,10 @@ class ComplianceEngineTest {
     private void mockParserReturnsNoCondition(ProtocolDefinition protocolDef, String actionId) {
         var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
-        when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+        when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(actionId, "Test Action",
                         List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                        List.of(), null, null, null, List.of(), List.of())));
+                        List.of(), null, null, null, List.of())));
     }
 
     /**
@@ -540,11 +540,11 @@ class ComplianceEngineTest {
                                                 String language, String expression) {
         var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
-        when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+        when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(actionId, "Conditional Action",
                         List.of(new PlanDefinitionParser.TriggerInfo(List.of(),
                                 new PlanDefinitionParser.ConditionInfo(language, expression))),
-                        List.of(), null, null, null, List.of(), List.of())));
+                        List.of(), null, null, null, List.of())));
     }
 
     /**
@@ -554,8 +554,8 @@ class ComplianceEngineTest {
                                                        Integer toleranceDays, String requiredBehavior) {
         var mockPlanDef = mock(org.hl7.fhir.r4.model.PlanDefinition.class);
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
-        when(planDefinitionParser.extractActions(mockPlanDef)).thenReturn(List.of(
+        when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(actionId, "Test Action",
-                        List.of(), List.of(), null, toleranceDays, requiredBehavior, List.of(), List.of())));
+                        List.of(), List.of(), null, toleranceDays, requiredBehavior, List.of())));
     }
 }
