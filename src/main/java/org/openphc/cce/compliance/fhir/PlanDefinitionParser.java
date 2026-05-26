@@ -241,7 +241,8 @@ public class PlanDefinitionParser {
         }
         CodeableConcept type = action.getType();
         for (Coding coding : type.getCoding()) {
-            if (planActionType.getCode().equals(coding.getCode())) {
+            if (planActionType.getCode().equals(coding.getCode())
+                    && planActionType.getSystem().equals(coding.getSystem())) {
                 return true;
             }
         }

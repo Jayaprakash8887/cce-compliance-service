@@ -6,17 +6,23 @@ package org.openphc.cce.compliance.domain.enums;
  */
 public enum PlanDefinitionActionType {
 
-    STEP("step"),
-    FIRE_EVENT("fire-event");
+    STEP("step", "http://openphc.org/fhir/CodeSystem/action-type"),
+    FIRE_EVENT("fire-event", "http://terminology.hl7.org/CodeSystem/action-type");
 
     private final String code;
+    private final String system;
 
-    PlanDefinitionActionType(String code) {
+    PlanDefinitionActionType(String code, String system) {
         this.code = code;
+        this.system = system;
     }
 
     public String getCode() {
         return code;
+    }
+
+    public String getSystem() {
+        return system;
     }
 
     /**

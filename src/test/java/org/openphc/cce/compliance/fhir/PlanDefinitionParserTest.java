@@ -496,11 +496,11 @@ class PlanDefinitionParserTest {
                   "status": "active",
                   "action": [{
                     "id": "step-1",
-                    "type": {"coding": [{"code": "step"}]},
+                    "type": {"coding": [{"system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step"}]},
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "intel-action-1",
-                      "type": {"coding": [{"code": "fire-event"}]},
+                      "type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event"}]},
                       "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
                       "definitionCanonical": "ActivityDefinition/test|1.0",
                       "extension": [
@@ -527,11 +527,11 @@ class PlanDefinitionParserTest {
                   "status": "active",
                   "action": [{
                     "id": "step-1",
-                    "type": {"coding": [{"code": "step"}]},
+                    "type": {"coding": [{"system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step"}]},
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "intel-action-1",
-                      "type": {"coding": [{"code": "fire-event"}]},
+                      "type": {"coding": [{"system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event"}]},
                       "condition": [{"kind": "applicability", "expression": {"language": "text/jsonlogic", "expression": "{\\"==\\": [1, 1]}"}}],
                       "definitionCanonical": "ActivityDefinition/test|1.0",
                       "extension": [
@@ -558,7 +558,7 @@ class PlanDefinitionParserTest {
                   "status": "active",
                   "action": [{
                     "id": "step-1",
-                    "type": {"coding": [{"code": "step"}]},
+                    "type": {"coding": [{"system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step"}]},
                     "trigger": [{"type": "named-event", "name": "test"}],
                     "action": [{
                       "id": "untyped-action",

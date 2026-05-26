@@ -71,7 +71,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]
@@ -132,7 +132,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]
@@ -176,7 +176,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]
@@ -200,7 +200,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]
@@ -228,7 +228,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]
@@ -251,7 +251,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]

@@ -37,6 +37,7 @@
           "type": {
             "coding": [
               {
+                "system": "http://terminology.hl7.org/CodeSystem/action-type",
                 "code": "fire-event"
               }
             ]
@@ -68,6 +69,7 @@
           "type": {
             "coding": [
               {
+                "system": "http://terminology.hl7.org/CodeSystem/action-type",
                 "code": "fire-event"
               }
             ]
@@ -97,7 +99,7 @@
       "type": {
         "coding": [
           {
-            "system": "http://hl7.org/fhir/action-type",
+            "system": "http://openphc.org/fhir/CodeSystem/action-type",
             "code": "step"
           }
         ]
