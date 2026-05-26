@@ -755,7 +755,7 @@ class PlanDefinitionParserTest {
         UUID protocolDefId = UUID.randomUUID();
         List<TriggerIndex> entries = parser.buildTriggerIndexEntries(pd, protocolDefId);
 
-        // Sub-step triggers should use plain actionId (no composite path)
+        // Sub-step triggers are indexed with their own actionId
         boolean hasReferral = entries.stream()
                 .anyMatch(e -> "anc-visit-1-referral".equals(e.getId().getActionId()));
         assertTrue(hasReferral, "Should have trigger index for anc-visit-1-referral");
@@ -764,7 +764,7 @@ class PlanDefinitionParserTest {
                 .anyMatch(e -> "anc-visit-1-referral-ack".equals(e.getId().getActionId()));
         assertTrue(hasAck, "Should have trigger index for anc-visit-1-referral-ack");
 
-        // Parent step itself should also have a trigger index
+        // Enclosing step itself should also have a trigger index
         boolean hasVisit1Direct = entries.stream()
                 .anyMatch(e -> "anc-visit-1".equals(e.getId().getActionId()));
         assertTrue(hasVisit1Direct, "Should have direct trigger index for anc-visit-1");

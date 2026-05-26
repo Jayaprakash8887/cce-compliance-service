@@ -49,8 +49,7 @@ public class PlanDefinitionParser {
     /**
      * Build TriggerIndex entries from a PlanDefinition by decomposing each action's
      * trigger data[].codeFilter[] into individual rows.
-     * Sub-step triggers are indexed with their plain action ID; parent derivation
-     * happens at runtime via the PlanDefinition tree.
+     * Sub-step triggers are indexed with their own action ID (flat model).
      */
     public List<TriggerIndex> buildTriggerIndexEntries(PlanDefinition planDefinition, UUID protocolDefinitionId) {
         List<TriggerIndex> entries = new ArrayList<>();
@@ -59,15 +58,14 @@ public class PlanDefinitionParser {
             // Index top-level action triggers
             indexActionTriggers(action, protocolDefinitionId, entries);
 
-            // Recursively index sub-step triggers at all nesting levels (plain IDs)
+            // Recursively index sub-step triggers at all nesting levels
             indexNestedSubStepTriggers(action, protocolDefinitionId, entries);
         }
         return entries;
     }
 
     /**
-     * Recursively index sub-step triggers using each sub-step's own plain action ID.
-     * Parent relationship is derived at runtime from the PlanDefinition tree structure.
+     * Recursively index sub-step triggers using each sub-step's own action ID.
      */
     private void indexNestedSubStepTriggers(PlanDefinition.PlanDefinitionActionComponent parentAction,
                                             UUID protocolDefinitionId,
