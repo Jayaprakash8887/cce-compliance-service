@@ -1,8 +1,8 @@
 # Core Schema Optimization
 
 > **CCE Compliance Service** — Schema cleanup for fresh deployment  
-> **Status**: Proposed | **Target**: v1.2.0  
-> **Last Updated**: 2025-05-28  
+> **Status**: Proposed | **Target**: v2.0.0  
+> **Last Updated**: 2026-05-27  
 > **Deployment Model**: Fresh deployment (no existing data to migrate)
 
 ---
