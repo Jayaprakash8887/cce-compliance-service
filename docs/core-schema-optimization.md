@@ -39,46 +39,39 @@ This document covers core schema normalization and cleanup decisions for the Com
 
 ---
 
-## 4. compliance_event_log Normalization — inbound_event FK
+## 4. compliance_event_log Normalization — Remove unused Columns
 
-**Problem:** 6 columns on `compliance_event_log` duplicate data already present in the Collector Service's `inbound_event` table:
+**Problem:** 6 columns on `compliance_event_log` are not used for any functionality — insights and filtering are served by the data pipeline.
 
-| compliance_event_log column | inbound_event column | Duplicated? |
-|----------------------------|---------------------|-------------|
-| `cloudeventsid` | `cloudevents_id` | Yes — identical CloudEvents ID |
-| `source` | `source` | Yes |
-| `source_event_id` | `source_event_id` | Yes |
-| `subject` | `subject` | Yes |
-| `type` | `type` | Yes |
-| `event_time` | `event_time` | Yes |
-
-Additionally, `compliance_event_log.data` (JSONB, ~2–5 KB per row) stores the extracted FHIR resource, while `inbound_event.raw_payload` stores the full CloudEvent envelope (which *contains* the same FHIR resource in `data`).
+| compliance_event_log column | Status |
+|----------------------------|--------|
+| `source_event_id` | Remove — never read by any query or business logic |
+| `subject` | Remove — only read by `findBySubject()` for the removed Events API |
+| `type` | Remove — only read by `DtoMapper` for the removed Events API |
+| `event_time` | Remove — only read by `DtoMapper` for the removed Events API |
+| `correlation_id` | Remove — only used for MDC logging (available on the Kafka message at processing time, not needed after) |
+| `facility_id` | Remove — only used for facility-scoped queries in removed APIs; available on Kafka message and in data pipeline |
 
 **Solution (fresh deploy):**
 
-1. Include `inbound_event_id UUID` FK on `compliance_event_log` — references the source event in the Collector's table
-2. Remove duplicated columns: `source_event_id`, `subject`, `type`, `event_time`, `data`
-3. **Retain** `cloudeventsid` and `source` — these form the idempotency unique constraint checked on every inbound event (before `inbound_event_id` is known)
+1. Remove 6 columns
 
-**Schema (included in initial `compliance_event_log` DDL):**
+**Resulting `compliance_event_log` schema:**
 
 ```sql
--- Within CREATE TABLE compliance_event_log:
-    inbound_event_id UUID,
--- Index:
-CREATE INDEX idx_cel_inbound_event ON compliance_event_log (inbound_event_id) WHERE inbound_event_id IS NOT NULL;
+CREATE TABLE compliance_event_log (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    cloudevents_id      VARCHAR NOT NULL,
+    source              VARCHAR NOT NULL,
+    processing_status   VARCHAR NOT NULL,
+    data                JSONB,
+    received_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT compliance_event_log_cloudevents_id_source_key UNIQUE (cloudevents_id, source),
+    CONSTRAINT compliance_event_log_processing_status_check CHECK (processing_status IN ('MATCHED', 'ZERO_MATCH', 'DUPLICATE'))
+);
 ```
 
-**Columns NOT included in initial DDL:**
-- `source_event_id` — available via `inbound_event_id → inbound_event.source_event_id`
-- `subject` — available via `inbound_event_id → inbound_event.subject`
-- `type` — available via `inbound_event_id → inbound_event.type`
-- `event_time` — available via `inbound_event_id → inbound_event.event_time`
-- `data` — available via `inbound_event_id → inbound_event.raw_payload` (FHIR resource is within the CloudEvent `data` field)
 
-**Prerequisite:** The Collector Service publishes `inboundeventid` as a CloudEvents extension attribute after persisting the `InboundEvent` entity (see **Collector Service** `docs/insights-optimization.md` §2.4 equivalent). The Compliance Service reads this from the Kafka message and sets it on the `EventLog` entity.
-
-> **Note:** `inbound_event_id` is nullable — if the Collector hasn't published the extension yet (backward compatibility), the FK remains NULL. Queries needing envelope metadata JOIN through the FK to `inbound_event`.
 
 ---
 
@@ -118,12 +111,12 @@ CREATE INDEX idx_step_instance_completed_event ON step_instance (completed_by_ev
 **Relationship diagram:**
 
 ```
-inbound_event ←── compliance_event_log ←── step_instance
-  (1)         inbound_event_id FK    (n)    completed_by_event_id FK   (n)
+compliance_event_log ←── step_instance
+       (1)          completed_by_event_id FK   (n)
 ```
 
 **Benefits:**
-- `compliance_event_log` becomes a lean audit record (id, cloudeventsid, source, inbound_event_id, processing_status, facility_id, resource_type, created_at)
+- `compliance_event_log` becomes a lean audit record (id, cloudeventsid, source, processing_status, data, received_at)
 - Step-event linkage is on the correct side of the relationship (the step knows its completing event)
 - No orphan FK issues — events that don't match any step simply have no step referencing them
 
@@ -135,7 +128,7 @@ These changes are incorporated into the initial schema migration:
 
 | Migration | Change |
 |-----------|--------|
-| `V1__initial_schema.sql` | Table named `compliance_event_log` (not `event_log`); dead columns excluded; `inbound_event_id` FK included; duplicate envelope columns excluded; step-related columns excluded; `step_instance.completed_by_event_id` FK included |
+| `V1__initial_schema.sql` | Table named `compliance_event_log` (not `event_log`); dead columns excluded; redundant envelope columns excluded; step-related columns excluded; `step_instance.completed_by_event_id` FK included |
 
 ---
 
@@ -147,7 +140,7 @@ These changes are incorporated into the initial schema migration:
 | Omit `matched_step_instance_id` from `compliance_event_log` | Not created | `EventLog` | Zero call sites — dead code |
 | Omit `ip_address` from `audit_log` | Not created | `AuditLog` | Zero call sites — dead code |
 | Omit `error_message` from `intelligence_event_log` | Not created | `IntelligenceEventLog` | Zero call sites — dead code |
-| Add `inbound_event_id` FK on `compliance_event_log` | Column + FK | `EventLog` | Normalize — eliminate 5 duplicated columns + JSONB `data` |
-| Omit `source_event_id`, `subject`, `type`, `event_time`, `data` | Not created | `EventLog` | Available via `inbound_event_id` FK |
+| Omit `source_event_id`, `subject`, `type`, `event_time`, `correlation_id`, `facility_id` from `compliance_event_log` | Not created | `EventLog` | Events API removed — data served by data pipeline |
+| Remove `GET /v1/patients/{patientId}/events` endpoint | API removal | `PatientTrackingController` | Event query responsibility moved to data pipeline |
 | Add `completed_by_event_id` FK on `step_instance` | Column + FK | `StepInstance` | Track completing event on the correct side of relationship |
 | Omit `protocol_instance_id`, `protocol_definition_id`, `action_id` from `compliance_event_log` | Not created | `EventLog` | Derivable via `step_instance.completed_by_event_id` |
