@@ -4,11 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.openphc.cce.compliance.domain.entity.EventLog;
+import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.ProcessingStatus;
-import org.openphc.cce.compliance.domain.repository.EventLogRepository;
+import org.openphc.cce.compliance.domain.repository.ComplianceEventLogRepository;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
@@ -47,7 +47,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
     private KafkaTemplate<String, Object> kafkaTemplate;
 
     @Autowired
-    private EventLogRepository eventLogRepository;
+    private ComplianceEventLogRepository eventLogRepository;
 
     @Autowired
     private ProtocolInstanceRepository protocolInstanceRepository;
@@ -96,7 +96,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
 
         // Wait for event to be processed
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            List<EventLog> logs = eventLogRepository.findAll().stream()
+            List<ComplianceEventLog> logs = eventLogRepository.findAll().stream()
                     .filter(el -> eventId.equals(el.getCloudeventsId()))
                     .toList();
             assertThat(logs).isNotEmpty();
@@ -104,7 +104,8 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         });
 
         // Verify enrollment
-        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
+                .filter(p -> patientId.equals(p.getPatientId())).toList();
         assertThat(instances).isNotEmpty();
 
         // Verify step created
@@ -124,7 +125,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, event);
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            List<EventLog> logs = eventLogRepository.findAll().stream()
+            List<ComplianceEventLog> logs = eventLogRepository.findAll().stream()
                     .filter(el -> eventId.equals(el.getCloudeventsId()))
                     .toList();
             assertThat(logs).isNotEmpty();
@@ -134,7 +135,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, event);
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            List<EventLog> logs = eventLogRepository.findAll().stream()
+            List<ComplianceEventLog> logs = eventLogRepository.findAll().stream()
                     .filter(el -> eventId.equals(el.getCloudeventsId())
                             && el.getProcessingStatus() == ProcessingStatus.DUPLICATE)
                     .toList();
@@ -168,7 +169,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, event);
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            List<EventLog> logs = eventLogRepository.findAll().stream()
+            List<ComplianceEventLog> logs = eventLogRepository.findAll().stream()
                     .filter(el -> eventId.equals(el.getCloudeventsId()))
                     .toList();
             assertThat(logs).isNotEmpty();
@@ -186,7 +187,8 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, buildEncounterEvent(enrollEventId, patientId, "in-progress"));
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            assertThat(protocolInstanceRepository.findByPatientId(patientId)).isNotEmpty();
+            assertThat(protocolInstanceRepository.findAll().stream()
+                    .filter(p -> patientId.equals(p.getPatientId())).toList()).isNotEmpty();
         });
 
         // Now send a blood-pressure Observation (LOINC 85354-9)
@@ -218,7 +220,7 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, bpEvent);
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            List<EventLog> logs = eventLogRepository.findAll().stream()
+            List<ComplianceEventLog> logs = eventLogRepository.findAll().stream()
                     .filter(el -> eventId.equals(el.getCloudeventsId()))
                     .toList();
             assertThat(logs).isNotEmpty();
@@ -226,7 +228,8 @@ class InboundEventIntegrationTest extends IntegrationTestBase {
         });
 
         // Verify a blood-pressure-check step was created
-        List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
+        List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
+                .filter(p -> patientId.equals(p.getPatientId())).toList();
         assertThat(instances).isNotEmpty();
         List<StepInstance> allSteps = stepInstanceRepository.findByProtocolInstanceId(instances.get(0).getId());
         assertThat(allSteps.stream().map(s -> s.getActionId()))

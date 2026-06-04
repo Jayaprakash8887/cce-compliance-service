@@ -7,6 +7,7 @@ import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
 import org.openphc.cce.compliance.domain.enums.StepState;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
+import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -28,11 +29,14 @@ public class ProtocolInstanceService {
             StepState.COMPLETED, StepState.MISSED, StepState.SKIPPED);
 
     private final ProtocolInstanceRepository protocolInstanceRepository;
+    private final StepInstanceRepository stepInstanceRepository;
     private final AuditService auditService;
 
     public ProtocolInstanceService(ProtocolInstanceRepository protocolInstanceRepository,
+                                   StepInstanceRepository stepInstanceRepository,
                                    AuditService auditService) {
         this.protocolInstanceRepository = protocolInstanceRepository;
+        this.stepInstanceRepository = stepInstanceRepository;
         this.auditService = auditService;
     }
 
@@ -78,6 +82,7 @@ public class ProtocolInstanceService {
     /**
      * Check if all steps in a protocol instance have reached terminal states.
      * If so, automatically set the protocol instance status to COMPLETED.
+     * Uses count queries to avoid loading the entire step collection.
      */
     public void checkAndCompleteProtocol(UUID instanceId) {
         ProtocolInstance instance = findByIdOrThrow(instanceId);
@@ -86,20 +91,19 @@ public class ProtocolInstanceService {
             return;
         }
 
-        Set<StepInstance> steps = instance.getSteps();
-        if (steps.isEmpty()) {
+        long totalSteps = stepInstanceRepository.countByProtocolInstanceId(instanceId);
+        if (totalSteps == 0) {
             return;
         }
 
-        boolean allTerminal = steps.stream()
-                .allMatch(step -> TERMINAL_STATES.contains(step.getState()));
+        long nonTerminalSteps = stepInstanceRepository.countNonTerminalSteps(instanceId, TERMINAL_STATES);
 
-        if (allTerminal) {
+        if (nonTerminalSteps == 0) {
             instance.setStatus(ProtocolInstanceStatus.COMPLETED);
             protocolInstanceRepository.save(instance);
 
             log.info("Protocol instance {} completed — all {} steps in terminal state",
-                    instanceId, steps.size());
+                    instanceId, totalSteps);
         }
     }
 

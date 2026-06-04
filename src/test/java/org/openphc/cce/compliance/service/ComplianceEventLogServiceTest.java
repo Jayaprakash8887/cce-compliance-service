@@ -9,9 +9,9 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.openphc.cce.compliance.domain.entity.EventLog;
+import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.enums.ProcessingStatus;
-import org.openphc.cce.compliance.domain.repository.EventLogRepository;
+import org.openphc.cce.compliance.domain.repository.ComplianceEventLogRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 
 import java.time.OffsetDateTime;
@@ -23,19 +23,19 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class EventLogServiceTest {
+class ComplianceEventLogServiceTest {
 
     @Mock
-    private EventLogRepository eventLogRepository;
+    private ComplianceEventLogRepository eventLogRepository;
 
-    private EventLogService eventLogService;
+    private ComplianceEventLogService eventLogService;
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        eventLogService = new EventLogService(eventLogRepository);
+        eventLogService = new ComplianceEventLogService(eventLogRepository);
     }
 
     @Test
@@ -71,23 +71,18 @@ class EventLogServiceTest {
                 .data(objectMapper.valueToTree(Map.of("resourceType", "Observation", "status", "final")))
                 .build();
 
-        when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(eventLogRepository.save(any(ComplianceEventLog.class))).thenAnswer(inv -> inv.getArgument(0));
 
         eventLogService.recordEvent(message, ProcessingStatus.ZERO_MATCH);
 
-        ArgumentCaptor<EventLog> captor = ArgumentCaptor.forClass(EventLog.class);
+        ArgumentCaptor<ComplianceEventLog> captor = ArgumentCaptor.forClass(ComplianceEventLog.class);
         verify(eventLogRepository).save(captor.capture());
 
-        EventLog saved = captor.getValue();
+        ComplianceEventLog saved = captor.getValue();
         assertEquals("evt-002", saved.getCloudeventsId());
         assertEquals("ebuzima", saved.getSource());
-        assertEquals("lab-evt-789", saved.getSourceEventId());
-        assertEquals("patient-123", saved.getSubject());
-        assertEquals("Observation", saved.getType());
-        assertEquals(message.getTime(), saved.getEventTime());
-        assertNotNull(saved.getReceivedAt());
         assertEquals("corr-abc-123", saved.getCorrelationId());
-        assertEquals("0002", saved.getFacilityId());
+        assertNotNull(saved.getReceivedAt());
         assertEquals(ProcessingStatus.ZERO_MATCH, saved.getProcessingStatus());
 
         // Verify data is converted to JsonNode
@@ -111,10 +106,10 @@ class EventLogServiceTest {
 
         OffsetDateTime before = OffsetDateTime.now(ZoneOffset.UTC);
 
-        when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(eventLogRepository.save(any(ComplianceEventLog.class))).thenAnswer(inv -> inv.getArgument(0));
         eventLogService.recordEvent(message, ProcessingStatus.MATCHED);
 
-        ArgumentCaptor<EventLog> captor = ArgumentCaptor.forClass(EventLog.class);
+        ArgumentCaptor<ComplianceEventLog> captor = ArgumentCaptor.forClass(ComplianceEventLog.class);
         verify(eventLogRepository).save(captor.capture());
 
         OffsetDateTime receivedAt = captor.getValue().getReceivedAt();
@@ -132,32 +127,27 @@ class EventLogServiceTest {
                 .type("Observation")
                 .subject("patient-789")
                 .time(OffsetDateTime.now(ZoneOffset.UTC))
-                .correlationid("corr-null-test")
                 .data(objectMapper.valueToTree(Map.of("resourceType", "Observation")))
                 .build();
-        // sourceeventid, facilityid are null
+        // correlationid is null
 
-        when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(eventLogRepository.save(any(ComplianceEventLog.class))).thenAnswer(inv -> inv.getArgument(0));
 
         eventLogService.recordEvent(message, ProcessingStatus.ZERO_MATCH);
 
-        ArgumentCaptor<EventLog> captor = ArgumentCaptor.forClass(EventLog.class);
+        ArgumentCaptor<ComplianceEventLog> captor = ArgumentCaptor.forClass(ComplianceEventLog.class);
         verify(eventLogRepository).save(captor.capture());
 
-        assertNull(captor.getValue().getSourceEventId());
-        assertNull(captor.getValue().getFacilityId());
-        assertNull(captor.getValue().getProtocolInstanceId());
-        assertNull(captor.getValue().getProtocolDefinitionId());
-        assertNull(captor.getValue().getActionId());
+        assertNull(captor.getValue().getCorrelationId());
     }
 
     @Test
     void updateStatus_updatesAndSaves() {
-        EventLog eventLog = EventLog.builder()
+        ComplianceEventLog eventLog = ComplianceEventLog.builder()
                 .processingStatus(ProcessingStatus.ZERO_MATCH)
                 .build();
 
-        when(eventLogRepository.save(any(EventLog.class))).thenAnswer(inv -> inv.getArgument(0));
+        when(eventLogRepository.save(any(ComplianceEventLog.class))).thenAnswer(inv -> inv.getArgument(0));
 
         eventLogService.updateStatus(eventLog, ProcessingStatus.MATCHED);
 

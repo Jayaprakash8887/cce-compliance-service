@@ -11,11 +11,12 @@ import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.dto.ActionDefinitionDto;
 import org.openphc.cce.compliance.web.dto.CreateActionDefinitionRequest;
 import org.openphc.cce.compliance.web.dto.UpdateActionDefinitionRequest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -43,16 +44,17 @@ public class ActionDefinitionController {
     }
 
     @GetMapping
-    public ResponseEntity<List<ActionDefinitionDto>> listAll(
-            @RequestParam(required = false) String status) {
-        List<ActionDefinition> definitions;
+    public ResponseEntity<Page<ActionDefinitionDto>> listAll(
+            @RequestParam(required = false) String status,
+            Pageable pageable) {
+        Page<ActionDefinition> definitions;
         if (status != null) {
             ActionDefinitionStatus statusEnum = ActionDefinitionStatus.valueOf(status);
-            definitions = actionDefinitionService.findByStatus(statusEnum);
+            definitions = actionDefinitionService.findByStatus(statusEnum, pageable);
         } else {
-            definitions = actionDefinitionService.findAll();
+            definitions = actionDefinitionService.findAll(pageable);
         }
-        return ResponseEntity.ok(dtoMapper.toDtoActionDefinitionList(definitions));
+        return ResponseEntity.ok(definitions.map(dtoMapper::toDto));
     }
 
     @GetMapping("/{id}")

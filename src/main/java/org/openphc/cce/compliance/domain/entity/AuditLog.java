@@ -7,6 +7,7 @@ import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
@@ -40,16 +41,13 @@ public class AuditLog {
     @Column(columnDefinition = "jsonb")
     private JsonNode details;
 
-    @Column(name = "ip_address")
-    private String ipAddress;
-
     @Column(nullable = false)
     private OffsetDateTime timestamp;
 
     @PrePersist
     protected void onCreate() {
         if (timestamp == null) {
-            timestamp = OffsetDateTime.now();
+            timestamp = OffsetDateTime.now(ZoneOffset.UTC);
         }
     }
 }

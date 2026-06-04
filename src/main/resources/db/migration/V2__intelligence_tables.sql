@@ -17,8 +17,6 @@ CREATE TABLE action_definition (
     title               VARCHAR,
     status              VARCHAR         NOT NULL,
     action_type         VARCHAR         NOT NULL,
-    severity            VARCHAR,
-    intelligence_channel VARCHAR,
     definition          JSONB           NOT NULL,
     created_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
@@ -51,7 +49,7 @@ CREATE TABLE intelligence_event_log (
     deviation_id            UUID,
     subject                 VARCHAR         NOT NULL,
     action_type             VARCHAR         NOT NULL,
-    intelligence_channel    VARCHAR         NOT NULL,
+    intelligence_destination VARCHAR         NOT NULL,
     step_state              VARCHAR         NOT NULL,
 
     -- Audit context (not in the event — explains why this action fired)
@@ -63,7 +61,6 @@ CREATE TABLE intelligence_event_log (
     -- Lifecycle
     published               BOOLEAN         NOT NULL DEFAULT FALSE,
     published_at            TIMESTAMPTZ,
-    error_message           TEXT,
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT intelligence_event_log_pkey PRIMARY KEY (id)

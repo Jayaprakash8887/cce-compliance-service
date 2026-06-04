@@ -45,7 +45,7 @@ curl localhost:8080/actuator/health
 
 ```
 Kafka → InboundEventConsumer → ComplianceEngine
-                                  ├── Idempotency (EventLogService)
+                                  ├── Idempotency (ComplianceEventLogService)
                                   ├── Resource Extraction (ResourceInfoExtractor)
                                   ├── Tier 1 Matching (TriggerMatchingService)
                                   ├── Tier 2 Evaluation (ExpressionEvaluationService)

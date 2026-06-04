@@ -110,7 +110,7 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.COMPLETED, step.getState());
             assertNotNull(step.getCompletedAt());
-            assertEquals(eventId, step.getMatchedEventId());
+            assertEquals(eventId, step.getCompletedByEventId());
             assertEquals("test-source", step.getCompletedBySource());
             assertEquals(CompletionStatus.EARLY, step.getCompletionStatus());
 

@@ -219,16 +219,15 @@ All CCE services share the same PostgreSQL database (`cce_collector`) deployed b
 
 The database and user are created by the collector service's Docker Compose. The compliance service only needs to run its Flyway migrations, which happen automatically on startup.
 
-> **Compliance service tables:** `protocol_definition`, `protocol_instance`, `step_instance`, `deviation`, `trigger_index`, `event_log`, `audit_log`, `action_definition`, `intelligence_event_log`
+> **Compliance service tables:** `protocol_definition`, `protocol_instance`, `step_instance`, `deviation`, `trigger_index`, `compliance_event_log`, `audit_log`, `action_definition`, `intelligence_event_log`
 
 ### Schema Migrations
 
 Flyway manages all schema migrations automatically on application startup.
 
 - Migrations are located at `classpath:db/migration`
-- `V1__initial_schema.sql` creates the initial 7 tables with indexes and constraints
+- `V1__initial_schema.sql` creates the initial 7 tables with indexes, constraints, and ORDER_VIOLATION deviation type
 - `V2__intelligence_tables.sql` adds `action_definition`, `intelligence_event_log` tables (9 total)
-- `V3__add_order_violation_deviation_type.sql` adds `ORDER_VIOLATION` to the deviation_type CHECK constraint
 - `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
 - **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
 
@@ -378,7 +377,7 @@ psql -U cce_user -h postgres-host -p 5433 cce_collector < backup_20250101.sql
 ### Recovery Considerations
 
 - **Kafka offsets:** Consumer group offsets are stored in Kafka. On restart, processing resumes from the last committed offset.
-- **Idempotency:** The `(cloudeventsId, source)` unique constraint on `event_log` ensures safe event reprocessing.
+- **Idempotency:** The `(cloudeventsId, source)` unique constraint on `compliance_event_log` ensures safe event reprocessing.
 - **Protocol definitions:** Stored in PostgreSQL with JSONB. Trigger index can be rebuilt via the `/v1/protocol-definitions/{id}/rebuild-index` endpoint.
 - **Condition-only triggers:** Loaded in-memory from stored definitions on startup (rebuild-index).
 

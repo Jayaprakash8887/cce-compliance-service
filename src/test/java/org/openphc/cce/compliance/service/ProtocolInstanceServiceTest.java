@@ -14,6 +14,7 @@ import org.openphc.cce.compliance.domain.enums.ProtocolDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
 import org.openphc.cce.compliance.domain.enums.StepState;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
+import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -33,13 +34,16 @@ class ProtocolInstanceServiceTest {
     private ProtocolInstanceRepository protocolInstanceRepository;
 
     @Mock
+    private StepInstanceRepository stepInstanceRepository;
+
+    @Mock
     private AuditService auditService;
 
     private ProtocolInstanceService service;
 
     @BeforeEach
     void setUp() {
-        service = new ProtocolInstanceService(protocolInstanceRepository, auditService);
+        service = new ProtocolInstanceService(protocolInstanceRepository, stepInstanceRepository, auditService);
     }
 
     @Nested
@@ -104,11 +108,10 @@ class ProtocolInstanceServiceTest {
         void allStepsTerminal_completesProtocol() {
             UUID instanceId = UUID.randomUUID();
             ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-            instance.getSteps().add(buildStep(StepState.COMPLETED));
-            instance.getSteps().add(buildStep(StepState.MISSED));
-            instance.getSteps().add(buildStep(StepState.SKIPPED));
 
             when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
+            when(stepInstanceRepository.countByProtocolInstanceId(instanceId)).thenReturn(3L);
+            when(stepInstanceRepository.countNonTerminalSteps(eq(instanceId), anyCollection())).thenReturn(0L);
             when(protocolInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             service.checkAndCompleteProtocol(instanceId);
@@ -121,10 +124,10 @@ class ProtocolInstanceServiceTest {
         void someStepsNotTerminal_doesNotComplete() {
             UUID instanceId = UUID.randomUUID();
             ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-            instance.getSteps().add(buildStep(StepState.COMPLETED));
-            instance.getSteps().add(buildStep(StepState.PENDING));
 
             when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
+            when(stepInstanceRepository.countByProtocolInstanceId(instanceId)).thenReturn(2L);
+            when(stepInstanceRepository.countNonTerminalSteps(eq(instanceId), anyCollection())).thenReturn(1L);
 
             service.checkAndCompleteProtocol(instanceId);
 
@@ -138,6 +141,7 @@ class ProtocolInstanceServiceTest {
             ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
 
             when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
+            when(stepInstanceRepository.countByProtocolInstanceId(instanceId)).thenReturn(0L);
 
             service.checkAndCompleteProtocol(instanceId);
 
@@ -155,44 +159,6 @@ class ProtocolInstanceServiceTest {
             service.checkAndCompleteProtocol(instanceId);
 
             verify(protocolInstanceRepository, never()).save(any());
-        }
-    }
-
-    @Nested
-    class WithdrawProtocol {
-
-        @Test
-        void activeInstance_withdrawsSuccessfully() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-            when(protocolInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-            ProtocolInstance result = service.withdrawProtocol(instanceId);
-
-            assertEquals(ProtocolInstanceStatus.WITHDRAWN, result.getStatus());
-            verify(auditService).audit(eq("COMPLIANCE"), eq("PROTOCOL_WITHDRAWN"),
-                    eq("system"), eq("ProtocolInstance"), eq(instanceId.toString()), anyMap());
-        }
-
-        @Test
-        void completedInstance_throwsIllegalState() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.COMPLETED);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-
-            assertThrows(IllegalStateException.class, () -> service.withdrawProtocol(instanceId));
-            verify(protocolInstanceRepository, never()).save(any());
-        }
-
-        @Test
-        void notFound_throwsEntityNotFound() {
-            UUID instanceId = UUID.randomUUID();
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.empty());
-
-            assertThrows(EntityNotFoundException.class, () -> service.withdrawProtocol(instanceId));
         }
     }
 
@@ -215,22 +181,6 @@ class ProtocolInstanceServiceTest {
             when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.empty());
 
             assertThrows(EntityNotFoundException.class, () -> service.findById(instanceId));
-        }
-
-        @Test
-        void findByPatientId_delegatesToRepository() {
-            when(protocolInstanceRepository.findByPatientId("patient-1")).thenReturn(List.of());
-            List<ProtocolInstance> result = service.findByPatientId("patient-1");
-            assertTrue(result.isEmpty());
-            verify(protocolInstanceRepository).findByPatientId("patient-1");
-        }
-
-        @Test
-        void findActiveByPatientId_delegatesToRepository() {
-            when(protocolInstanceRepository.findByPatientIdAndStatus("patient-1", ProtocolInstanceStatus.ACTIVE))
-                    .thenReturn(List.of());
-            List<ProtocolInstance> result = service.findActiveByPatientId("patient-1");
-            assertTrue(result.isEmpty());
         }
     }
 

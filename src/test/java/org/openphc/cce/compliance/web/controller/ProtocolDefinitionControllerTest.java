@@ -10,6 +10,9 @@ import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.GlobalExceptionHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ContextConfiguration;
@@ -109,22 +112,24 @@ class ProtocolDefinitionControllerTest {
     @Test
     void listAll_returnsDefinitions() throws Exception {
         ProtocolDefinition protocolDef = buildProtocolDefinition();
-        when(protocolDefinitionService.findAll()).thenReturn(List.of(protocolDef));
+        Page<ProtocolDefinition> page = new PageImpl<>(List.of(protocolDef));
+        when(protocolDefinitionService.findAll(any(Pageable.class))).thenReturn(page);
 
         mockMvc.perform(get("/v1/compliance/protocol-definitions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(PROTOCOL_ID.toString()))
-                .andExpect(jsonPath("$[0].url").value("http://example.org/PlanDefinition/hiv-treatment"));
+                .andExpect(jsonPath("$.content[0].id").value(PROTOCOL_ID.toString()))
+                .andExpect(jsonPath("$.content[0].url").value("http://example.org/PlanDefinition/hiv-treatment"));
     }
 
     @Test
     void listAll_empty_returnsEmptyList() throws Exception {
-        when(protocolDefinitionService.findAll()).thenReturn(List.of());
+        Page<ProtocolDefinition> page = new PageImpl<>(List.of());
+        when(protocolDefinitionService.findAll(any(Pageable.class))).thenReturn(page);
 
         mockMvc.perform(get("/v1/compliance/protocol-definitions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$").isEmpty());
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     // --- GET /{id} (getById) ---

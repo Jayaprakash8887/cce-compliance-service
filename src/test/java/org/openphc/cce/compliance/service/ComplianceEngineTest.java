@@ -12,7 +12,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.hl7.fhir.r4.model.PlanDefinition;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.openphc.cce.compliance.domain.entity.EventLog;
+import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
@@ -38,7 +38,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ComplianceEngineTest {
 
-    @Mock private EventLogService eventLogService;
+    @Mock private ComplianceEventLogService eventLogService;
     @Mock private ResourceInfoExtractor resourceInfoExtractor;
     @Mock private TriggerMatchingService triggerMatchingService;
     @Mock private ExpressionEvaluationService expressionEvaluationService;
@@ -91,7 +91,7 @@ class ComplianceEngineTest {
         @Test
         void noMatches_zeroMatchStatusLogged() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
@@ -113,7 +113,7 @@ class ComplianceEngineTest {
         @Test
         void singleMatch_enrollmentAndStepCompletion() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId = UUID.randomUUID();
             ProtocolDefinition protocolDef = buildProtocolDefinition(protocolDefId);
             ProtocolInstance protocolInstance = buildProtocolInstance(protocolDef);
@@ -149,7 +149,7 @@ class ComplianceEngineTest {
         @Test
         void multipleMatches_eachCreatesOwnStep() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId1 = UUID.randomUUID();
             UUID protocolDefId2 = UUID.randomUUID();
             ProtocolDefinition protocolDef1 = buildProtocolDefinition(protocolDefId1);
@@ -204,7 +204,7 @@ class ComplianceEngineTest {
         @Test
         void conditionOnlyTrigger_matchedViaTier2() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId = UUID.randomUUID();
             ProtocolDefinition protocolDef = buildProtocolDefinition(protocolDefId);
             ProtocolInstance protocolInstance = buildProtocolInstance(protocolDef);
@@ -249,7 +249,7 @@ class ComplianceEngineTest {
             event.setActionid("explicit-action");
             event.setProtocolinstanceid(protocolInstanceId.toString());
 
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
@@ -278,7 +278,7 @@ class ComplianceEngineTest {
             event.setActionid("new-action");
             event.setProtocolinstanceid(protocolInstanceId.toString());
 
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
@@ -304,7 +304,7 @@ class ComplianceEngineTest {
         @Test
         void existingEnrollment_stepCompletedWithoutReEnrollment() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId = UUID.randomUUID();
             ProtocolDefinition protocolDef = buildProtocolDefinition(protocolDefId);
             ProtocolInstance existingInstance = buildProtocolInstance(protocolDef);
@@ -339,7 +339,7 @@ class ComplianceEngineTest {
         @Test
         void tier2ConditionFails_candidateFilteredOut() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId = UUID.randomUUID();
             ProtocolDefinition protocolDef = buildProtocolDefinition(protocolDefId);
 
@@ -372,7 +372,7 @@ class ComplianceEngineTest {
         @Test
         void unsupportedExpressionLanguage_propagatesException() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId = UUID.randomUUID();
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
@@ -397,7 +397,7 @@ class ComplianceEngineTest {
         @Test
         void noActionableStep_createsNewInitialStep() {
             CloudEventMessage event = buildEvent();
-            EventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
+            ComplianceEventLog eventLog = buildEventLog(ProcessingStatus.ZERO_MATCH);
             UUID protocolDefId = UUID.randomUUID();
             ProtocolDefinition protocolDef = buildProtocolDefinition(protocolDefId);
             ProtocolInstance protocolInstance = buildProtocolInstance(protocolDef);
@@ -468,14 +468,11 @@ class ComplianceEngineTest {
                 .build();
     }
 
-    private EventLog buildEventLog(ProcessingStatus status) {
-        return EventLog.builder()
+    private ComplianceEventLog buildEventLog(ProcessingStatus status) {
+        return ComplianceEventLog.builder()
                 .id(UUID.randomUUID())
                 .cloudeventsId("ce-" + UUID.randomUUID())
                 .source("test-source")
-                .subject("patient-1")
-                .type("test-type")
-                .eventTime(OffsetDateTime.now(ZoneOffset.UTC))
                 .receivedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationId(UUID.randomUUID().toString())
                 .processingStatus(status)

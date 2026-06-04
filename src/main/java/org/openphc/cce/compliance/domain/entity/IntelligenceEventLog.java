@@ -70,9 +70,6 @@ public class IntelligenceEventLog {
     @Column(name = "published_at")
     private OffsetDateTime publishedAt;
 
-    @Column(name = "error_message", columnDefinition = "text")
-    private String errorMessage;
-
     @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 

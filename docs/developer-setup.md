@@ -159,9 +159,7 @@ cce-compliance-service/
 │           ├── application.yml
 │           └── db/migration/
 │               ├── V1__initial_schema.sql
-│               ├── V2__intelligence_tables.sql
-│               ├── V3__add_order_violation_deviation_type.sql
-│               └── V4__core_schema_optimization.sql
+│               └── V2__intelligence_tables.sql
 ├── Dockerfile                          # Multi-stage Docker build
 ├── .gitignore
 ├── build.gradle                        # Gradle build configuration
@@ -194,10 +192,8 @@ Migrations are applied automatically on application startup. To run manually:
 
 | Version | Description | Script |
 |---|---|---|
-| V1 | Initial schema (7 tables) | `V1__initial_schema.sql` |
+| V1 | Initial schema (7 tables, indexes, constraints) | `V1__initial_schema.sql` |
 | V2 | Intelligence tables (action_definition, intelligence_event_log) | `V2__intelligence_tables.sql` |
-| V3 | Add ORDER_VIOLATION deviation type | `V3__add_order_violation_deviation_type.sql` |
-| V4 | Performance indexes and constraints | `V4__core_schema_optimization.sql` |
 
 ## 6. Docker Build
 

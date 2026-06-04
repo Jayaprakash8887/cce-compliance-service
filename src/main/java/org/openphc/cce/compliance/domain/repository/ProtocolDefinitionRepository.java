@@ -1,7 +1,6 @@
 package org.openphc.cce.compliance.domain.repository;
 
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
-import org.openphc.cce.compliance.domain.enums.ProtocolDefinitionStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -15,6 +14,4 @@ public interface ProtocolDefinitionRepository extends JpaRepository<ProtocolDefi
     Optional<ProtocolDefinition> findByUrlAndVersion(String url, String version);
 
     List<ProtocolDefinition> findByUrl(String url);
-
-    List<ProtocolDefinition> findByStatus(ProtocolDefinitionStatus status);
 }

@@ -11,6 +11,9 @@ import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.GlobalExceptionHandler;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ContextConfiguration;
@@ -119,37 +122,40 @@ class ActionDefinitionControllerTest {
     @Test
     void listAll_returnsDefinitions() throws Exception {
         ActionDefinition actionDef = buildActionDefinition();
-        when(actionDefinitionService.findAll()).thenReturn(List.of(actionDef));
+        Page<ActionDefinition> page = new PageImpl<>(List.of(actionDef));
+        when(actionDefinitionService.findAll(any(Pageable.class))).thenReturn(page);
 
         mockMvc.perform(get("/v1/compliance/action-definitions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].id").value(ACTION_DEF_ID.toString()))
-                .andExpect(jsonPath("$[0].name").value("escalation-alert"));
+                .andExpect(jsonPath("$.content[0].id").value(ACTION_DEF_ID.toString()))
+                .andExpect(jsonPath("$.content[0].name").value("escalation-alert"));
     }
 
     @Test
     void listAll_empty_returnsEmptyList() throws Exception {
-        when(actionDefinitionService.findAll()).thenReturn(List.of());
+        Page<ActionDefinition> page = new PageImpl<>(List.of());
+        when(actionDefinitionService.findAll(any(Pageable.class))).thenReturn(page);
 
         mockMvc.perform(get("/v1/compliance/action-definitions"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$").isArray())
-                .andExpect(jsonPath("$").isEmpty());
+                .andExpect(jsonPath("$.content").isArray())
+                .andExpect(jsonPath("$.content").isEmpty());
     }
 
     @Test
     void listAll_filterByStatus_returnsFiltered() throws Exception {
         ActionDefinition actionDef = buildActionDefinition();
-        when(actionDefinitionService.findByStatus(ActionDefinitionStatus.ACTIVE))
-                .thenReturn(List.of(actionDef));
+        Page<ActionDefinition> page = new PageImpl<>(List.of(actionDef));
+        when(actionDefinitionService.findByStatus(eq(ActionDefinitionStatus.ACTIVE), any(Pageable.class)))
+                .thenReturn(page);
 
         mockMvc.perform(get("/v1/compliance/action-definitions")
                         .param("status", "ACTIVE"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].status").value("ACTIVE"));
+                .andExpect(jsonPath("$.content[0].status").value("ACTIVE"));
 
-        verify(actionDefinitionService).findByStatus(ActionDefinitionStatus.ACTIVE);
-        verify(actionDefinitionService, never()).findAll();
+        verify(actionDefinitionService).findByStatus(eq(ActionDefinitionStatus.ACTIVE), any(Pageable.class));
+        verify(actionDefinitionService, never()).findAll(any(Pageable.class));
     }
 
     // --- GET /{id} (getById) ---

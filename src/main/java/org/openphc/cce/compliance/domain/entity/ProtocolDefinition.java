@@ -8,6 +8,7 @@ import org.hibernate.type.SqlTypes;
 import org.openphc.cce.compliance.domain.enums.ProtocolDefinitionStatus;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
@@ -43,7 +44,7 @@ public class ProtocolDefinition {
     @PrePersist
     protected void onCreate() {
         if (loadedAt == null) {
-            loadedAt = OffsetDateTime.now();
+            loadedAt = OffsetDateTime.now(ZoneOffset.UTC);
         }
     }
 

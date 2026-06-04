@@ -22,7 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Violations rejected with `IllegalArgumentException` at protocol load time
 
 #### Schema Optimization
-- Flyway V4 migration: Performance indexes and constraints for production workloads
+- Performance indexes, constraints, and `compliance_event_log` lean schema (all folded into V1/V2 for fresh deployment)
+- `event_log` renamed to `compliance_event_log` — lean idempotency log (id, cloudeventsId, source, correlationId, processingStatus, data, receivedAt)
+- `step_instance.matched_event_id` renamed to `completed_by_event_id`
+- `audit_log.ip_address` column removed
+- List endpoints (protocol-definitions, action-definitions, intelligence-events) now return paginated `Page<T>` responses
 
 ### Changed
 
@@ -66,8 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `IntelligenceEventLog` entity recording each intelligence action execution with evaluation context and Kafka event payload
 - `ActionDefinition` entity for FHIR `ActivityDefinition` resources — CRUD operations via `ActionDefinitionService`
 - Flyway V2 migration: `action_definition`, `intelligence_event_log` tables with indexes
-- Flyway V3 migration: `ORDER_VIOLATION` added to `deviation_type` CHECK constraint
-- `ORDER_VIOLATION` deviation type for detecting out-of-sequence step completions
+- `ORDER_VIOLATION` deviation type for detecting out-of-sequence step completions (included in V1 CHECK constraint)
 
 #### New Enums
 - `ActionDefinitionStatus` (ACTIVE, RETIRED)

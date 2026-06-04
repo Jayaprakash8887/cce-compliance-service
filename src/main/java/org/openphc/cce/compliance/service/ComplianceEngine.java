@@ -5,7 +5,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.hl7.fhir.r4.model.PlanDefinition;
-import org.openphc.cce.compliance.domain.entity.EventLog;
+import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
@@ -37,7 +37,7 @@ public class ComplianceEngine {
 
     private static final Logger log = LoggerFactory.getLogger(ComplianceEngine.class);
 
-    private final EventLogService eventLogService;
+    private final ComplianceEventLogService eventLogService;
     private final ResourceInfoExtractor resourceInfoExtractor;
     private final TriggerMatchingService triggerMatchingService;
     private final ExpressionEvaluationService expressionEvaluationService;
@@ -55,7 +55,7 @@ public class ComplianceEngine {
     private final Timer matchingDurationTimer;
     private final Timer eventProcessingTimer;
 
-    public ComplianceEngine(EventLogService eventLogService,
+    public ComplianceEngine(ComplianceEventLogService eventLogService,
                             ResourceInfoExtractor resourceInfoExtractor,
                             TriggerMatchingService triggerMatchingService,
                             ExpressionEvaluationService expressionEvaluationService,
@@ -106,7 +106,7 @@ public class ComplianceEngine {
         }
 
         // Step 2: Record event with initial ZERO_MATCH status
-        EventLog eventLog = eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH);
+        ComplianceEventLog eventLog = eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH);
 
         // Step 3: Extract resource info from payload
         JsonNode data = event.getData();
@@ -145,7 +145,7 @@ public class ComplianceEngine {
      * Process an explicit match — bypass Tier 1/2 entirely.
      * Uses actionId and protocolInstanceId from CloudEvent extensions.
      */
-    void processExplicitMatch(CloudEventMessage event, EventLog eventLog) {
+    void processExplicitMatch(CloudEventMessage event, ComplianceEventLog eventLog) {
         String actionId = event.getActionid();
         String protocolInstanceIdStr = event.getProtocolinstanceid();
 
@@ -158,11 +158,6 @@ public class ComplianceEngine {
         UUID protocolInstanceId = UUID.fromString(protocolInstanceIdStr);
         ProtocolInstance protocolInstance = protocolInstanceService.findById(protocolInstanceId);
         Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache = new HashMap<>();
-
-        // Link event_log to the matched protocol instance
-        eventLog.setProtocolInstanceId(protocolInstanceId);
-        eventLog.setProtocolDefinitionId(protocolInstance.getProtocolDefinition().getId());
-        eventLog.setActionId(actionId);
 
         StepInstance step = stepInstanceService.findActionableStep(protocolInstanceId, actionId);
         if (step == null) {
@@ -251,7 +246,7 @@ public class ComplianceEngine {
         return false;
     }
 
-    private void processMatch(MatchedStep match, CloudEventMessage event, EventLog eventLog,
+    private void processMatch(MatchedStep match, CloudEventMessage event, ComplianceEventLog eventLog,
                               Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache) {
         ProtocolDefinition protocolDef = protocolDefinitionService.findById(match.protocolDefinitionId());
         String patientId = event.getSubject();
@@ -261,11 +256,6 @@ public class ComplianceEngine {
                 patientId, protocolDef, OffsetDateTime.now(ZoneOffset.UTC));
 
         String actionId = match.actionId();
-
-        // Link event_log to the matched protocol instance
-        eventLog.setProtocolInstanceId(protocolInstance.getId());
-        eventLog.setProtocolDefinitionId(protocolDef.getId());
-        eventLog.setActionId(actionId);
 
         // Find or create an actionable step
         StepInstance step = stepInstanceService.findActionableStep(

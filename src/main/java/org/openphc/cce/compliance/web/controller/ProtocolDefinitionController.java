@@ -7,6 +7,8 @@ import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.dto.LoadProtocolRequest;
 import org.openphc.cce.compliance.web.dto.ProtocolDefinitionDto;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -36,9 +38,9 @@ public class ProtocolDefinitionController {
     }
 
     @GetMapping
-    public ResponseEntity<List<ProtocolDefinitionDto>> listAll() {
-        List<ProtocolDefinition> definitions = protocolDefinitionService.findAll();
-        return ResponseEntity.ok(dtoMapper.toDtoProtocolDefinitionList(definitions));
+    public ResponseEntity<Page<ProtocolDefinitionDto>> listAll(Pageable pageable) {
+        Page<ProtocolDefinition> definitions = protocolDefinitionService.findAll(pageable);
+        return ResponseEntity.ok(definitions.map(dtoMapper::toDto));
     }
 
     @GetMapping("/{id}")

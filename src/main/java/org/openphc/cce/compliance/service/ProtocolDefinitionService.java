@@ -13,6 +13,8 @@ import org.openphc.cce.compliance.domain.repository.TriggerIndexRepository;
 import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -214,6 +216,11 @@ public class ProtocolDefinitionService {
     @Transactional(readOnly = true)
     public List<ProtocolDefinition> findAll() {
         return protocolDefinitionRepository.findAll();
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ProtocolDefinition> findAll(Pageable pageable) {
+        return protocolDefinitionRepository.findAll(pageable);
     }
 
     @Transactional(readOnly = true)

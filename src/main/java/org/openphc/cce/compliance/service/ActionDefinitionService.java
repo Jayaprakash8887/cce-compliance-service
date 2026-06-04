@@ -9,6 +9,8 @@ import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
 import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -160,8 +162,18 @@ public class ActionDefinitionService {
     }
 
     @Transactional(readOnly = true)
+    public Page<ActionDefinition> findAll(Pageable pageable) {
+        return actionDefinitionRepository.findAll(pageable);
+    }
+
+    @Transactional(readOnly = true)
     public List<ActionDefinition> findByStatus(ActionDefinitionStatus status) {
         return actionDefinitionRepository.findByStatus(status);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ActionDefinition> findByStatus(ActionDefinitionStatus status, Pageable pageable) {
+        return actionDefinitionRepository.findByStatus(status, pageable);
     }
 
     @Transactional(readOnly = true)

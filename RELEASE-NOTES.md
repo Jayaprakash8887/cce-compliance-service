@@ -10,7 +10,7 @@
 
 Release 1.2.0 adds **flat-model sub-step support** — nested `PlanDefinition.action.action[]` entries of type `"step"` are flattened into peer-level steps at parse time, connected via `relatedSteps` references. No parent-child hierarchy is stored in the database. This approach simplifies the domain model while preserving full support for multi-level nested action structures in FHIR PlanDefinitions.
 
-Additionally, this release includes core schema optimizations (V4 migration) for production workloads and mandatory unique `actionId` validation.
+Additionally, this release includes core schema optimizations (folded into base V1/V2 migrations) for production workloads and mandatory unique `actionId` validation.
 
 ---
 
@@ -44,19 +44,21 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 - `StepInstanceService.autoSkipPrecedingOptionalSteps(step, steps)` — auto-skip preceding `could` steps
 - `completeStep()` parses PlanDefinition **once** and passes `List<StepMetadata>` to all helper methods (eliminated redundant re-parses)
 
-### Core Schema Optimization (V4)
+### Core Schema Optimization
 - Performance indexes and constraints for production workloads
+- `event_log` renamed to `compliance_event_log` with lean schema (idempotency + processing status only)
+- `step_instance.matched_event_id` renamed to `completed_by_event_id`
+- `audit_log.ip_address` removed (never populated)
 
 ---
 
 ## Database Schema Changes
 
-1 new Flyway migration since v1.1.0:
-- `V4__core_schema_optimization.sql` — Performance indexes and constraints
+All schema optimizations (performance indexes, constraints, ORDER_VIOLATION deviation type) are included in the base V1/V2 migrations for fresh deployment.
 
 **Removed from schema:**
 - No `parent_step_id` column on `step_instance` (flat model)
-- No `matched_step_instance_id` column on `event_log` (dead field removed from entity)
+- No `matched_step_instance_id` column on `compliance_event_log` (dead field removed from entity)
 
 ---
 
@@ -64,7 +66,7 @@ Additionally, this release includes core schema optimizations (V4 migration) for
 
 ```
 Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
-                                    ├── Idempotency (EventLogService)
+                                    ├── Idempotency (ComplianceEventLogService)
                                     ├── Resource Extraction (ResourceInfoExtractor)
                                     ├── Tier 1 Matching (TriggerMatchingService)
                                     ├── Tier 2 Evaluation (ExpressionEvaluationService)
@@ -83,8 +85,8 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 
 ## Migration from v1.1.0
 
-1. Apply Flyway V4 migration (automatic on startup)
-2. No breaking changes to existing REST API endpoints
+1. Flyway migrations run automatically on startup (all optimizations folded into V1/V2)
+2. No breaking changes to existing REST API endpoints (list endpoints now return paginated responses)
 3. No changes to existing Kafka message schemas
 4. Existing PlanDefinitions without nested actions continue to work unchanged
 5. PlanDefinitions with nested `action.action[]` typed as `"step"` are now flattened at parse time — no schema change needed
@@ -101,7 +103,7 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 
 ## Test Coverage
 
-- **370 unit tests** covering all services including multi-level sub-step lifecycle and recursive parsing
+- **374 unit tests** covering all services including multi-level sub-step lifecycle and recursive parsing
 - **39 integration tests** covering end-to-end workflows with EmbeddedKafka + H2
 - JaCoCo coverage reports via `./gradlew test jacocoTestReport`
 
@@ -152,7 +154,7 @@ Initial release of the CCE Compliance Service — a clinical protocol compliance
 
 ### Event Processing
 - CloudEvents v1.0 spec with CCE extension attributes (`correlationid`, `actionid`, `facilityid`, `protocolinstanceid`)
-- Idempotency via `(cloudeventsId, source)` uniqueness on `event_log`
+- Idempotency via `(cloudeventsId, source)` uniqueness on `compliance_event_log`
 - Comprehensive event logging with processing status tracking
 
 ### Kafka Infrastructure
@@ -190,7 +192,7 @@ Initial release of the CCE Compliance Service — a clinical protocol compliance
 
 ```
 Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
-                                    ├── Idempotency (EventLogService)
+                                    ├── Idempotency (ComplianceEventLogService)
                                     ├── Resource Extraction (ResourceInfoExtractor)
                                     ├── Tier 1 Matching (TriggerMatchingService)
                                     ├── Tier 2 Evaluation (ExpressionEvaluationService)
@@ -210,7 +212,7 @@ Kafka ─→ InboundEventConsumer ─→ ComplianceEngine
 - `step_instance` — Individual step state tracking
 - `deviation` — Deviation records with metadata
 - `trigger_index` — Decomposed codeFilter entries for Tier 1 matching (composite PK)
-- `event_log` — Inbound event log with idempotency constraint
+- `compliance_event_log` — Inbound event log with idempotency constraint
 - `audit_log` — Audit trail for all operations
 
 ---

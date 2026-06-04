@@ -2,6 +2,8 @@ package org.openphc.cce.compliance.domain.repository;
 
 import org.openphc.cce.compliance.domain.entity.ActionDefinition;
 import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
@@ -15,6 +17,8 @@ public interface ActionDefinitionRepository extends JpaRepository<ActionDefiniti
     Optional<ActionDefinition> findByCanonicalUrlAndVersion(String canonicalUrl, String version);
 
     List<ActionDefinition> findByStatus(ActionDefinitionStatus status);
+
+    Page<ActionDefinition> findByStatus(ActionDefinitionStatus status, Pageable pageable);
 
     long countByStatus(ActionDefinitionStatus status);
 

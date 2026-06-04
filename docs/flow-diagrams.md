@@ -15,7 +15,7 @@ sequenceDiagram
     participant Kafka as Apache Kafka
     participant Consumer as InboundEventConsumer
     participant Engine as ComplianceEngine
-    participant EventLog as EventLogService
+    participant EventLog as ComplianceEventLogService
     participant TriggerMatch as TriggerMatchingService
     participant Parser as PlanDefinitionParser
     participant ExprEval as ExpressionEvaluationService<br/>(JSONLogic + FHIRPath)
@@ -43,8 +43,8 @@ sequenceDiagram
         rect rgb(245, 255, 245)
             Note over Engine,DB: Step 2 — Record Event
             Engine->>EventLog: recordEvent(cloudEvent, ZERO_MATCH)
-            EventLog->>DB: INSERT INTO event_log
-            DB-->>EventLog: EventLog entity
+            EventLog->>DB: INSERT INTO compliance_event_log
+            DB-->>EventLog: ComplianceEventLog entity
             EventLog-->>Engine: eventLog
         end
 
@@ -257,8 +257,8 @@ flowchart TD
     T --> V
     U --> V
 
-    V --> W["Set matchedEventId"]
-    W --> X["Update Event Log"]
+    V --> W["Set completedByEventId"]
+    W --> X["Update Compliance Event Log"]
 ```
 
 ## 5. Deviation Detection & Recording
