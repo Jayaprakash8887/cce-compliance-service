@@ -37,11 +37,6 @@ public class DeviationService {
         this.objectMapper = objectMapper;
     }
 
-    @Transactional(readOnly = true)
-    public List<Deviation> findByProtocolInstanceId(UUID protocolInstanceId) {
-        return deviationRepository.findByProtocolInstanceId(protocolInstanceId);
-    }
-
     /**
      * Create a deviation with auto-enriched metadata based on deviation type.
      * Delegates to recordDeviation after building metadata.

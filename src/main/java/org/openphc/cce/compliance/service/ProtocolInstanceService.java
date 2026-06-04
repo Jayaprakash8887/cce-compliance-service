@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -104,50 +103,9 @@ public class ProtocolInstanceService {
         }
     }
 
-    /**
-     * Withdraw a protocol instance — sets status to WITHDRAWN.
-     */
-    public ProtocolInstance withdrawProtocol(UUID instanceId) {
-        ProtocolInstance instance = findByIdOrThrow(instanceId);
-
-        if (instance.getStatus() != ProtocolInstanceStatus.ACTIVE) {
-            throw new IllegalStateException(
-                    "Cannot withdraw protocol instance in state " + instance.getStatus() + ": " + instanceId);
-        }
-
-        instance.setStatus(ProtocolInstanceStatus.WITHDRAWN);
-        instance = protocolInstanceRepository.save(instance);
-
-        auditService.audit("COMPLIANCE", "PROTOCOL_WITHDRAWN", "system",
-                "ProtocolInstance", instanceId.toString(),
-                Map.of("patientId", instance.getPatientId(),
-                        "protocolCanonical", instance.getProtocolCanonical()));
-
-        log.info("Withdrew protocol instance {} for patient {}",
-                instanceId, instance.getPatientId());
-
-        return instance;
-    }
-
     @Transactional(readOnly = true)
     public ProtocolInstance findById(UUID id) {
         return findByIdOrThrow(id);
-    }
-
-    @Transactional(readOnly = true)
-    public ProtocolInstance findByIdWithDetails(UUID id) {
-        return protocolInstanceRepository.findByIdWithStepsAndDeviations(id)
-                .orElseThrow(() -> new EntityNotFoundException("Protocol instance not found: " + id));
-    }
-
-    @Transactional(readOnly = true)
-    public List<ProtocolInstance> findByPatientId(String patientId) {
-        return protocolInstanceRepository.findByPatientId(patientId);
-    }
-
-    @Transactional(readOnly = true)
-    public List<ProtocolInstance> findActiveByPatientId(String patientId) {
-        return protocolInstanceRepository.findByPatientIdAndStatus(patientId, ProtocolInstanceStatus.ACTIVE);
     }
 
     private ProtocolInstance findByIdOrThrow(UUID id) {
