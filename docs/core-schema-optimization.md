@@ -9,7 +9,7 @@
 
 ## 1. Overview
 
-This document covers core schema normalization and cleanup decisions for the Compliance Service's fresh deployment. These are **permanent structural improvements** — not temporary insights optimizations (see [insights-optimization.md](insights-optimization.md) for those).
+This document covers core schema normalization and cleanup decisions for the Compliance Service's fresh deployment. 
 
 ---
 
