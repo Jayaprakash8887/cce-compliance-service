@@ -1,8 +1,8 @@
 package org.openphc.cce.compliance.service;
 
-import org.openphc.cce.compliance.domain.entity.EventLog;
+import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.enums.ProcessingStatus;
-import org.openphc.cce.compliance.domain.repository.EventLogRepository;
+import org.openphc.cce.compliance.domain.repository.ComplianceEventLogRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -14,13 +14,13 @@ import java.time.ZoneOffset;
 
 @Service
 @Transactional
-public class EventLogService {
+public class ComplianceEventLogService {
 
-    private static final Logger log = LoggerFactory.getLogger(EventLogService.class);
+    private static final Logger log = LoggerFactory.getLogger(ComplianceEventLogService.class);
 
-    private final EventLogRepository eventLogRepository;
+    private final ComplianceEventLogRepository eventLogRepository;
 
-    public EventLogService(EventLogRepository eventLogRepository) {
+    public ComplianceEventLogService(ComplianceEventLogRepository eventLogRepository) {
         this.eventLogRepository = eventLogRepository;
     }
 
@@ -29,30 +29,25 @@ public class EventLogService {
         return eventLogRepository.existsByCloudeventsIdAndSource(cloudeventsId, source);
     }
 
-    public EventLog recordEvent(CloudEventMessage message, ProcessingStatus status) {
-        EventLog eventLog = EventLog.builder()
+    public ComplianceEventLog recordEvent(CloudEventMessage message, ProcessingStatus status) {
+        ComplianceEventLog eventLog = ComplianceEventLog.builder()
                 .cloudeventsId(message.getId())
                 .source(message.getSource())
-                .sourceEventId(message.getSourceeventid())
-                .subject(message.getSubject())
-                .type(message.getType())
-                .eventTime(message.getTime())
-                .receivedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationId(message.getCorrelationid())
                 .data(message.getData())
-                .facilityId(message.getFacilityid())
+                .receivedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .processingStatus(status)
                 .build();
 
         eventLog = eventLogRepository.save(eventLog);
 
-        log.debug("Recorded event: cloudeventsId={}, source={}, subject={}, status={}",
-                message.getId(), message.getSource(), message.getSubject(), status);
+        log.debug("Recorded event: cloudeventsId={}, source={}, status={}",
+                message.getId(), message.getSource(), status);
 
         return eventLog;
     }
 
-    public void updateStatus(EventLog eventLog, ProcessingStatus status) {
+    public void updateStatus(ComplianceEventLog eventLog, ProcessingStatus status) {
         eventLog.setProcessingStatus(status);
         eventLogRepository.save(eventLog);
 

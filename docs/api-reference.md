@@ -54,23 +54,37 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.2 List Active Protocol Definitions
 
-**`GET /v1/protocol-definitions`** — List all active protocol definitions.
+**`GET /v1/protocol-definitions`** — List all active protocol definitions (paginated).
 
+**Query Parameters:**
 
-**Response:** `200 OK`
+| Parameter | Type | Required | Default | Description |
+|---|---|---|---|---|
+| `page` | Integer | No | `0` | Page number (zero-based) |
+| `size` | Integer | No | `20` | Page size |
+| `sort` | String | No | `loadedAt,desc` | Sort field and direction |
+
+**Response:** `200 OK` — `Page<ProtocolDefinitionDto>`
 
 ```json
-[
-  {
-    "id": "550e8400-e29b-41d4-a716-446655440000",
-    "url": "http://example.org/PlanDefinition/hiv-treatment",
-    "version": "1.0",
-    "canonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-    "status": "active",
-    "loadedAt": "2026-03-15T10:30:00Z",
-    "definition": { ... }
-  }
-]
+{
+  "content": [
+    {
+      "id": "550e8400-e29b-41d4-a716-446655440000",
+      "url": "http://example.org/PlanDefinition/hiv-treatment",
+      "version": "1.0",
+      "canonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
+      "status": "active",
+      "loadedAt": "2026-03-15T10:30:00Z",
+      "definition": { ... }
+    }
+  ],
+  "pageable": { "pageNumber": 0, "pageSize": 20 },
+  "totalElements": 1,
+  "totalPages": 1,
+  "last": true,
+  "first": true
+}
 ```
 
 ---
@@ -324,15 +338,18 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 
 ### 5.2 List Action Definitions
 
-**`GET /v1/compliance/action-definitions`** — List all action definitions.
+**`GET /v1/compliance/action-definitions`** — List all action definitions (paginated).
 
 **Query Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `status` | String | No | — | Filter by status (`ACTIVE`, `RETIRED`) |
+| `page` | Integer | No | `0` | Page number (zero-based) |
+| `size` | Integer | No | `20` | Page size |
+| `sort` | String | No | `createdAt,desc` | Sort field and direction |
 
-**Response:** `200 OK` — `List<ActionDefinitionDto>`
+**Response:** `200 OK` — `Page<ActionDefinitionDto>`
 
 ---
 
@@ -409,7 +426,7 @@ View intelligence action execution records.
 
 ### 6.1 List Intelligence Events
 
-**`GET /v1/compliance/intelligence-events`** — List intelligence event logs with optional filters.
+**`GET /v1/compliance/intelligence-events`** — List intelligence event logs with optional filters (paginated).
 
 **Query Parameters:**
 
@@ -418,8 +435,11 @@ View intelligence action execution records.
 | `protocolInstanceId` | UUID | No | — | Filter by protocol instance |
 | `actionDefinitionId` | UUID | No | — | Filter by action definition |
 | `published` | Boolean | No | — | Filter by publish status (`true` or `false`) |
+| `page` | Integer | No | `0` | Page number (zero-based) |
+| `size` | Integer | No | `20` | Page size |
+| `sort` | String | No | `createdAt,desc` | Sort field and direction |
 
-**Response:** `200 OK` — `List<IntelligenceEventLogDto>`
+**Response:** `200 OK` — `Page<IntelligenceEventLogDto>`
 
 ---
 

@@ -115,7 +115,8 @@ class AuditIntegrationTest extends IntegrationTestBase {
 
         // Wait for enrollment
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            assertThat(protocolInstanceRepository.findByPatientId(patientId)).isNotEmpty();
+            assertThat(protocolInstanceRepository.findAll().stream()
+                    .filter(p -> patientId.equals(p.getPatientId())).toList()).isNotEmpty();
         });
 
         // Verify audit records for enrollment and matching (async)

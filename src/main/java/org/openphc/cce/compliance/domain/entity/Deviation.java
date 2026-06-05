@@ -8,6 +8,7 @@ import org.hibernate.type.SqlTypes;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
@@ -48,7 +49,7 @@ public class Deviation {
     @PrePersist
     protected void onCreate() {
         if (detectedAt == null) {
-            detectedAt = OffsetDateTime.now();
+            detectedAt = OffsetDateTime.now(ZoneOffset.UTC);
         }
     }
 }

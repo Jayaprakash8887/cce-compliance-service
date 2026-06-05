@@ -134,11 +134,13 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
         kafkaTemplate.send(inboundTopic, event);
 
         await().atMost(30, SECONDS).untilAsserted(() -> {
-            List<ProtocolInstance> instances = protocolInstanceRepository.findByPatientId(patientId);
+            List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
+                    .filter(p -> patientId.equals(p.getPatientId())).toList();
             assertThat(instances).anyMatch(i -> i.getProtocolCanonical().equals(expectedCanonical));
         });
 
-        return protocolInstanceRepository.findByPatientId(patientId).stream()
+        return protocolInstanceRepository.findAll().stream()
+                .filter(p -> patientId.equals(p.getPatientId()))
                 .filter(i -> i.getProtocolCanonical().equals(expectedCanonical))
                 .findFirst().orElseThrow();
     }
@@ -186,7 +188,8 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             });
 
             // Verify deviation was created
-            List<Deviation> deviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
+            List<Deviation> deviations = deviationRepository.findAll().stream()
+                    .filter(d -> d.getProtocolInstance().getId().equals(protocolInstanceId)).toList();
             assertThat(deviations).anyMatch(d ->
                     d.getStepInstance().getId().equals(stepId) &&
                             d.getDeviationType() == DeviationType.OVERDUE);
@@ -216,7 +219,8 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .andExpect(jsonPath("$.evaluationContext").isNotEmpty());
 
             // Verify deviation.intelligenceEventId was set
-            List<Deviation> updatedDeviations = deviationRepository.findByProtocolInstanceId(protocolInstanceId);
+            List<Deviation> updatedDeviations = deviationRepository.findAll().stream()
+                    .filter(d -> d.getProtocolInstance().getId().equals(protocolInstanceId)).toList();
             Deviation deviation = updatedDeviations.stream()
                     .filter(d -> d.getStepInstance().getId().equals(stepId))
                     .findFirst().orElseThrow();

@@ -435,7 +435,7 @@ public class IntelligenceTriggerProducer {
 | Guarantee | Mechanism |
 |---|---|
 | **At-least-once delivery** | `AckMode.RECORD` + `DefaultErrorHandler` + no auto-commit |
-| **Idempotency (consumer)** | `(cloudeventsId, source)` deduplication in event_log |
+| **Idempotency (consumer)** | `(cloudeventsId, source)` deduplication in compliance_event_log |
 | **Idempotency (producer)** | `enable.idempotence=true` on producer |
 | **Ordering (per partition)** | Key-based routing ensures ordering per action execution |
 | **Transactional reads** | `isolation.level=read_committed` prevents reading uncommitted |

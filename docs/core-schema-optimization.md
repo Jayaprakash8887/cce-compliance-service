@@ -41,7 +41,7 @@ This document covers core schema normalization and cleanup decisions for the Com
 
 ## 4. compliance_event_log Normalization — Remove unused Columns
 
-**Problem:** 6 columns on `compliance_event_log` are not used for any functionality — insights and filtering are served by the data pipeline.
+**Problem:** 5 columns on `compliance_event_log` are not used for any functionality — insights and filtering are served by the data pipeline.
 
 | compliance_event_log column | Status |
 |----------------------------|--------|
@@ -49,12 +49,12 @@ This document covers core schema normalization and cleanup decisions for the Com
 | `subject` | Remove — only read by `findBySubject()` for the removed Events API |
 | `type` | Remove — only read by `DtoMapper` for the removed Events API |
 | `event_time` | Remove — only read by `DtoMapper` for the removed Events API |
-| `correlation_id` | Remove — only used for MDC logging (available on the Kafka message at processing time, not needed after) |
 | `facility_id` | Remove — only used for facility-scoped queries in removed APIs; available on Kafka message and in data pipeline |
+| `correlation_id` | **Retain** — used for distributed tracing correlation across services |
 
 **Solution (fresh deploy):**
 
-1. Remove 6 columns
+1. Remove 5 columns, retain `correlation_id`
 
 **Resulting `compliance_event_log` schema:**
 
@@ -63,6 +63,7 @@ CREATE TABLE compliance_event_log (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     cloudevents_id      VARCHAR NOT NULL,
     source              VARCHAR NOT NULL,
+    correlation_id      VARCHAR,
     processing_status   VARCHAR NOT NULL,
     data                JSONB,
     received_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -116,7 +117,7 @@ compliance_event_log ←── step_instance
 ```
 
 **Benefits:**
-- `compliance_event_log` becomes a lean audit record (id, cloudeventsid, source, processing_status, data, received_at)
+- `compliance_event_log` becomes a lean audit record (id, cloudeventsid, source, correlation_id, processing_status, data, received_at)
 - Step-event linkage is on the correct side of the relationship (the step knows its completing event)
 - No orphan FK issues — events that don't match any step simply have no step referencing them
 
@@ -140,7 +141,7 @@ These changes are incorporated into the initial schema migration:
 | Omit `matched_step_instance_id` from `compliance_event_log` | Not created | `EventLog` | Zero call sites — dead code |
 | Omit `ip_address` from `audit_log` | Not created | `AuditLog` | Zero call sites — dead code |
 | Omit `error_message` from `intelligence_event_log` | Not created | `IntelligenceEventLog` | Zero call sites — dead code |
-| Omit `source_event_id`, `subject`, `type`, `event_time`, `correlation_id`, `facility_id` from `compliance_event_log` | Not created | `EventLog` | Events API removed — data served by data pipeline |
+| Omit `source_event_id`, `subject`, `type`, `event_time`, `facility_id` from `compliance_event_log` | Not created | `EventLog` | Events API removed — data served by data pipeline |
 | Remove `GET /v1/patients/{patientId}/events` endpoint | API removal | `PatientTrackingController` | Event query responsibility moved to data pipeline |
 | Add `completed_by_event_id` FK on `step_instance` | Column + FK | `StepInstance` | Track completing event on the correct side of relationship |
 | Omit `protocol_instance_id`, `protocol_definition_id`, `action_id` from `compliance_event_log` | Not created | `EventLog` | Derivable via `step_instance.completed_by_event_id` |

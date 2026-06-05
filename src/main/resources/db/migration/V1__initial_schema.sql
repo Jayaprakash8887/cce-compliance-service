@@ -60,7 +60,7 @@ CREATE TABLE step_instance (
     completed_at            TIMESTAMPTZ,
     completed_by_source     VARCHAR,
     completion_status       VARCHAR,
-    matched_event_id        UUID,
+    completed_by_event_id   UUID,
     required_behavior       VARCHAR,
     created_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
@@ -97,7 +97,7 @@ CREATE TABLE deviation (
         FOREIGN KEY (protocol_instance_id) REFERENCES protocol_instance(id),
     CONSTRAINT deviation_step_instance_id_fkey
         FOREIGN KEY (step_instance_id) REFERENCES step_instance(id),
-    CONSTRAINT deviation_type_check CHECK (deviation_type IN ('OVERDUE', 'MISSED'))
+    CONSTRAINT deviation_type_check CHECK (deviation_type IN ('OVERDUE', 'MISSED', 'ORDER_VIOLATION'))
 );
 
 CREATE INDEX idx_deviation_protocol ON deviation (protocol_instance_id);
@@ -123,34 +123,28 @@ CREATE INDEX idx_trigger_index_resource ON trigger_index (resource_type);
 CREATE INDEX idx_trigger_index_code ON trigger_index (resource_type, path, code_system, code_value);
 
 -- =============================================
--- 6. event_log
+-- 6. compliance_event_log
 -- =============================================
-CREATE TABLE event_log (
+CREATE TABLE compliance_event_log (
     id                          UUID            NOT NULL DEFAULT gen_random_uuid(),
     cloudevents_id              VARCHAR         NOT NULL,
     source                      VARCHAR         NOT NULL,
-    source_event_id             VARCHAR,
-    subject                     VARCHAR         NOT NULL,
-    type                        VARCHAR         NOT NULL,
-    event_time                  TIMESTAMPTZ     NOT NULL,
-    received_at                 TIMESTAMPTZ     NOT NULL,
-    correlation_id              VARCHAR         NOT NULL,
-    data                        JSONB           NOT NULL,
-    protocol_instance_id        UUID,
-    protocol_definition_id      UUID,
-    action_id                   VARCHAR,
-    facility_id                 VARCHAR,
+    correlation_id              VARCHAR,
     processing_status           VARCHAR         NOT NULL,
-    matched_step_instance_id    UUID,
+    data                        JSONB,
+    received_at                 TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
-    CONSTRAINT event_log_pkey PRIMARY KEY (id),
-    CONSTRAINT event_log_cloudevents_id_source_key UNIQUE (cloudevents_id, source),
-    CONSTRAINT event_log_processing_status_check CHECK (processing_status IN ('MATCHED', 'ZERO_MATCH', 'DUPLICATE'))
+    CONSTRAINT compliance_event_log_pkey PRIMARY KEY (id),
+    CONSTRAINT compliance_event_log_cloudevents_id_source_key UNIQUE (cloudevents_id, source),
+    CONSTRAINT compliance_event_log_processing_status_check CHECK (processing_status IN ('MATCHED', 'ZERO_MATCH', 'DUPLICATE'))
 );
 
-CREATE UNIQUE INDEX idx_event_log_source_sourceeventid ON event_log (source, source_event_id) WHERE source_event_id IS NOT NULL;
-CREATE INDEX idx_event_log_subject ON event_log (subject);
-CREATE INDEX idx_event_log_facility ON event_log (facility_id) WHERE facility_id IS NOT NULL;
+-- FK from step_instance to compliance_event_log
+ALTER TABLE step_instance ADD CONSTRAINT step_instance_completed_by_event_id_fkey
+    FOREIGN KEY (completed_by_event_id) REFERENCES compliance_event_log(id);
+
+CREATE INDEX idx_step_instance_completed_event ON step_instance (completed_by_event_id)
+    WHERE completed_by_event_id IS NOT NULL;
 
 -- =============================================
 -- 7. audit_log
@@ -163,7 +157,6 @@ CREATE TABLE audit_log (
     resource_type       VARCHAR,
     resource_id         VARCHAR,
     details             JSONB,
-    ip_address          VARCHAR,
     timestamp           TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT audit_log_pkey PRIMARY KEY (id)

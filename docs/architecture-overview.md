@@ -216,7 +216,7 @@ flowchart TD
     S1 -->|"Duplicate"| DUP["Return early"]
     S1 -->|"New"| S2
 
-    S2["Step 2: Record Event Log"] --> S3
+    S2["Step 2: Record Compliance Event Log"] --> S3
     S3["Step 3: Extract Resource Info<br/>from payload (data)"] --> EXPL
 
     EXPL{"Step 4: Explicit Match?<br/>(actionId on CloudEvent)"}

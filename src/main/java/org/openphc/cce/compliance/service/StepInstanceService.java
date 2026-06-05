@@ -101,7 +101,7 @@ public class StepInstanceService {
         CompletionStatus completionStatus = determineCompletionStatus(step, now);
         step.setState(StepState.COMPLETED);
         step.setCompletedAt(now);
-        step.setMatchedEventId(matchedEventId);
+        step.setCompletedByEventId(matchedEventId);
         step.setCompletedBySource(completedBySource);
         step.setCompletionStatus(completionStatus);
 

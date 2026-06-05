@@ -55,8 +55,8 @@ public class StepInstance {
     @Column(name = "completion_status")
     private CompletionStatus completionStatus;
 
-    @Column(name = "matched_event_id")
-    private UUID matchedEventId;
+    @Column(name = "completed_by_event_id")
+    private UUID completedByEventId;
 
     @Column(name = "required_behavior")
     private String requiredBehavior;

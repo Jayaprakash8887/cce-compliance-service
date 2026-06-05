@@ -15,7 +15,7 @@
 5. [step_instance](#5-step_instance)
 6. [deviation](#6-deviation)
 7. [trigger_index](#7-trigger_index)
-8. [event_log](#8-event_log)
+8. [compliance_event_log](#8-compliance_event_log)
 9. [audit_log](#9-audit_log)
 10. [action_definition](#10-action_definition)
 11. [intelligence_event_log](#11-intelligence_event_log)
@@ -34,6 +34,8 @@ erDiagram
     PROTOCOL_INSTANCE ||--o{ STEP_INSTANCE : "contains"
     PROTOCOL_INSTANCE ||--o{ DEVIATION : "has"
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
+    COMPLIANCE_EVENT_LOG ||--o| STEP_INSTANCE : "completes"
+    ACTION_DEFINITION ||..o{ INTELLIGENCE_EVENT_LOG : "triggers"
 
     PROTOCOL_DEFINITION {
         uuid id PK
@@ -67,7 +69,7 @@ erDiagram
         timestamptz completed_at
         varchar completed_by_source
         varchar completion_status
-        uuid matched_event_id
+        uuid completed_by_event_id
         varchar required_behavior
         timestamptz created_at
         timestamptz updated_at
@@ -92,22 +94,14 @@ erDiagram
         varchar action_id PK
     }
 
-    EVENT_LOG {
+    COMPLIANCE_EVENT_LOG {
         uuid id PK
         varchar cloudeventsid
         varchar source
-        varchar source_event_id
-        varchar subject
-        varchar type
-        timestamptz event_time
-        timestamptz received_at
         varchar correlation_id
-        jsonb data
-        uuid protocol_instance_id
-        uuid protocol_definition_id
-        varchar action_id
-        varchar facility_id
         varchar processing_status
+        jsonb data
+        timestamptz received_at
     }
 
     AUDIT_LOG {
@@ -118,7 +112,6 @@ erDiagram
         varchar resource_type
         varchar resource_id
         jsonb details
-        varchar ip_address
         timestamptz timestamp
     }
 
@@ -152,7 +145,6 @@ erDiagram
         jsonb evaluation_context
         boolean published
         timestamptz published_at
-        text error_message
         timestamptz created_at
     }
 ```
@@ -170,7 +162,7 @@ erDiagram
 | 3 | `step_instance` | Individual action steps within a patient's protocol journey | Medium–High |
 | 4 | `deviation` | Compliance deviations (overdue, missed) | Medium |
 | 5 | `trigger_index` | Inverted index for fast Tier 1 structural event matching | Low (rebuilt on protocol load) |
-| 6 | `event_log` | Immutable log of all inbound CloudEvents and their processing outcomes | High (every event) |
+| 6 | `compliance_event_log` | Lean idempotency log of all inbound CloudEvents and their processing outcomes | High (every event) |
 | 7 | `audit_log` | System and user audit trail | Medium–High |
 | 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence actions | Low (tens) |
 | 9 | `intelligence_event_log` | Intelligence action execution and evaluation context (flat, no FKs) | Medium–High |
@@ -254,7 +246,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `completed_at` | `TIMESTAMPTZ` | Yes | — | Completion timestamp. `NULL` for non-completed steps. |
 | `completed_by_source` | `VARCHAR` | Yes | — | CloudEvent `source` that completed this step. |
 | `completion_status` | `VARCHAR` | Yes | — | Timeliness classification. See [CompletionStatus](#completionstatus). |
-| `matched_event_id` | `UUID` | Yes | — | Links to `event_log.id` that completed this step. |
+| `completed_by_event_id` | `UUID` | Yes | — | Foreign key → `compliance_event_log.id`. Links to the event that completed this step. |
 | `required_behavior` | `VARCHAR` | Yes | — | FHIR `requiredBehavior` code from `PlanDefinition.action`: `must`, `could`, or `must-unless-documented`. Determines whether the step produces a deviation on non-completion. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp. |
@@ -390,12 +382,12 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 
 ---
 
-## 8. event_log
+## 8. compliance_event_log
 
-**Immutable append-only log** of every inbound CloudEvent. Records the full event payload and processing outcome. Used for:
+**Lean idempotency log** of every inbound CloudEvent. Records the event source and processing outcome. Used for:
 - **Idempotency**: `(cloudevents_id, source)` uniqueness prevents duplicate processing.
-- **Auditability**: Complete provenance trail of every clinical event.
-- **Troubleshooting**: Full payload preservation enables replay and debugging.
+- **Auditability**: Links step completions back to the originating event.
+- **Troubleshooting**: Payload preservation (optional) enables replay and debugging.
 
 ### Columns
 
@@ -404,27 +396,23 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
 | `cloudevents_id` | `VARCHAR` | **NOT NULL** | — | CloudEvents `id`. Used with `source` for idempotency. |
 | `source` | `VARCHAR` | **NOT NULL** | — | CloudEvents `source` (e.g., `rhie-mediator`, `smartcare-emr`). |
-| `source_event_id` | `VARCHAR` | Yes | — | Optional external identifier from the originating system. |
-| `subject` | `VARCHAR` | **NOT NULL** | — | Patient UPID from CloudEvent `subject`. |
-| `type` | `VARCHAR` | **NOT NULL** | — | CloudEvents `type`. |
-| `event_time` | `TIMESTAMPTZ` | **NOT NULL** | — | Clinical event time from CloudEvent `time`. |
-| `received_at` | `TIMESTAMPTZ` | **NOT NULL** | — | Ingestion timestamp. |
-| `correlation_id` | `VARCHAR` | **NOT NULL** | — | Distributed tracing ID from CloudEvent `correlationid` extension. |
-| `data` | `JSONB` | **NOT NULL** | — | Full CloudEvent `data` body. See [JSONB: event data](#event_log--data). |
-| `protocol_instance_id` | `UUID` | Yes | — | Matched protocol instance. `NULL` for zero-match or duplicate events. |
-| `protocol_definition_id` | `UUID` | Yes | — | Matched protocol definition. `NULL` for zero-match or duplicate events. |
-| `action_id` | `VARCHAR` | Yes | — | Matched protocol definition action. `NULL` for zero-match or duplicate events. |
-| `facility_id` | `VARCHAR` | Yes | — | FOSA ID from CloudEvent `facilityid` extension. |
+| `correlation_id` | `VARCHAR` | Yes | — | Distributed tracing ID from CloudEvent `correlationid` extension. |
 | `processing_status` | `VARCHAR` | **NOT NULL** | — | Processing outcome. See [ProcessingStatus](#processingstatus). |
+| `data` | `JSONB` | Yes | — | Full CloudEvent `data` body (optional, stored for debugging). |
+| `received_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Ingestion timestamp. |
 
 ### Constraints & Indexes
 
 | Type | Name | Details |
 |------|------|---------|
-| Unique | `event_log_cloudevents_id_source_key` | `(cloudevents_id, source)` — Idempotency guard. |
-| Unique (partial) | `idx_event_log_source_sourceeventid` | `(source, source_event_id) WHERE source_event_id IS NOT NULL` |
-| B-tree Index | `idx_event_log_subject` | `subject` — Patient-centric event queries. |
-| Partial B-tree | `idx_event_log_facility` | `facility_id WHERE facility_id IS NOT NULL` — Facility-level queries. |
+| Primary Key | `compliance_event_log_pkey` | `id` |
+| Unique | `compliance_event_log_cloudevents_id_source_key` | `(cloudevents_id, source)` — Idempotency guard. |
+| Check | — | `processing_status IN ('MATCHED', 'ZERO_MATCH', 'DUPLICATE')` |
+
+### Design Notes
+
+- **Lean design:** Unlike a full audit log, `compliance_event_log` stores only what's needed for idempotency and event-to-step linking. Patient, facility, and action details are not denormalized here — they live in the step instances and audit log.
+- **FK from step_instance:** `step_instance.completed_by_event_id` references `compliance_event_log.id`, linking each completed step to its triggering event.
 
 
 
@@ -445,7 +433,6 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 | `resource_type` | `VARCHAR` | Yes | — | Affected entity type (e.g., `StepInstance`, `ProtocolDefinition`). |
 | `resource_id` | `VARCHAR` | Yes | — | Affected entity UUID (stored as VARCHAR). |
 | `details` | `JSONB` | Yes | — | Event-specific context. See [JSONB: audit details](#audit_log--details). |
-| `ip_address` | `VARCHAR` | Yes | — | Client IP. `NULL` for system-generated events. |
 | `timestamp` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | When the action occurred. |
 
 ### Constraints & Indexes
@@ -519,7 +506,6 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 | `evaluation_context` | `JSONB` | Yes | — | Runtime variables passed to the expression evaluator. See [JSONB: intelligence_event_log evaluation_context](#intelligence_event_log--evaluation_context). |
 | `published` | `BOOLEAN` | **NOT NULL** | `false` | Whether the event was successfully published to Kafka. |
 | `published_at` | `TIMESTAMPTZ` | Yes | — | Timestamp of successful Kafka publish. `NULL` until published. |
-| `error_message` | `TEXT` | Yes | — | Error message if Kafka publish failed. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Record creation timestamp. |
 
 ### Constraints & Indexes
@@ -644,6 +630,7 @@ The `intelligence_destination` field on `intelligence_event_log` is a **free-for
 | `protocol_instance` | `step_instance` | `protocol_instance_id` | JPA `CascadeType.ALL` | Steps fully managed by parent. |
 | `protocol_instance` | `deviation` | `protocol_instance_id` | JPA `CascadeType.ALL` | Deviations fully managed by parent. |
 | `step_instance` | `deviation` | `step_instance_id` | No cascade (DB level) | Reference only; not cascade-deleted. |
+| `compliance_event_log` | `step_instance` | `completed_by_event_id` | No cascade | Links completed step to triggering event. |
 | `action_definition` | `intelligence_event_log` | `action_definition_id` | No FK constraint | Plain UUID; delete guard in application code. |
 
 > **Note:** The `intelligence_event_log` table uses plain UUID columns with no foreign key constraints. Referential integrity for `action_definition_id`, `protocol_instance_id`, `step_instance_id`, and `deviation_id` is enforced at the application level.
@@ -720,9 +707,9 @@ Contains deviation-type-specific timing information.
 | MISSED | `{"daysPastMissedDate": 0}` |
 
 
-### event_log — `data`
+### compliance_event_log — `data`
 
-Contains the full CloudEvent `data` payload. For FHIR-based events:
+Contains the full CloudEvent `data` payload (when stored). For FHIR-based events:
 
 ```json
 {
