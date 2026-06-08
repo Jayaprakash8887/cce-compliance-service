@@ -58,7 +58,7 @@ All configuration is externalized via environment variables. Defaults are provid
 |---|---|---|---|
 | `DB_HOST` | `localhost` | Yes | PostgreSQL host (shared with collector service) |
 | `DB_PORT` | `5433` | No | PostgreSQL port (collector service default) |
-| `DB_NAME` | `cce_collector` | No | Shared database name (all CCE services) |
+| `DB_NAME` | `ccedb` | No | Shared database name (all CCE services) |
 | `DB_USERNAME` | `cce_user` | Yes | Database username (shared with collector service) |
 | `DB_PASSWORD` | `cce_pass` | Yes | Database password (shared with collector service) |
 | `DB_POOL_SIZE` | `20` (dev) / `30` (prod) | No | HikariCP maximum pool size |
@@ -102,7 +102,7 @@ docker run -d \
   -e SPRING_PROFILES_ACTIVE=prod \
   -e DB_HOST=postgres-host \
   -e DB_PORT=5433 \
-  -e DB_NAME=cce_collector \
+  -e DB_NAME=ccedb \
   -e DB_USERNAME=cce_user \
   -e DB_PASSWORD=cce_pass \
   -e KAFKA_BOOTSTRAP_SERVERS=kafka-host:9092 \
@@ -124,10 +124,10 @@ cd /path/to/cce-compliance-service
 ```
 
 The shared infrastructure (from [cce-collector-service deployment guide](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md)) provides:
-- **PostgreSQL 16** on port `5433` (user: `cce_user`, password: `cce_pass`, database: `cce_collector`)
+- **PostgreSQL 16** on port `5433` (user: `cce_user`, password: `cce_pass`, database: `ccedb`)
 - **Apache Kafka 3.7.0 KRaft** on port `9092` (single broker, no Zookeeper)
 
-> **Note:** All CCE services share the same `cce_collector` database. Each service owns its own tables — Flyway migrations are namespaced to avoid conflicts.
+> **Note:** All CCE services share the same `ccedb` database. Each service owns its own tables — Flyway migrations are namespaced to avoid conflicts.
 
 ---
 
@@ -204,7 +204,7 @@ spec:
 
 ## 5. Database Setup
 
-All CCE services share the same PostgreSQL database (`cce_collector`) deployed by the [CCE Collector Service](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md). Each service owns its own tables within the shared database — Flyway migrations are namespaced to avoid conflicts.
+All CCE services share the same PostgreSQL database (`ccedb`) deployed by the [CCE Collector Service](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md). Each service owns its own tables within the shared database — Flyway migrations are namespaced to avoid conflicts.
 
 ### Shared Infrastructure
 
@@ -213,7 +213,7 @@ All CCE services share the same PostgreSQL database (`cce_collector`) deployed b
 | **PostgreSQL Host** | Same as collector service |
 | **PostgreSQL Port** | `5433` (local dev) / as configured (production) |
 | **Shared User** | `cce_user` |
-| **Shared Database** | `cce_collector` |
+| **Shared Database** | `ccedb` |
 
 ### No Separate Database Creation Needed
 
@@ -368,10 +368,10 @@ scrape_configs:
 
 ```bash
 # Full backup
-pg_dump -U cce_user -h postgres-host -p 5433 cce_collector > backup_$(date +%Y%m%d).sql
+pg_dump -U cce_user -h postgres-host -p 5433 ccedb > backup_$(date +%Y%m%d).sql
 
 # Restore
-psql -U cce_user -h postgres-host -p 5433 cce_collector < backup_20250101.sql
+psql -U cce_user -h postgres-host -p 5433 ccedb < backup_20250101.sql
 ```
 
 ### Recovery Considerations

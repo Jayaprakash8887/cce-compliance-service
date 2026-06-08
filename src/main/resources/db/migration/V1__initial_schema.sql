@@ -15,6 +15,7 @@ CREATE TABLE protocol_definition (
     status              VARCHAR         NOT NULL,
     definition          JSONB           NOT NULL,
     loaded_at           TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT protocol_definition_pkey PRIMARY KEY (id),
     CONSTRAINT protocol_definition_url_version_key UNIQUE (url, version),
@@ -22,6 +23,8 @@ CREATE TABLE protocol_definition (
 );
 
 CREATE INDEX idx_protocol_definition_triggers ON protocol_definition USING GIN (definition jsonb_path_ops);
+
+ALTER TABLE protocol_definition REPLICA IDENTITY FULL;
 
 -- =============================================
 -- 2. protocol_instance
@@ -44,6 +47,8 @@ CREATE TABLE protocol_instance (
 
 CREATE INDEX idx_protocol_instance_patient ON protocol_instance (patient_id);
 CREATE INDEX idx_protocol_instance_status ON protocol_instance (status) WHERE status = 'ACTIVE';
+
+ALTER TABLE protocol_instance REPLICA IDENTITY FULL;
 
 -- =============================================
 -- 3. step_instance
@@ -80,6 +85,8 @@ CREATE INDEX idx_step_instance_protocol ON step_instance (protocol_instance_id);
 CREATE INDEX idx_step_instance_state ON step_instance (state) WHERE state IN ('PENDING', 'DUE', 'OVERDUE');
 CREATE INDEX idx_step_instance_due_date ON step_instance (due_date) WHERE state IN ('PENDING', 'DUE', 'OVERDUE');
 
+ALTER TABLE step_instance REPLICA IDENTITY FULL;
+
 -- =============================================
 -- 4. deviation
 -- =============================================
@@ -91,6 +98,7 @@ CREATE TABLE deviation (
     detected_at             TIMESTAMPTZ     NOT NULL DEFAULT now(),
     intelligence_event_id   UUID,
     metadata                JSONB,
+    updated_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT deviation_pkey PRIMARY KEY (id),
     CONSTRAINT deviation_protocol_instance_id_fkey
@@ -102,6 +110,8 @@ CREATE TABLE deviation (
 
 CREATE INDEX idx_deviation_protocol ON deviation (protocol_instance_id);
 CREATE INDEX idx_deviation_type ON deviation (deviation_type);
+
+ALTER TABLE deviation REPLICA IDENTITY FULL;
 
 -- =============================================
 -- 5. trigger_index
@@ -122,6 +132,8 @@ CREATE TABLE trigger_index (
 CREATE INDEX idx_trigger_index_resource ON trigger_index (resource_type);
 CREATE INDEX idx_trigger_index_code ON trigger_index (resource_type, path, code_system, code_value);
 
+ALTER TABLE trigger_index REPLICA IDENTITY FULL;
+
 -- =============================================
 -- 6. compliance_event_log
 -- =============================================
@@ -133,6 +145,7 @@ CREATE TABLE compliance_event_log (
     processing_status           VARCHAR         NOT NULL,
     data                        JSONB,
     received_at                 TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at                  TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT compliance_event_log_pkey PRIMARY KEY (id),
     CONSTRAINT compliance_event_log_cloudevents_id_source_key UNIQUE (cloudevents_id, source),
@@ -145,6 +158,8 @@ ALTER TABLE step_instance ADD CONSTRAINT step_instance_completed_by_event_id_fke
 
 CREATE INDEX idx_step_instance_completed_event ON step_instance (completed_by_event_id)
     WHERE completed_by_event_id IS NOT NULL;
+
+ALTER TABLE compliance_event_log REPLICA IDENTITY FULL;
 
 -- =============================================
 -- 7. audit_log
@@ -165,3 +180,5 @@ CREATE TABLE audit_log (
 CREATE INDEX idx_audit_log_category ON audit_log (event_category);
 CREATE INDEX idx_audit_log_actor ON audit_log (actor);
 CREATE INDEX idx_audit_log_timestamp ON audit_log (timestamp);
+
+ALTER TABLE audit_log REPLICA IDENTITY FULL;

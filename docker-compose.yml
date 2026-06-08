@@ -1,7 +1,7 @@
 # ==============================================================================
 # CCE Compliance Service — Docker Compose
 # ==============================================================================
-# PostgreSQL, Kafka, and the shared database (cce_collector) are deployed by the
+# PostgreSQL, Kafka, and the shared database (ccedb) are deployed by the
 # CCE Collector Service. Start collector infrastructure first:
 #   cd /path/to/cce-collector-service && docker compose up -d
 #
