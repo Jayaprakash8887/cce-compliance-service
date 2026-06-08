@@ -8,6 +8,7 @@ import org.hibernate.type.SqlTypes;
 import org.openphc.cce.compliance.domain.enums.ProcessingStatus;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
@@ -42,4 +43,19 @@ public class ComplianceEventLog {
 
     @Column(name = "received_at", nullable = false)
     private OffsetDateTime receivedAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (receivedAt == null) receivedAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
+    }
 }

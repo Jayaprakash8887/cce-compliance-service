@@ -44,6 +44,7 @@ erDiagram
         varchar status
         jsonb definition
         timestamptz loaded_at
+        timestamptz updated_at
     }
 
     PROTOCOL_INSTANCE {
@@ -83,6 +84,7 @@ erDiagram
         timestamptz detected_at
         uuid intelligence_event_id
         jsonb metadata
+        timestamptz updated_at
     }
 
     TRIGGER_INDEX {
@@ -102,6 +104,7 @@ erDiagram
         varchar processing_status
         jsonb data
         timestamptz received_at
+        timestamptz updated_at
     }
 
     AUDIT_LOG {
@@ -182,6 +185,7 @@ Stores FHIR R4 **PlanDefinition** resources that define compliance protocols. Ea
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. Only `ACTIVE` definitions participate in trigger matching. See [ProtocolDefinitionStatus](#protocoldefinitionstatus). |
 | `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 PlanDefinition resource. Contains `action[]` with triggers, conditions, timing, and related actions. See [JSONB: definition](#protocol_definition--definition). |
 | `loaded_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | When this protocol definition was loaded into the system. |
+| `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp (e.g., status change to RETIRED). |
 
 ### Constraints & Indexes
 
@@ -308,6 +312,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | `detected_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Detection timestamp. |
 | `intelligence_event_id` | `UUID` | Yes | — | Links to the intelligence event published to Kafka when an intelligence action fires on this deviation. `NULL` when no intelligence actions are configured for the step. |
 | `metadata` | `JSONB` | Yes | — | Deviation-type-specific timing details. See [JSONB: deviation metadata](#deviation--metadata). |
+| `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp (e.g., when `intelligence_event_id` is linked). |
 
 ### Constraints & Indexes
 
@@ -400,6 +405,7 @@ The `:codeTriples` parameter is a list of `path|system|code` strings extracted f
 | `processing_status` | `VARCHAR` | **NOT NULL** | — | Processing outcome. See [ProcessingStatus](#processingstatus). |
 | `data` | `JSONB` | Yes | — | Full CloudEvent `data` body (optional, stored for debugging). |
 | `received_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Ingestion timestamp. |
+| `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp (e.g., when `processing_status` changes). |
 
 ### Constraints & Indexes
 

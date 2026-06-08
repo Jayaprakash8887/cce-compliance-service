@@ -41,11 +41,19 @@ public class ProtocolDefinition {
     @Column(name = "loaded_at", nullable = false)
     private OffsetDateTime loadedAt;
 
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
     @PrePersist
     protected void onCreate() {
-        if (loadedAt == null) {
-            loadedAt = OffsetDateTime.now(ZoneOffset.UTC);
-        }
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (loadedAt == null) loadedAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 
     public String getCanonical() {

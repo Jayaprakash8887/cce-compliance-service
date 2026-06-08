@@ -15,6 +15,7 @@ CREATE TABLE protocol_definition (
     status              VARCHAR         NOT NULL,
     definition          JSONB           NOT NULL,
     loaded_at           TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at          TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT protocol_definition_pkey PRIMARY KEY (id),
     CONSTRAINT protocol_definition_url_version_key UNIQUE (url, version),
@@ -91,6 +92,7 @@ CREATE TABLE deviation (
     detected_at             TIMESTAMPTZ     NOT NULL DEFAULT now(),
     intelligence_event_id   UUID,
     metadata                JSONB,
+    updated_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT deviation_pkey PRIMARY KEY (id),
     CONSTRAINT deviation_protocol_instance_id_fkey
@@ -133,6 +135,7 @@ CREATE TABLE compliance_event_log (
     processing_status           VARCHAR         NOT NULL,
     data                        JSONB,
     received_at                 TIMESTAMPTZ     NOT NULL DEFAULT now(),
+    updated_at                  TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT compliance_event_log_pkey PRIMARY KEY (id),
     CONSTRAINT compliance_event_log_cloudevents_id_source_key UNIQUE (cloudevents_id, source),

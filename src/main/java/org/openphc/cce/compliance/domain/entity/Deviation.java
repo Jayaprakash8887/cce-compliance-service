@@ -46,10 +46,18 @@ public class Deviation {
     @Column(columnDefinition = "jsonb")
     private JsonNode metadata;
 
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
     @PrePersist
     protected void onCreate() {
-        if (detectedAt == null) {
-            detectedAt = OffsetDateTime.now(ZoneOffset.UTC);
-        }
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (detectedAt == null) detectedAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
     }
 }
