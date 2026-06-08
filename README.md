@@ -20,7 +20,7 @@ cd /path/to/cce-collector-service && docker compose up -d
 cd /path/to/cce-compliance-service
 ./gradlew build
 
-# Run (Flyway applies migrations to shared cce_collector database)
+# Run (Flyway applies migrations to shared ccedb database)
 ./gradlew bootRun
 
 # Health check
