@@ -30,6 +30,8 @@ CREATE TABLE action_definition (
 CREATE INDEX idx_action_definition_status ON action_definition (status) WHERE status = 'ACTIVE';
 CREATE INDEX idx_action_definition_canonical ON action_definition (canonical_url);
 
+ALTER TABLE action_definition REPLICA IDENTITY FULL;
+
 -- =============================================
 -- 9. intelligence_event_log
 -- =============================================
@@ -71,3 +73,5 @@ CREATE INDEX idx_intelligence_event_log_protocol_instance ON intelligence_event_
 CREATE INDEX idx_intelligence_event_log_step_instance ON intelligence_event_log (step_instance_id) WHERE step_instance_id IS NOT NULL;
 CREATE INDEX idx_intelligence_event_log_subject ON intelligence_event_log (subject);
 CREATE INDEX idx_intelligence_event_log_published ON intelligence_event_log (published) WHERE published = FALSE;
+
+ALTER TABLE intelligence_event_log REPLICA IDENTITY FULL;
