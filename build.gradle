@@ -46,6 +46,7 @@ dependencies {
     implementation "ca.uhn.hapi.fhir:hapi-fhir-base:${hapiVersion}"
     implementation "ca.uhn.hapi.fhir:hapi-fhir-structures-r4:${hapiVersion}"
     implementation "ca.uhn.hapi.fhir:hapi-fhir-caching-caffeine:${hapiVersion}"
+    implementation "ca.uhn.hapi.fhir:hapi-fhir-validation-resources-r4:${hapiVersion}"
     implementation 'org.fhir:ucum:1.0.8'
 
     // Expression evaluation
