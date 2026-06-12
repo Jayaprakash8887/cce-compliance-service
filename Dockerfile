@@ -19,8 +19,9 @@ RUN ./gradlew build -x test --no-daemon
 # ==============================================================================
 FROM eclipse-temurin:21-jre-alpine
 
-# Install wget for the container healthcheck
-RUN apk add --no-cache wget
+# wget: container healthcheck; bash: Portainer/shell exec (Alpine default is /bin/sh only)
+RUN apk add --no-cache wget bash \
+    && command -v wget >/dev/null
 
 # Create non-root user
 RUN addgroup -g 1001 cce && adduser -u 1001 -G cce -s /bin/sh -D cce
@@ -38,6 +39,6 @@ USER cce
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1
+    CMD ["/usr/bin/wget", "--no-verbose", "--tries=1", "--spider", "http://127.0.0.1:8080/actuator/health"]
 
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
