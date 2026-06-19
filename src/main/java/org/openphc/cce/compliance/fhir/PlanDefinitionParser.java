@@ -146,6 +146,36 @@ public class PlanDefinitionParser {
     }
 
     /**
+     * Validate that every action (including nested sub-steps) declares an explicit
+     * type coding of 'step' or 'fire-event'. Mirrors the validation that
+     * {@link #extractSteps(PlanDefinition)} performs lazily at event-processing time,
+     * so a malformed protocol is rejected at load time rather than poisoning the
+     * event pipeline (and DLQ-ing inbound events) on first match.
+     *
+     * <p>Children of step-type actions are validated recursively; fire-event actions
+     * are treated as leaves and their children are not inspected — matching the
+     * behaviour of {@code flattenAction}.
+     *
+     * @throws IllegalArgumentException if any action is missing a type coding or has
+     *                                  an unsupported one
+     */
+    public void validateActionTypes(PlanDefinition planDefinition) {
+        for (PlanDefinition.PlanDefinitionActionComponent action : planDefinition.getAction()) {
+            validateActionType(action);
+            validateNestedActionTypes(action);
+        }
+    }
+
+    private void validateNestedActionTypes(PlanDefinition.PlanDefinitionActionComponent action) {
+        for (PlanDefinition.PlanDefinitionActionComponent nested : action.getAction()) {
+            validateActionType(nested);
+            if (isStepAction(nested)) {
+                validateNestedActionTypes(nested);
+            }
+        }
+    }
+
+    /**
      * Validate that all actions (including nested sub-steps) have a non-blank actionId
      * and that all actionIds are unique across the entire PlanDefinition.
      *

@@ -575,6 +575,101 @@ class PlanDefinitionParserTest {
         assertTrue(ex.getMessage().contains("untyped-action"));
     }
 
+    // ── ActionType Validation Tests ──
+
+    @Test
+    void validateActionTypes_topLevelActionMissingType_throwsException() {
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-missing-top-type",
+                  "url": "http://test.org/PlanDefinition/missing-top-type",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "visit-encounter",
+                    "title": "Patient Visit Encounter",
+                    "trigger": [{"type": "named-event", "name": "test"}]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> parser.validateActionTypes(pd));
+        assertTrue(ex.getMessage().contains("must have explicit type coding"));
+        assertTrue(ex.getMessage().contains("visit-encounter"));
+    }
+
+    @Test
+    void validateActionTypes_nestedActionMissingType_throwsException() {
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-missing-nested-type",
+                  "url": "http://test.org/PlanDefinition/missing-nested-type",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "step-1",
+                    "type": {"coding": [{"system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step"}]},
+                    "trigger": [{"type": "named-event", "name": "test"}],
+                    "action": [{
+                      "id": "untyped-nested",
+                      "trigger": [{"type": "named-event", "name": "test2"}]
+                    }]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> parser.validateActionTypes(pd));
+        assertTrue(ex.getMessage().contains("must have explicit type coding"));
+        assertTrue(ex.getMessage().contains("untyped-nested"));
+    }
+
+    @Test
+    void validateActionTypes_unsupportedTypeCoding_throwsException() {
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-bad-type",
+                  "url": "http://test.org/PlanDefinition/bad-type",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "step-1",
+                    "type": {"coding": [{"system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "bogus"}]},
+                    "trigger": [{"type": "named-event", "name": "test"}]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> parser.validateActionTypes(pd));
+        assertTrue(ex.getMessage().contains("unsupported type coding"));
+        assertTrue(ex.getMessage().contains("step-1"));
+    }
+
+    @Test
+    void validateActionTypes_validTypeCodings_noException() {
+        String json = """
+                {
+                  "resourceType": "PlanDefinition",
+                  "id": "test-valid-types",
+                  "url": "http://test.org/PlanDefinition/valid-types",
+                  "version": "1.0",
+                  "status": "active",
+                  "action": [{
+                    "id": "step-1",
+                    "type": {"coding": [{"system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step"}]},
+                    "trigger": [{"type": "named-event", "name": "test"}]
+                  }]
+                }
+                """;
+        PlanDefinition pd = parser.parse(json);
+        assertDoesNotThrow(() -> parser.validateActionTypes(pd));
+    }
+
     // ── ActionId Validation Tests ──
 
     @Test
