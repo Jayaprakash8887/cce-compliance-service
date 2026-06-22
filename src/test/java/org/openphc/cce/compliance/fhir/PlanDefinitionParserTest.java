@@ -919,4 +919,69 @@ class PlanDefinitionParserTest {
         assertTrue(visit2.relatedSteps().stream()
                 .anyMatch(r -> "anc-visit-3".equals(r.actionId())));
     }
+
+    // ── EMR Service (nested consultation) protocol ──
+
+    @Test
+    void emrNestedProtocol_validatesAndFlattensToTenSteps() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        PlanDefinition pd = parser.parse(json);
+
+        // Every action (incl. nested) carries a valid type coding
+        assertDoesNotThrow(() -> parser.validateActionTypes(pd));
+
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(pd);
+        List<String> ids = steps.stream().map(PlanDefinitionParser.StepMetadata::id).toList();
+        assertEquals(10, steps.size());
+        assertTrue(ids.containsAll(List.of(
+                "visit-encounter", "vitals-recording", "consultation", "chief-complaints",
+                "history-assessment", "lab-order", "lab-results", "diagnosis", "treatment", "referral")));
+    }
+
+    @Test
+    void emrNestedProtocol_hasForwardChainAndNoBackwardParentLinks() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        PlanDefinition pd = parser.parse(json);
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(pd);
+
+        java.util.Map<String, List<String>> next = new java.util.HashMap<>();
+        for (PlanDefinitionParser.StepMetadata s : steps) {
+            next.put(s.id(), s.relatedSteps().stream()
+                    .map(PlanDefinitionParser.RelatedStepInfo::actionId).toList());
+        }
+
+        // The full clinical sequence is expressed as an explicit forward chain
+        assertEquals(List.of("vitals-recording"), next.get("visit-encounter"));
+        assertEquals(List.of("consultation"), next.get("vitals-recording"));
+        assertEquals(List.of("chief-complaints"), next.get("consultation"));
+        assertEquals(List.of("history-assessment"), next.get("chief-complaints"));
+        assertEquals(List.of("lab-order"), next.get("history-assessment"));
+        assertEquals(List.of("lab-results"), next.get("lab-order"));
+        assertEquals(List.of("diagnosis"), next.get("lab-results"));
+        assertEquals(List.of("treatment"), next.get("diagnosis"));
+        assertEquals(List.of("referral"), next.get("treatment"));
+        assertEquals(List.of(), next.get("referral"));
+
+        // Nesting is organizational only — no nested sub-step carries an implicit backward
+        // relatedStep to its parent. The only links into the parent steps are the legitimate
+        // forward ones from the immediately preceding sibling.
+        long linksIntoConsultation = steps.stream()
+                .filter(s -> s.relatedSteps().stream().anyMatch(r -> "consultation".equals(r.actionId())))
+                .count();
+        long linksIntoLabOrder = steps.stream()
+                .filter(s -> s.relatedSteps().stream().anyMatch(r -> "lab-order".equals(r.actionId())))
+                .count();
+        assertEquals(1, linksIntoConsultation, "only vitals-recording should point to consultation");
+        assertEquals(1, linksIntoLabOrder, "only history-assessment should point to lab-order");
+
+        // Every step is reachable from the enrollment step via the forward chain
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        java.util.Deque<String> queue = new java.util.ArrayDeque<>(List.of("visit-encounter"));
+        while (!queue.isEmpty()) {
+            String n = queue.poll();
+            if (!seen.add(n)) continue;
+            queue.addAll(next.getOrDefault(n, List.of()));
+        }
+        assertEquals(10, seen.size(), "all 10 steps reachable from visit-encounter");
+    }
 }
