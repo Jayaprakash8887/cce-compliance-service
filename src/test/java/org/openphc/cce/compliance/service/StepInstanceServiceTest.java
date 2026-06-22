@@ -319,6 +319,52 @@ class StepInstanceServiceTest {
                 assertNotNull(s.getMissedDate());
             }
         }
+
+        @Test
+        void relatedStepAlreadyExists_isNotRecreated() {
+            // Regression: a target step may already exist (created reactively by its own
+            // trigger, or a redelivered event). Progressive instantiation must NOT create a
+            // duplicate — otherwise the duplicate goes overdue/missed and raises a spurious
+            // deviation. This also guarantees nesting (organizational only) never spawns
+            // duplicate parent/sibling steps.
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime dueDate = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
+            StepInstance step = buildStepWithProtocol(protocolInstance, "initial-enrollment",
+                    StepState.PENDING, dueDate, dueDate.plusDays(3));
+
+            when(stepInstanceRepository.save(any(StepInstance.class))).thenAnswer(invocation -> {
+                StepInstance s = invocation.getArgument(0);
+                if (s.getId() == null) s.setId(UUID.randomUUID());
+                return s;
+            });
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+
+            // A bp-check step already exists for this instance
+            when(stepInstanceRepository.existsByProtocolInstanceIdAndActionId(
+                    protocolInstance.getId(), "bp-check")).thenReturn(true);
+
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+
+            List<PlanDefinitionParser.StepMetadata> actions = List.of(
+                    new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
+                                    BigDecimal.valueOf(7), "d")),
+                            null, null, "must", List.of()),
+                    new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
+                            List.of(), List.of(), null, 3, "must", List.of()));
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
+
+            service.completeStep(step, UUID.randomUUID(), "test-source");
+
+            ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
+            verify(stepInstanceRepository, atLeastOnce()).save(captor.capture());
+
+            boolean createdDuplicate = captor.getAllValues().stream()
+                    .anyMatch(s -> "bp-check".equals(s.getActionId()));
+            assertFalse(createdDuplicate, "Existing bp-check step must not be re-created");
+        }
     }
 
     @Nested

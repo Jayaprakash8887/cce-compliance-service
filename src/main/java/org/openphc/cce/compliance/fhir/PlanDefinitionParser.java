@@ -34,8 +34,9 @@ public class PlanDefinitionParser {
     /**
      * Extract all steps from a PlanDefinition with their metadata.
      * Flattens nested sub-steps into a single list — all steps are treated uniformly.
-     * Sub-steps that don't already have a relatedStep to their parent get one added
-     * automatically (relationship: "after-end", no offset).
+     * Nesting is organizational only and does NOT create an implicit step dependency;
+     * ordering between a parent and its sub-steps (and among sub-steps) must be expressed
+     * explicitly via relatedAction.
      */
     public List<StepMetadata> extractSteps(PlanDefinition planDefinition) {
         List<StepMetadata> result = new ArrayList<>();
@@ -263,12 +264,15 @@ public class PlanDefinitionParser {
             }
         }
 
-        // If this is a nested step and has no explicit relatedStep to its parent, add one
-        if (parentActionId != null && relatedSteps.stream()
-                .noneMatch(rs -> parentActionId.equals(rs.actionId()))) {
-            relatedSteps = new ArrayList<>(relatedSteps);
-            relatedSteps.add(new RelatedStepInfo(parentActionId, "after-end", null, null));
-        }
+        // Nesting is organizational only: it groups sub-steps under a parent and lets
+        // sub-step triggers be indexed with their own action IDs. It does NOT create an
+        // implicit step dependency. Ordering between a parent and its sub-steps (and among
+        // sub-steps) must be expressed explicitly via relatedAction.
+        //
+        // Historically a backward relatedStep (child -> parent, after-end) was auto-added
+        // here. Under the forward progressive-instantiation model (see
+        // StepInstanceService.createDependentSteps) that link meant "completing the child
+        // re-creates the parent", spawning duplicate parent steps. It has been removed.
 
         result.add(new StepMetadata(
                 action.getId(),

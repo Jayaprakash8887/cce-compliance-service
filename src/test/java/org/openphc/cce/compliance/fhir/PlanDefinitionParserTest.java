@@ -835,7 +835,6 @@ class PlanDefinitionParserTest {
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
         // anc-visit-1-referral has relatedStep → anc-visit-1-referral-ack (progressive instantiation)
-        // Plus auto-added relatedStep to parent anc-visit-1 (after-end, entry-point sub-step)
         PlanDefinitionParser.StepMetadata referral = actions.stream()
                 .filter(a -> "anc-visit-1-referral".equals(a.id()))
                 .findFirst().orElseThrow();
@@ -879,21 +878,25 @@ class PlanDefinitionParserTest {
     }
 
     @Test
-    void extractActions_subStepsPlanDefinition_formerSubStepsHaveRelatedStepToParent() throws IOException {
+    void extractActions_subStepsPlanDefinition_subStepsHaveNoBackwardRelatedStepToParent() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        // Entry-point sub-steps (those without explicit relatedStep to sibling) should have
-        // an auto-added relatedStep to their parent (after-end, no offset)
+        // Nesting is organizational only — no implicit backward (child -> parent) relatedStep
+        // is created. Under the forward progressive-instantiation model such a link would make
+        // completing the child re-create the parent, spawning duplicate parent steps.
         PlanDefinitionParser.StepMetadata referral = actions.stream()
                 .filter(a -> "anc-visit-1-referral".equals(a.id()))
                 .findFirst().orElseThrow();
 
-        // referral has relatedStep to ack (explicit) and possibly to parent anc-visit-1 (auto-added)
-        boolean hasParentRelation = referral.relatedSteps().stream()
-                .anyMatch(r -> "anc-visit-1".equals(r.actionId()));
-        assertTrue(hasParentRelation, "Entry-point sub-step should have relatedStep to parent");
+        // referral keeps ONLY its explicit relatedStep (to the ack sub-step) — no link to parent anc-visit-1
+        assertTrue(referral.relatedSteps().stream()
+                        .anyMatch(r -> "anc-visit-1-referral-ack".equals(r.actionId())),
+                "Sub-step should keep its explicit relatedStep");
+        assertFalse(referral.relatedSteps().stream()
+                        .anyMatch(r -> "anc-visit-1".equals(r.actionId())),
+                "Sub-step must NOT have an implicit backward relatedStep to its parent");
     }
 
     @Test
