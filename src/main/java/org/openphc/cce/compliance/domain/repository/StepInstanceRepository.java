@@ -19,6 +19,8 @@ public interface StepInstanceRepository extends JpaRepository<StepInstance, UUID
     List<StepInstance> findByProtocolInstanceIdAndActionIdAndStateIn(
             UUID protocolInstanceId, String actionId, Collection<StepState> states);
 
+    boolean existsByProtocolInstanceIdAndActionId(UUID protocolInstanceId, String actionId);
+
     @Query("SELECT COUNT(s) FROM StepInstance s WHERE s.protocolInstance.id = :instanceId AND s.state NOT IN :terminalStates")
     long countNonTerminalSteps(@Param("instanceId") UUID instanceId,
                               @Param("terminalStates") Collection<StepState> terminalStates);

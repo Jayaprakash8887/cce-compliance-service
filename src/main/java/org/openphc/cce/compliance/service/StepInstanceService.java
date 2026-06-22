@@ -276,6 +276,19 @@ public class StepInstanceService {
         }
 
         for (PlanDefinitionParser.RelatedStepInfo relatedStep : completedStepMetadata.relatedSteps()) {
+            // Dedup guard: skip if a step for this action already exists in the instance.
+            // A target may already exist because it was created reactively by its own
+            // trigger (createInitialStep) before its predecessor completed, or because a
+            // redelivered event re-completed the predecessor. Without this guard, progressive
+            // instantiation would create a duplicate step that later goes overdue/missed and
+            // raises a spurious deviation.
+            if (stepInstanceRepository.existsByProtocolInstanceIdAndActionId(
+                    protocolInstance.getId(), relatedStep.actionId())) {
+                log.debug("Skipping progressive instantiation of {} — a step for this action already exists (instanceId={})",
+                        relatedStep.actionId(), protocolInstance.getId());
+                continue;
+            }
+
             // after-start: offset from when predecessor became active (dueDate)
             // after-end (default): offset from when predecessor completed (completedAt)
             OffsetDateTime baseTime = "after-start".equals(relatedStep.relationship())
