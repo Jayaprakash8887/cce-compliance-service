@@ -1,0 +1,49 @@
+package org.openphc.cce.compliance.domain.entity;
+
+import jakarta.persistence.*;
+import lombok.*;
+
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
+import java.util.UUID;
+
+@Entity
+@Table(name = "facility_reference")
+@Getter
+@Setter
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
+public class FacilityReference {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.AUTO)
+    private UUID id;
+
+    @Column(name = "facility_id", nullable = false, unique = true)
+    private String facilityId;
+
+    @Column(name = "facility_name", nullable = false)
+    private String facilityName;
+
+    @Column(name = "expected_patients_per_day")
+    private Integer expectedPatientsPerDay;
+
+    @Column(name = "created_at", nullable = false)
+    private OffsetDateTime createdAt;
+
+    @Column(name = "updated_at", nullable = false)
+    private OffsetDateTime updatedAt;
+
+    @PrePersist
+    protected void onCreate() {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        if (createdAt == null) createdAt = now;
+        if (updatedAt == null) updatedAt = now;
+    }
+
+    @PreUpdate
+    protected void onUpdate() {
+        updatedAt = OffsetDateTime.now(ZoneOffset.UTC);
+    }
+}

@@ -14,6 +14,7 @@ sequenceDiagram
     participant EHR as CCE Collector Service
     participant Kafka as Apache Kafka
     participant Consumer as InboundEventConsumer
+    participant FacilityRef as FacilityReferenceService
     participant Engine as ComplianceEngine
     participant EventLog as ComplianceEventLogService
     participant TriggerMatch as TriggerMatchingService
@@ -27,6 +28,17 @@ sequenceDiagram
     EHR->>Kafka: Publish clinical event<br/>(CloudEvents v1.0)
     Kafka->>Consumer: Poll cce.events.inbound
     Consumer->>Consumer: Set MDC correlationId
+
+    rect rgb(235, 245, 235)
+        Note over Consumer,DB: Facility Registration (best-effort, non-fatal)
+        Consumer->>FacilityRef: registerFacilityIfAbsent(cloudEvent)
+        FacilityRef->>DB: SELECT EXISTS(facility_id)
+        alt Facility not yet known
+            FacilityRef->>DB: INSERT INTO facility_reference
+        end
+        Note over Consumer,FacilityRef: Failure is swallowed — compliance<br/>processing continues regardless
+    end
+
     Consumer->>Engine: processInboundEvent(cloudEvent)
 
     rect rgb(240, 248, 255)
