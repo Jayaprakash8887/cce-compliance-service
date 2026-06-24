@@ -191,7 +191,7 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog, FacilityReference)
+│   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog, Facility)
 │   ├── enums/                                 # 11 value-based enums
 │   └── repository/                            # 10 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation

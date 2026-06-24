@@ -10,7 +10,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import org.openphc.cce.compliance.service.ComplianceEngine;
-import org.openphc.cce.compliance.service.FacilityReferenceService;
+import org.openphc.cce.compliance.service.FacilityService;
 import org.slf4j.MDC;
 
 import java.time.OffsetDateTime;
@@ -25,14 +25,14 @@ import static org.mockito.Mockito.*;
 class InboundEventConsumerTest {
 
     @Mock private ComplianceEngine complianceEngine;
-    @Mock private FacilityReferenceService facilityReferenceService;
+    @Mock private FacilityService facilityService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private InboundEventConsumer consumer;
 
     @BeforeEach
     void setUp() {
-        consumer = new InboundEventConsumer(complianceEngine, facilityReferenceService, new SimpleMeterRegistry());
+        consumer = new InboundEventConsumer(complianceEngine, facilityService, new SimpleMeterRegistry());
         MDC.clear();
     }
 
@@ -90,7 +90,7 @@ class InboundEventConsumerTest {
         void facilityRegistrationFailure_doesNotBlockComplianceProcessing() {
             CloudEventMessage event = buildEvent();
             doThrow(new RuntimeException("DB unavailable"))
-                    .when(facilityReferenceService).registerFacilityIfAbsent(event);
+                    .when(facilityService).upsertFacility(event);
 
             // Should NOT throw — facility failure is swallowed
             assertDoesNotThrow(() -> consumer.consume(event));

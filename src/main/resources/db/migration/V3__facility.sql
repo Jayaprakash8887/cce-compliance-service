@@ -1,7 +1,7 @@
 -- =============================================
--- 3. facility_reference
+-- 3. facility
 -- =============================================
-CREATE TABLE facility_reference (
+CREATE TABLE facility (
     id                          UUID            NOT NULL DEFAULT gen_random_uuid(),
     facility_id                 VARCHAR         NOT NULL,
     facility_name               VARCHAR         NOT NULL,
@@ -9,8 +9,8 @@ CREATE TABLE facility_reference (
     created_at                  TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
-    CONSTRAINT facility_reference_pkey PRIMARY KEY (id),
-    CONSTRAINT facility_reference_facility_id_key UNIQUE (facility_id)
+    CONSTRAINT facility_pkey PRIMARY KEY (id),
+    CONSTRAINT facility_facility_id_key UNIQUE (facility_id)
 );
 
-ALTER TABLE facility_reference REPLICA IDENTITY FULL;
+ALTER TABLE facility REPLICA IDENTITY FULL;

@@ -8,13 +8,13 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
-@Table(name = "facility_reference")
+@Table(name = "facility")
 @Getter
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-public class FacilityReference {
+public class Facility {
 
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)

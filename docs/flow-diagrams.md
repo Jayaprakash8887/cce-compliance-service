@@ -14,7 +14,7 @@ sequenceDiagram
     participant EHR as CCE Collector Service
     participant Kafka as Apache Kafka
     participant Consumer as InboundEventConsumer
-    participant FacilityRef as FacilityReferenceService
+    participant FacilityRef as FacilityService
     participant Engine as ComplianceEngine
     participant EventLog as ComplianceEventLogService
     participant TriggerMatch as TriggerMatchingService
@@ -31,10 +31,12 @@ sequenceDiagram
 
     rect rgb(235, 245, 235)
         Note over Consumer,DB: Facility Registration (best-effort, non-fatal)
-        Consumer->>FacilityRef: registerFacilityIfAbsent(cloudEvent)
-        FacilityRef->>DB: SELECT EXISTS(facility_id)
+        Consumer->>FacilityRef: upsertFacility(cloudEvent)
+        FacilityRef->>DB: SELECT facility by facility_id
         alt Facility not yet known
-            FacilityRef->>DB: INSERT INTO facility_reference
+            FacilityRef->>DB: INSERT INTO facility
+        else Facility name changed
+            FacilityRef->>DB: UPDATE facility SET facility_name
         end
         Note over Consumer,FacilityRef: Failure is swallowed — compliance<br/>processing continues regardless
     end

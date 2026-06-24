@@ -7,9 +7,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.openphc.cce.compliance.domain.entity.FacilityReference;
-import org.openphc.cce.compliance.domain.repository.FacilityReferenceRepository;
+import org.openphc.cce.compliance.domain.entity.Facility;
+import org.openphc.cce.compliance.domain.repository.FacilityRepository;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
+
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -17,17 +20,17 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-class FacilityReferenceServiceTest {
+class FacilityServiceTest {
 
     @Mock
-    private FacilityReferenceRepository facilityReferenceRepository;
+    private FacilityRepository facilityRepository;
 
-    private FacilityReferenceService service;
+    private FacilityService service;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
-        service = new FacilityReferenceService(facilityReferenceRepository);
+        service = new FacilityService(facilityRepository);
     }
 
     // ── ServiceRequest ─────────────────────────────────────────────────────────
@@ -41,13 +44,13 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith("1302", payload);
-        when(facilityReferenceRepository.existsByFacilityId("1302")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("1302", captor.getValue().getFacilityId());
         assertEquals("NCD Upazila", captor.getValue().getFacilityName());
         assertNull(captor.getValue().getExpectedPatientsPerDay());
@@ -62,13 +65,13 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityReferenceRepository.existsByFacilityId("1302")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("1302", captor.getValue().getFacilityId());
         assertEquals("NCD Upazila", captor.getValue().getFacilityName());
     }
@@ -82,13 +85,13 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityReferenceRepository.existsByFacilityId("999")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("999")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("999", captor.getValue().getFacilityId());
     }
 
@@ -101,13 +104,13 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityReferenceRepository.existsByFacilityId("FAC-007")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("FAC-007")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("FAC-007", captor.getValue().getFacilityId());
         assertEquals("Health Post", captor.getValue().getFacilityName());
     }
@@ -125,13 +128,13 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityReferenceRepository.existsByFacilityId("0030")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("0030")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("0030", captor.getValue().getFacilityId());
         assertEquals("Kacyiru Health Center", captor.getValue().getFacilityName());
     }
@@ -146,15 +149,14 @@ class FacilityReferenceServiceTest {
                   }]
                 }
                 """;
-        // Envelope says "ENVELOPE-ID", payload reference says "0030" — envelope wins
         CloudEventMessage event = eventWith("ENVELOPE-ID", payload);
-        when(facilityReferenceRepository.existsByFacilityId("ENVELOPE-ID")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("ENVELOPE-ID")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("ENVELOPE-ID", captor.getValue().getFacilityId());
         assertEquals("Kacyiru Health Center", captor.getValue().getFacilityName());
     }
@@ -170,13 +172,13 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityReferenceRepository.existsByFacilityId("0030")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("0030")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("0030", captor.getValue().getFacilityId());
         assertEquals("Outpatient Clinic", captor.getValue().getFacilityName());
     }
@@ -190,33 +192,60 @@ class FacilityReferenceServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityReferenceRepository.existsByFacilityId("0055")).thenReturn(false);
-        when(facilityReferenceRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(facilityRepository.findByFacilityId("0055")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        ArgumentCaptor<FacilityReference> captor = ArgumentCaptor.forClass(FacilityReference.class);
-        verify(facilityReferenceRepository).save(captor.capture());
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
         assertEquals("0055", captor.getValue().getFacilityId());
         assertEquals("Vaccination Centre", captor.getValue().getFacilityName());
     }
 
-    // ── Idempotency ────────────────────────────────────────────────────────────
+    // ── Upsert — name change ───────────────────────────────────────────────────
 
     @Test
-    void alreadyExists_doesNotSaveAgain() throws Exception {
+    void existingFacility_nameChanged_updatesName() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "ServiceRequest",
+                  "locationReference": [{ "reference": "Location/1302", "display": "NCD Upazila Renamed" }]
+                }
+                """;
+        Facility existing = Facility.builder()
+                .id(UUID.randomUUID())
+                .facilityId("1302")
+                .facilityName("NCD Upazila")
+                .build();
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.of(existing));
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(eventWith("1302", payload));
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("NCD Upazila Renamed", captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void existingFacility_nameUnchanged_doesNotSave() throws Exception {
         String payload = """
                 {
                   "resourceType": "ServiceRequest",
                   "locationReference": [{ "reference": "Location/1302", "display": "NCD Upazila" }]
                 }
                 """;
-        CloudEventMessage event = eventWith("1302", payload);
-        when(facilityReferenceRepository.existsByFacilityId("1302")).thenReturn(true);
+        Facility existing = Facility.builder()
+                .id(UUID.randomUUID())
+                .facilityId("1302")
+                .facilityName("NCD Upazila")
+                .build();
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.of(existing));
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(eventWith("1302", payload));
 
-        verify(facilityReferenceRepository, never()).save(any());
+        verify(facilityRepository, never()).save(any());
     }
 
     // ── Skip conditions ────────────────────────────────────────────────────────
@@ -228,10 +257,10 @@ class FacilityReferenceServiceTest {
                 """;
         CloudEventMessage event = eventWith(null, payload);
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        verify(facilityReferenceRepository, never()).existsByFacilityId(anyString());
-        verify(facilityReferenceRepository, never()).save(any());
+        verify(facilityRepository, never()).findByFacilityId(anyString());
+        verify(facilityRepository, never()).save(any());
     }
 
     @Test
@@ -242,12 +271,11 @@ class FacilityReferenceServiceTest {
                   "locationReference": [{ "reference": "Location/1302" }]
                 }
                 """;
-        // No display field → can't determine name → skip
         CloudEventMessage event = eventWith(null, payload);
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        verify(facilityReferenceRepository, never()).save(any());
+        verify(facilityRepository, never()).save(any());
     }
 
     @Test
@@ -260,9 +288,9 @@ class FacilityReferenceServiceTest {
                 """;
         CloudEventMessage event = eventWith(null, payload);
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        verify(facilityReferenceRepository, never()).save(any());
+        verify(facilityRepository, never()).save(any());
     }
 
     @Test
@@ -272,9 +300,9 @@ class FacilityReferenceServiceTest {
                 .data(null)
                 .build();
 
-        service.registerFacilityIfAbsent(event);
+        service.upsertFacility(event);
 
-        verify(facilityReferenceRepository, never()).save(any());
+        verify(facilityRepository, never()).save(any());
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────

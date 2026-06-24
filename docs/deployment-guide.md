@@ -219,7 +219,7 @@ All CCE services share the same PostgreSQL database (`ccedb`) deployed by the [C
 
 The database and user are created by the collector service's Docker Compose. The compliance service only needs to run its Flyway migrations, which happen automatically on startup.
 
-> **Compliance service tables:** `protocol_definition`, `protocol_instance`, `step_instance`, `deviation`, `trigger_index`, `compliance_event_log`, `audit_log`, `action_definition`, `intelligence_event_log`, `facility_reference`
+> **Compliance service tables:** `protocol_definition`, `protocol_instance`, `step_instance`, `deviation`, `trigger_index`, `compliance_event_log`, `audit_log`, `action_definition`, `intelligence_event_log`, `facility`
 
 ### Schema Migrations
 
@@ -228,7 +228,7 @@ Flyway manages all schema migrations automatically on application startup.
 - Migrations are located at `classpath:db/migration`
 - `V1__initial_schema.sql` creates the initial 7 tables with indexes, constraints, and ORDER_VIOLATION deviation type
 - `V2__intelligence_tables.sql` adds `action_definition`, `intelligence_event_log` tables (9 total)
-- `V3__facility_reference.sql` adds `facility_reference` table with `REPLICA IDENTITY FULL` for CDC sync (10 total)
+- `V3__facility.sql` adds `facility` table with `REPLICA IDENTITY FULL` for CDC sync (10 total)
 - `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
 - **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
 

@@ -19,7 +19,7 @@
 9. [audit_log](#9-audit_log)
 10. [action_definition](#10-action_definition)
 11. [intelligence_event_log](#11-intelligence_event_log)
-12. [facility_reference](#12-facility_reference)
+12. [facility](#12-facility)
 13. [Enumerated Value Reference](#13-enumerated-value-reference)
 14. [Relationships & Foreign Keys](#14-relationships--foreign-keys)
 15. [JSONB Column Schemas](#15-jsonb-column-schemas)
@@ -37,7 +37,7 @@ erDiagram
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
     COMPLIANCE_EVENT_LOG ||--o| STEP_INSTANCE : "completes"
     ACTION_DEFINITION ||..o{ INTELLIGENCE_EVENT_LOG : "triggers"
-    COMPLIANCE_EVENT_LOG }o--o| FACILITY_REFERENCE : "populates"
+    COMPLIANCE_EVENT_LOG }o--o| FACILITY : "populates"
 
     PROTOCOL_DEFINITION {
         uuid id PK
@@ -153,7 +153,7 @@ erDiagram
         timestamptz created_at
     }
 
-    FACILITY_REFERENCE {
+    FACILITY {
         uuid id PK
         varchar facility_id UK
         varchar facility_name
@@ -180,7 +180,7 @@ erDiagram
 | 7 | `audit_log` | System and user audit trail | Medium–High |
 | 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence actions | Low (tens) |
 | 9 | `intelligence_event_log` | Intelligence action execution and evaluation context (flat, no FKs) | Medium–High |
-| 10 | `facility_reference` | Reference lookup table of known facilities — auto-populated from inbound event payloads | Low (one row per facility) |
+| 10 | `facility` | Reference lookup table of known facilities — auto-populated from inbound event payloads | Low (one row per facility) |
 ---
 
 ## 3. protocol_definition
@@ -543,7 +543,7 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 - **Fat event pattern:** The `event_payload` JSONB column stores the complete Kafka event, making each row self-contained. Consumers of the REST API can see exactly what was published without joining other tables.
 - **`published` boolean:** A simple boolean tracks whether the event was successfully sent to Kafka.
 
-## 12. facility_reference
+## 12. facility
 
 Reference lookup table of known facilities, auto-populated from inbound FHIR event payloads by the `InboundEventConsumer`. Acts as the authoritative facility registry within the compliance service and is CDC-synced to ClickHouse for analytics.
 
@@ -562,8 +562,8 @@ Reference lookup table of known facilities, auto-populated from inbound FHIR eve
 
 | Type | Name | Columns / Details |
 |------|------|-------------------|
-| Primary Key | `facility_reference_pkey` | `id` |
-| Unique | `facility_reference_facility_id_key` | `facility_id` — Idempotency guard; ensures one row per facility. |
+| Primary Key | `facility_pkey` | `id` |
+| Unique | `facility_facility_id_key` | `facility_id` — Idempotency guard; ensures one row per facility. |
 
 ### REPLICA IDENTITY
 
@@ -571,7 +571,7 @@ Reference lookup table of known facilities, auto-populated from inbound FHIR eve
 
 ### Auto-population Behaviour
 
-The `InboundEventConsumer` calls `FacilityReferenceService.registerFacilityIfAbsent()` for every inbound event before handing off to the compliance engine. The service extracts `facility_id` and `facility_name` from the FHIR payload in a single pass using the following resource-type-specific paths:
+The `InboundEventConsumer` calls `FacilityService.upsertFacility()` for every inbound event before handing off to the compliance engine. The service extracts `facility_id` and `facility_name` from the FHIR payload in a single pass and performs an upsert: inserts a new row if the facility is unknown, or updates `facility_name` if the name has changed. Resource-type-specific paths used:
 
 | Resource Type | `facility_id` source | `facility_name` source |
 |---------------|---------------------|----------------------|

@@ -4,7 +4,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.openphc.cce.compliance.kafka.model.CloudEventMessage;
 import org.openphc.cce.compliance.service.ComplianceEngine;
-import org.openphc.cce.compliance.service.FacilityReferenceService;
+import org.openphc.cce.compliance.service.FacilityService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -22,14 +22,14 @@ public class InboundEventConsumer {
     private static final Logger log = LoggerFactory.getLogger(InboundEventConsumer.class);
 
     private final ComplianceEngine complianceEngine;
-    private final FacilityReferenceService facilityReferenceService;
+    private final FacilityService facilityService;
     private final Counter errorCounter;
 
     public InboundEventConsumer(ComplianceEngine complianceEngine,
-                                FacilityReferenceService facilityReferenceService,
+                                FacilityService facilityService,
                                 MeterRegistry meterRegistry) {
         this.complianceEngine = complianceEngine;
-        this.facilityReferenceService = facilityReferenceService;
+        this.facilityService = facilityService;
         this.errorCounter = meterRegistry.counter("cce.consumer.inbound.errors");
     }
 
@@ -38,7 +38,7 @@ public class InboundEventConsumer {
      * two independent concerns before the Kafka offset is committed:
      *
      * <ol>
-     *   <li><b>Facility registration</b> — {@link FacilityReferenceService#registerFacilityIfAbsent}
+     *   <li><b>Facility registration</b> — {@link FacilityService#upsertFacility}
      *       is called here rather than inside {@link ComplianceEngine} for three reasons:
      *       <ul>
      *         <li>It is a reference-data concern, not a compliance concern — keeping it outside
@@ -69,7 +69,7 @@ public class InboundEventConsumer {
         try {
             log.debug("Received inbound event: cloudeventsId={}, source={}", event.getId(), event.getSource());
             try {
-                facilityReferenceService.registerFacilityIfAbsent(event);
+                facilityService.upsertFacility(event);
             } catch (Exception e) {
                 log.warn("Facility registration failed for facilityId={} — compliance processing will continue",
                         event.getFacilityid(), e);
