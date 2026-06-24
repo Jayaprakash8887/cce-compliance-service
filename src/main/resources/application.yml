@@ -3,7 +3,7 @@
 # ==============================================================================
 
 server:
-  port: ${SERVER_PORT:8080}
+  port: ${SERVER_PORT:8091}
 
 spring:
   application:
@@ -12,7 +12,7 @@ spring:
   # --- DataSource ---
   # Connects to shared PostgreSQL + database deployed by cce-collector-service (port 5433)
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5433}/${DB_NAME:ccedb}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:ccedb}
     username: ${DB_USERNAME:cce_user}
     password: ${DB_PASSWORD:cce_pass}
     hikari:
@@ -25,7 +25,7 @@ spring:
   # --- JPA / Hibernate ---
   jpa:
     hibernate:
-      ddl-auto: validate
+      ddl-auto: none
     open-in-view: false
     properties:
       hibernate:
@@ -37,6 +37,9 @@ spring:
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
+    baseline-version: 0
+    out-of-order: true
+    table: flyway_schema_history_compliance
 
   # --- Kafka Consumer ---
   kafka:

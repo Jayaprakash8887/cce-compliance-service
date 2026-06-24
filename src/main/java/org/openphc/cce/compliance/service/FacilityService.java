@@ -23,12 +23,14 @@ public class FacilityService {
         FacilityDetails facilityDetails = extractFacilityDetails(event);
         if (facilityDetails == null) return;
 
-        Optional<Facility> existingFacility = facilityRepository.findByFacilityId(facilityDetails.id());
-        if (existingFacility.isPresent()) {
-            Facility facility = existingFacility.get();
-            if (!facility.getFacilityName().equals(facilityDetails.name())) {
-                facility.setFacilityName(facilityDetails.name());
-                facilityRepository.save(facility);
+        Optional<Facility> optExistingFacility = facilityRepository.findByFacilityId(facilityDetails.id());
+        if (optExistingFacility.isPresent()) {
+            Facility existingFacility = optExistingFacility.get();
+            // Update only when incoming name is present AND differs from stored name (covers null→name and name→newName).
+            // If incoming name is absent, keep whatever is stored (avoids overwriting a known name with null).
+            if (facilityDetails.name() != null && !facilityDetails.name().equals(existingFacility.getFacilityName())) {
+                existingFacility.setFacilityName(facilityDetails.name());
+                facilityRepository.save(existingFacility);
                 log.info("Updated facility name: facilityId={}, name={}", facilityDetails.id(), facilityDetails.name());
             }
             return;
@@ -87,13 +89,18 @@ public class FacilityService {
             }
         }
 
+        // Fallback: envelope has facilityId but no FHIR location node was found — insert with null name
+        if (facilityId != null && !facilityId.isBlank()) {
+            return new FacilityDetails(facilityId, null);
+        }
         return null;
     }
 
     /**
      * Extracts facilityId and facilityName from a single FHIR Reference node in one pass.
      * facilityId resolution order: envelope facilityId → reference string (strip ResourceType/ prefix) → identifier.value
-     * Returns null if either facilityId or facilityName is missing — incomplete records are not persisted.
+     * facilityName is taken from the display field and may be null — a row with a known id but unknown name is still persisted.
+     * Returns null only when facilityId cannot be resolved from any source.
      */
     private FacilityDetails fromRefNode(JsonNode locationRefNode, String facilityId) {
         // ID: envelope first, then reference string (strip prefix), then identifier.value
@@ -108,9 +115,10 @@ public class FacilityService {
             if (identifier != null) facilityId = textOrNull(identifier.get("value"));
         }
 
-        String facilityName = textOrNull(locationRefNode.get("display"));
+        if (facilityId == null || facilityId.isBlank()) return null;
 
-        return (facilityId != null && facilityName != null) ? new FacilityDetails(facilityId, facilityName) : null;
+        String facilityName = textOrNull(locationRefNode.get("display"));
+        return new FacilityDetails(facilityId, facilityName);
     }
 
     private record FacilityDetails(String id, String name) {}

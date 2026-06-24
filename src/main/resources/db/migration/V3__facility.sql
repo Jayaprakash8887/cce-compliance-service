@@ -4,7 +4,7 @@
 CREATE TABLE facility (
     id                          UUID            NOT NULL DEFAULT gen_random_uuid(),
     facility_id                 VARCHAR         NOT NULL,
-    facility_name               VARCHAR         NOT NULL,
+    facility_name               VARCHAR,
     expected_patients_per_day   INTEGER,
     created_at                  TIMESTAMPTZ     NOT NULL DEFAULT now(),
     updated_at                  TIMESTAMPTZ     NOT NULL DEFAULT now(),

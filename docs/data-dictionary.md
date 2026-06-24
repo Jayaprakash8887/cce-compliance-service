@@ -553,7 +553,7 @@ Reference lookup table of known facilities, auto-populated from inbound FHIR eve
 |--------|------|----------|---------|-------------|
 | `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Surrogate primary key. |
 | `facility_id` | `VARCHAR` | **NOT NULL** | — | The bare facility identifier extracted from the FHIR resource location reference (e.g., `"1302"` from `"Location/1302"`). Unique across the table. |
-| `facility_name` | `VARCHAR` | **NOT NULL** | — | Human-readable facility display name extracted from the FHIR `display` field of the same reference node. |
+| `facility_name` | `VARCHAR` | Yes | `NULL` | Human-readable facility display name extracted from the FHIR `display` field of the same reference node. Null when the payload carries no display value — updated on the next event that does. |
 | `expected_patients_per_day` | `INTEGER` | Yes | `NULL` | Programme-configured daily patient volume baseline. Updated directly in the database by programme staff. Used by analytics MVs to calculate adoption rates. |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Timestamp of first insertion. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Timestamp of last modification. |
@@ -571,7 +571,16 @@ Reference lookup table of known facilities, auto-populated from inbound FHIR eve
 
 ### Auto-population Behaviour
 
-The `InboundEventConsumer` calls `FacilityService.upsertFacility()` for every inbound event before handing off to the compliance engine. The service extracts `facility_id` and `facility_name` from the FHIR payload in a single pass and performs an upsert: inserts a new row if the facility is unknown, or updates `facility_name` if the name has changed. Resource-type-specific paths used:
+The `InboundEventConsumer` calls `FacilityService.upsertFacility()` for every inbound event before handing off to the compliance engine. The service extracts `facility_id` and `facility_name` from the FHIR payload in a single pass and applies the following upsert rules:
+
+| Scenario | Action |
+|----------|--------|
+| `facility_id` not resolvable | Skip — nothing is written |
+| New facility (id not in table) | INSERT — `facility_name` may be null if no display value found |
+| Existing facility, incoming has a name, name differs from stored | UPDATE `facility_name` to incoming value (covers null → name and name → new name) |
+| Existing facility, incoming has no name | No-op — stored name is preserved |
+
+Resource-type-specific paths for `facility_id` and `facility_name`:
 
 | Resource Type | `facility_id` source | `facility_name` source |
 |---------------|---------------------|----------------------|
@@ -580,7 +589,7 @@ The `InboundEventConsumer` calls `FacilityService.upsertFacility()` for every in
 | `Procedure` | `location.reference` (strip prefix) or `identifier.value` | `location.display` |
 | `Immunization` | `location.reference` (strip prefix) or `identifier.value` | `location.display` |
 
-If the CloudEvent envelope already carries a `facilityid` extension attribute (set by the emitter), that value is used directly for the ID instead of re-parsing the payload. A row is only inserted when both `facility_id` and `facility_name` are resolvable. Failures are non-fatal — a warning is logged and event processing continues unaffected.
+If the CloudEvent envelope already carries a `facilityid` extension attribute (set by the emitter), that value is used directly as the ID without re-parsing the payload. Failures are non-fatal — a warning is logged and compliance processing continues unaffected.
 
 ### Design Notes
 

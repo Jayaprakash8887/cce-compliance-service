@@ -23,7 +23,7 @@ public class Facility {
     @Column(name = "facility_id", nullable = false, unique = true)
     private String facilityId;
 
-    @Column(name = "facility_name", nullable = false)
+    @Column(name = "facility_name")
     private String facilityName;
 
     @Column(name = "expected_patients_per_day")

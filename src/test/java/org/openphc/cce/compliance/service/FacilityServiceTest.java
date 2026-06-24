@@ -203,7 +203,66 @@ class FacilityServiceTest {
         assertEquals("Vaccination Centre", captor.getValue().getFacilityName());
     }
 
-    // ── Upsert — name change ───────────────────────────────────────────────────
+    // ── Case 1: id present, name absent → insert with null name ───────────────
+
+    @Test
+    void newFacility_noDisplayName_insertsWithNullFacilityName() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "ServiceRequest",
+                  "locationReference": [{ "reference": "Location/1302" }]
+                }
+                """;
+        CloudEventMessage event = eventWith(null, payload);
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("1302", captor.getValue().getFacilityId());
+        assertNull(captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void newFacility_blankDisplayName_insertsWithNullFacilityName() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "ServiceRequest",
+                  "locationReference": [{ "reference": "Location/1302", "display": "   " }]
+                }
+                """;
+        CloudEventMessage event = eventWith(null, payload);
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("1302", captor.getValue().getFacilityId());
+        assertNull(captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void envelopeFacilityIdOnly_noLocationInPayload_insertsWithNullFacilityName() throws Exception {
+        String payload = """
+                { "resourceType": "Observation", "status": "final" }
+                """;
+        CloudEventMessage event = eventWith("ENV-001", payload);
+        when(facilityRepository.findByFacilityId("ENV-001")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("ENV-001", captor.getValue().getFacilityId());
+        assertNull(captor.getValue().getFacilityName());
+    }
+
+    // ── Case 2: existing has name, incoming has different name → update ────────
 
     @Test
     void existingFacility_nameChanged_updatesName() throws Exception {
@@ -248,6 +307,53 @@ class FacilityServiceTest {
         verify(facilityRepository, never()).save(any());
     }
 
+    // ── Case 3: existing has null name, incoming has name → update ─────────────
+
+    @Test
+    void existingFacility_nullName_incomingHasName_updatesName() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "ServiceRequest",
+                  "locationReference": [{ "reference": "Location/1302", "display": "NCD Upazila" }]
+                }
+                """;
+        Facility existing = Facility.builder()
+                .id(UUID.randomUUID())
+                .facilityId("1302")
+                .facilityName(null)
+                .build();
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.of(existing));
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(eventWith("1302", payload));
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("NCD Upazila", captor.getValue().getFacilityName());
+    }
+
+    // ── Case 4: existing has name, incoming has no name → don't update ─────────
+
+    @Test
+    void existingFacility_hasName_incomingHasNoName_doesNotUpdate() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "ServiceRequest",
+                  "locationReference": [{ "reference": "Location/1302" }]
+                }
+                """;
+        Facility existing = Facility.builder()
+                .id(UUID.randomUUID())
+                .facilityId("1302")
+                .facilityName("NCD Upazila")
+                .build();
+        when(facilityRepository.findByFacilityId("1302")).thenReturn(Optional.of(existing));
+
+        service.upsertFacility(eventWith(null, payload));
+
+        verify(facilityRepository, never()).save(any());
+    }
+
     // ── Skip conditions ────────────────────────────────────────────────────────
 
     @Test
@@ -260,36 +366,6 @@ class FacilityServiceTest {
         service.upsertFacility(event);
 
         verify(facilityRepository, never()).findByFacilityId(anyString());
-        verify(facilityRepository, never()).save(any());
-    }
-
-    @Test
-    void facilityIdPresentButNoDisplayName_skips() throws Exception {
-        String payload = """
-                {
-                  "resourceType": "ServiceRequest",
-                  "locationReference": [{ "reference": "Location/1302" }]
-                }
-                """;
-        CloudEventMessage event = eventWith(null, payload);
-
-        service.upsertFacility(event);
-
-        verify(facilityRepository, never()).save(any());
-    }
-
-    @Test
-    void blankDisplayName_skips() throws Exception {
-        String payload = """
-                {
-                  "resourceType": "ServiceRequest",
-                  "locationReference": [{ "reference": "Location/1302", "display": "   " }]
-                }
-                """;
-        CloudEventMessage event = eventWith(null, payload);
-
-        service.upsertFacility(event);
-
         verify(facilityRepository, never()).save(any());
     }
 
