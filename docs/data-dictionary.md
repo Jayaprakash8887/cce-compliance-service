@@ -2,7 +2,7 @@
 
 > **CCE Compliance Service** — Complete database schema reference  
 > **Database**: PostgreSQL 16 | **Schema**: `public` | **Migration**: Flyway  
-> **Last Updated**: 2026-05-25
+> **Last Updated**: 2026-06-23
 
 ---
 
@@ -19,9 +19,10 @@
 9. [audit_log](#9-audit_log)
 10. [action_definition](#10-action_definition)
 11. [intelligence_event_log](#11-intelligence_event_log)
-12. [Enumerated Value Reference](#12-enumerated-value-reference)
-13. [Relationships & Foreign Keys](#13-relationships--foreign-keys)
-14. [JSONB Column Schemas](#14-jsonb-column-schemas)
+12. [facility](#12-facility)
+13. [Enumerated Value Reference](#13-enumerated-value-reference)
+14. [Relationships & Foreign Keys](#14-relationships--foreign-keys)
+15. [JSONB Column Schemas](#15-jsonb-column-schemas)
 
 ---
 
@@ -36,6 +37,7 @@ erDiagram
     STEP_INSTANCE ||--o{ DEVIATION : "causes"
     COMPLIANCE_EVENT_LOG ||--o| STEP_INSTANCE : "completes"
     ACTION_DEFINITION ||..o{ INTELLIGENCE_EVENT_LOG : "triggers"
+    COMPLIANCE_EVENT_LOG }o--o| FACILITY : "populates"
 
     PROTOCOL_DEFINITION {
         uuid id PK
@@ -150,6 +152,15 @@ erDiagram
         timestamptz published_at
         timestamptz created_at
     }
+
+    FACILITY {
+        uuid id PK
+        varchar facility_id UK
+        varchar facility_name
+        integer expected_patients_per_day
+        timestamptz created_at
+        timestamptz updated_at
+    }
 ```
 
 > **Note:** The `scheduler_lease` table is owned and managed by the CCE Scheduler Service and is not shown in this ERD. See [Architecture Overview §1.1](architecture-overview.md#11-scheduler-service-contract) for the Scheduler Service interaction model.
@@ -169,6 +180,7 @@ erDiagram
 | 7 | `audit_log` | System and user audit trail | Medium–High |
 | 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence actions | Low (tens) |
 | 9 | `intelligence_event_log` | Intelligence action execution and evaluation context (flat, no FKs) | Medium–High |
+| 10 | `facility` | Reference lookup table of known facilities — auto-populated from inbound event payloads | Low (one row per facility) |
 ---
 
 ## 3. protocol_definition
@@ -531,7 +543,63 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 - **Fat event pattern:** The `event_payload` JSONB column stores the complete Kafka event, making each row self-contained. Consumers of the REST API can see exactly what was published without joining other tables.
 - **`published` boolean:** A simple boolean tracks whether the event was successfully sent to Kafka.
 
-## 12. Enumerated Value Reference
+## 12. facility
+
+Reference lookup table of known facilities, auto-populated from inbound FHIR event payloads by the `InboundEventConsumer`. Acts as the authoritative facility registry within the compliance service and is CDC-synced to ClickHouse for analytics.
+
+### Columns
+
+| Column | Type | Nullable | Default | Description |
+|--------|------|----------|---------|-------------|
+| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Surrogate primary key. |
+| `facility_id` | `VARCHAR` | **NOT NULL** | — | The bare facility identifier extracted from the FHIR resource location reference (e.g., `"1302"` from `"Location/1302"`). Unique across the table. |
+| `facility_name` | `VARCHAR` | Yes | `NULL` | Human-readable facility display name extracted from the FHIR `display` field of the same reference node. Null when the payload carries no display value — updated on the next event that does. |
+| `expected_patients_per_day` | `INTEGER` | Yes | `NULL` | Programme-configured daily patient volume baseline. Updated directly in the database by programme staff. Used by analytics MVs to calculate adoption rates. |
+| `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Timestamp of first insertion. |
+| `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Timestamp of last modification. |
+
+### Constraints & Indexes
+
+| Type | Name | Columns / Details |
+|------|------|-------------------|
+| Primary Key | `facility_pkey` | `id` |
+| Unique | `facility_facility_id_key` | `facility_id` — Idempotency guard; ensures one row per facility. |
+
+### REPLICA IDENTITY
+
+`REPLICA IDENTITY FULL` is set so Debezium captures the full row on UPDATE/DELETE, enabling correct CDC sync to ClickHouse.
+
+### Auto-population Behaviour
+
+The `InboundEventConsumer` calls `FacilityService.upsertFacility()` for every inbound event before handing off to the compliance engine. The service extracts `facility_id` and `facility_name` from the FHIR payload in a single pass and applies the following upsert rules:
+
+| Scenario | Action |
+|----------|--------|
+| `facility_id` not resolvable | Skip — nothing is written |
+| New facility (id not in table) | INSERT — `facility_name` may be null if no display value found |
+| Existing facility, incoming has a name, name differs from stored | UPDATE `facility_name` to incoming value (covers null → name and name → new name) |
+| Existing facility, incoming has no name | No-op — stored name is preserved |
+
+Resource-type-specific paths for `facility_id` and `facility_name`:
+
+| Resource Type | `facility_id` source | `facility_name` source |
+|---------------|---------------------|----------------------|
+| `ServiceRequest` | `locationReference[0].reference` (strip prefix) or `identifier.value` | `locationReference[0].display` |
+| `Encounter` | `location[0].location.reference` (strip prefix) or `identifier.value` | `location[0].location.display` |
+| `Procedure` | `location.reference` (strip prefix) or `identifier.value` | `location.display` |
+| `Immunization` | `location.reference` (strip prefix) or `identifier.value` | `location.display` |
+
+If the CloudEvent envelope already carries a `facilityid` extension attribute (set by the emitter), that value is used directly as the ID without re-parsing the payload. Failures are non-fatal — a warning is logged and compliance processing continues unaffected.
+
+### Design Notes
+
+- **Owned by the compliance service:** Unlike the CCE Collector Service, which does not extract facility names, this service is the first point where both the bare ID and display name are available together from the FHIR payload.
+- **CDC-synced to ClickHouse:** Via the Debezium connector. Downstream analytics materialized views join against this table for facility-level KPIs and adoption rate calculations.
+- **`expected_patients_per_day` is NULL by default:** Programme staff update this column directly in the database once they know the facility's expected volume. The compliance service never writes to this column.
+
+---
+
+## 13. Enumerated Value Reference
 
 ### ProtocolDefinitionStatus
 
