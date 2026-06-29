@@ -53,6 +53,9 @@ class StepInstanceServiceTest {
     @Mock
     private IntelligenceActionEvaluator intelligenceActionEvaluator;
 
+    @Mock
+    private StateTransitionHistoryService stateTransitionHistoryService;
+
     private StepInstanceService service;
     private ObjectMapper objectMapper;
 
@@ -62,7 +65,7 @@ class StepInstanceServiceTest {
         objectMapper.registerModule(new JavaTimeModule());
         service = new StepInstanceService(stepInstanceRepository,
                 planDefinitionParser, protocolInstanceService, deviationService, auditService,
-                intelligenceActionEvaluator);
+                intelligenceActionEvaluator, stateTransitionHistoryService);
     }
 
     @Nested
@@ -91,6 +94,8 @@ class StepInstanceServiceTest {
             assertEquals(dueDate, result.getDueDate());
             assertEquals(overdueDate, result.getOverdueDate());
             assertEquals(missedDate, result.getMissedDate());
+            // The initial PENDING state is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(result), any());
         }
     }
 
@@ -117,6 +122,8 @@ class StepInstanceServiceTest {
             verify(auditService).audit(eq("COMPLIANCE"), eq("STEP_COMPLETED"),
                     eq("system"), eq("StepInstance"), anyString(), anyMap());
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
+            // The COMPLETED transition (state + completion status) is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
 
         @Test
@@ -389,6 +396,8 @@ class StepInstanceServiceTest {
 
             assertEquals(StepState.DUE, step.getState());
             verify(deviationService, never()).createDeviation(any(), any());
+            // The scheduler-driven DUE transition is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
 
         @Test
@@ -445,6 +454,8 @@ class StepInstanceServiceTest {
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
 
             verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
+            // The MISSED transition is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
 
         @Test
@@ -466,6 +477,8 @@ class StepInstanceServiceTest {
             // State should remain COMPLETED (transition skipped, not errored)
             assertEquals(StepState.COMPLETED, step.getState());
             verify(stepInstanceRepository, never()).save(any());
+            // No state change → nothing recorded in history.
+            verify(stateTransitionHistoryService, never()).recordStepInstanceTransition(any(), any());
         }
 
         @Test
@@ -547,6 +560,8 @@ class StepInstanceServiceTest {
             service.completeStep(completedStep, UUID.randomUUID(), "test-src");
 
             assertEquals(StepState.SKIPPED, optionalStep.getState());
+            // The auto-skip transition of the ancestor optional step is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(optionalStep), any(OffsetDateTime.class));
         }
 
         @Test

@@ -45,19 +45,22 @@ public class StepInstanceService {
     private final DeviationService deviationService;
     private final AuditService auditService;
     private final IntelligenceActionEvaluator intelligenceActionEvaluator;
+    private final StateTransitionHistoryService stateTransitionHistoryService;
 
     public StepInstanceService(StepInstanceRepository stepInstanceRepository,
                                PlanDefinitionParser planDefinitionParser,
                                ProtocolInstanceService protocolInstanceService,
                                DeviationService deviationService,
                                AuditService auditService,
-                               IntelligenceActionEvaluator intelligenceActionEvaluator) {
+                               IntelligenceActionEvaluator intelligenceActionEvaluator,
+                               StateTransitionHistoryService stateTransitionHistoryService) {
         this.stepInstanceRepository = stepInstanceRepository;
         this.planDefinitionParser = planDefinitionParser;
         this.protocolInstanceService = protocolInstanceService;
         this.deviationService = deviationService;
         this.auditService = auditService;
         this.intelligenceActionEvaluator = intelligenceActionEvaluator;
+        this.stateTransitionHistoryService = stateTransitionHistoryService;
     }
 
     /**
@@ -79,6 +82,9 @@ public class StepInstanceService {
                 .build();
 
         step = stepInstanceRepository.save(step);
+
+        // Capture the initial PENDING state in append-only history.
+        stateTransitionHistoryService.recordStepInstanceTransition(step, step.getCreatedAt());
 
         log.info("Created step instance: actionId={}, repeatIndex={}, instanceId={}, stepId={}",
                 actionId, repeatIndex, protocolInstance.getId(), step.getId());
@@ -106,6 +112,9 @@ public class StepInstanceService {
         step.setCompletionStatus(completionStatus);
 
         stepInstanceRepository.save(step);
+
+        // Capture the COMPLETED transition in append-only history.
+        stateTransitionHistoryService.recordStepInstanceTransition(step, now);
 
         auditService.audit("COMPLIANCE", "STEP_COMPLETED", "system",
                 "StepInstance", step.getId().toString(),
@@ -196,6 +205,9 @@ public class StepInstanceService {
 
         step.setState(newState);
         stepInstanceRepository.save(step);
+
+        // Capture the scheduler-driven transition in append-only history.
+        stateTransitionHistoryService.recordStepInstanceTransition(step, OffsetDateTime.now(ZoneOffset.UTC));
 
         log.info("Transitioned step {} from {} to {} (actionId={})",
                 step.getId(), expectedState, newState, step.getActionId());
@@ -375,6 +387,9 @@ public class StepInstanceService {
 
             sibling.setState(StepState.SKIPPED);
             stepInstanceRepository.save(sibling);
+
+            // Capture the auto-skip transition in append-only history.
+            stateTransitionHistoryService.recordStepInstanceTransition(sibling, OffsetDateTime.now(ZoneOffset.UTC));
 
             log.info("Auto-skipped predecessor optional step {} (actionId={}) " +
                             "due to completion of step {} (actionId={})",

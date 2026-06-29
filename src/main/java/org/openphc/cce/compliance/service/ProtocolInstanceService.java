@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -31,13 +32,16 @@ public class ProtocolInstanceService {
     private final ProtocolInstanceRepository protocolInstanceRepository;
     private final StepInstanceRepository stepInstanceRepository;
     private final AuditService auditService;
+    private final StateTransitionHistoryService stateTransitionHistoryService;
 
     public ProtocolInstanceService(ProtocolInstanceRepository protocolInstanceRepository,
                                    StepInstanceRepository stepInstanceRepository,
-                                   AuditService auditService) {
+                                   AuditService auditService,
+                                   StateTransitionHistoryService stateTransitionHistoryService) {
         this.protocolInstanceRepository = protocolInstanceRepository;
         this.stepInstanceRepository = stepInstanceRepository;
         this.auditService = auditService;
+        this.stateTransitionHistoryService = stateTransitionHistoryService;
     }
 
     /**
@@ -66,6 +70,9 @@ public class ProtocolInstanceService {
                 .build();
 
         instance = protocolInstanceRepository.save(instance);
+
+        // Capture the initial ACTIVE status in append-only history.
+        stateTransitionHistoryService.recordProtocolInstanceTransition(instance, instance.getEnrolledAt());
 
         auditService.audit("COMPLIANCE", "PROTOCOL_ENROLLED", "system",
                 "ProtocolInstance", instance.getId().toString(),
@@ -101,6 +108,9 @@ public class ProtocolInstanceService {
         if (nonTerminalSteps == 0) {
             instance.setStatus(ProtocolInstanceStatus.COMPLETED);
             protocolInstanceRepository.save(instance);
+
+            // Capture the COMPLETED transition in append-only history.
+            stateTransitionHistoryService.recordProtocolInstanceTransition(instance, OffsetDateTime.now(ZoneOffset.UTC));
 
             log.info("Protocol instance {} completed — all {} steps in terminal state",
                     instanceId, totalSteps);
