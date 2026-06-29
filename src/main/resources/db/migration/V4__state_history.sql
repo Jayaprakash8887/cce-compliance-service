@@ -17,9 +17,10 @@
 --   - A one-time seed from current state is included but DISABLED by default (section 2) —
 --     enable it only when a re-snapshot backfill needs pre-V4 rows. Forward capture does not
 --     depend on it.
---   - CDC wiring (publication membership, grants, replica identity) is configured
---     centrally in data-pipeline/cdc/01-configure-replication.sql — NOT here. These
---     tables are append-only, so the default PK replica identity is sufficient.
+--   - CDC wiring (publication membership, grants, replica identity) is configured centrally
+--     in data-pipeline/cdc/01-configure-replication.sql — NOT here. cdc/01 sets REPLICA IDENTITY
+--     FULL on every CDC table uniformly; for these append-only tables that is a harmless no-op
+--     (the default PK identity would also suffice), kept for consistency.
 --
 -- ORDER: tables -> (optional seed, disabled) -> triggers.
 -- =============================================================================
@@ -189,8 +190,9 @@ CREATE TRIGGER trg_step_instance_history
 -- =============================================
 -- REPLICA IDENTITY, publication membership, and CDC-user SELECT grants are all set in
 -- data-pipeline/cdc/01-configure-replication.sql (single source of truth for CDC config).
--- These tables are append-only (INSERT only), so the default PK-based replica identity is
--- sufficient — REPLICA IDENTITY FULL only matters for UPDATE/DELETE old-row images, which
--- never occur here. On existing environments, cdc/01 (or these statements) must run:
+-- cdc/01 sets REPLICA IDENTITY FULL on every CDC table uniformly; for these append-only tables
+-- it is a harmless no-op (default PK identity would suffice — FULL only matters for UPDATE/DELETE
+-- old-row images, which never occur here), kept for consistency. On existing environments,
+-- cdc/01 (or these statements) must run:
 --   ALTER PUBLICATION cce_analytics_pub ADD TABLE public.protocol_instance_history, public.step_instance_history;
 --   GRANT SELECT ON protocol_instance_history, step_instance_history TO cce_cdc_user;
