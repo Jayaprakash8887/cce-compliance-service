@@ -20,9 +20,10 @@
 10. [action_definition](#10-action_definition)
 11. [intelligence_event_log](#11-intelligence_event_log)
 12. [facility](#12-facility)
-13. [Enumerated Value Reference](#13-enumerated-value-reference)
-14. [Relationships & Foreign Keys](#14-relationships--foreign-keys)
-15. [JSONB Column Schemas](#15-jsonb-column-schemas)
+13. [State-Transition History Tables](#13-state-transition-history-tables)
+14. [Enumerated Value Reference](#14-enumerated-value-reference)
+15. [Relationships & Foreign Keys](#15-relationships--foreign-keys)
+16. [JSONB Column Schemas](#16-jsonb-column-schemas)
 
 ---
 
@@ -181,6 +182,8 @@ erDiagram
 | 8 | `action_definition` | FHIR ActivityDefinition resources for intelligence actions | Low (tens) |
 | 9 | `intelligence_event_log` | Intelligence action execution and evaluation context (flat, no FKs) | Medium–High |
 | 10 | `facility` | Reference lookup table of known facilities — auto-populated from inbound event payloads | Low (one row per facility) |
+| 11 | `protocol_instance_history` | Append-only log of every `protocol_instance.status` transition (point-in-time, CDC → ClickHouse) | High (per status change) |
+| 12 | `step_instance_history` | Append-only log of every `step_instance.state`/`completion_status` transition (point-in-time, CDC → ClickHouse) | High (per state change) |
 ---
 
 ## 3. protocol_definition
@@ -599,7 +602,61 @@ If the CloudEvent envelope already carries a `facilityid` extension attribute (s
 
 ---
 
-## 13. Enumerated Value Reference
+## 13. State-Transition History Tables
+
+Append-only audit logs that record **every** transition of the two UPDATE-in-place lifecycle
+columns. They exist because `protocol_instance.status` and `step_instance.state` are overwritten
+in place — the prior value is lost — so point-in-time analytics ("what state was this on date D")
+and historical rebuilds of the ClickHouse daily-summary MVs are otherwise impossible.
+
+- **Populated by triggers** (`V4__state_history.sql`): `AFTER INSERT OR UPDATE` on the parent
+  table. This captures every code path (event-driven completion, scheduler-driven DUE/OVERDUE/MISSED,
+  auto-skip) atomically with the change — no gaps.
+- **Append-only:** rows are only ever INSERTed. Never UPDATEd or DELETEd.
+- **Seed** of existing rows from current state is included in the migration but **disabled by
+  default** — forward capture doesn't need it; enable it only to backfill pre-V4 rows for a
+  re-snapshot (exact for `protocol_instance`; best-effort for `step_instance` from its planned/actual timestamps).
+- **CDC-synced to ClickHouse** — added to `cce_analytics_pub` and granted in the data-pipeline's
+  `cdc/01-configure-replication.sql` (not in the V4 migration). Append-only, so the default PK
+  replica identity suffices. Not part of the ER diagram — they reference parents by ID but
+  enforce no FK (logs must survive independently).
+- Consumed **only** by the historical-backfill job (`data-pipeline/schema/09-historical-backfill.sql`),
+  run after a full re-snapshot. Normal forward operation never reads them.
+
+### protocol_instance_history
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | `BIGSERIAL` | **NOT NULL** | Primary key (insertion order). |
+| `protocol_instance_id` | `UUID` | **NOT NULL** | The enrollment whose status changed. |
+| `protocol_definition_id` | `UUID` | **NOT NULL** | Denormalized from the parent (immutable) for backfill grouping. |
+| `status` | `VARCHAR` | **NOT NULL** | The status value *after* this transition. See [ProtocolInstanceStatus](#protocolinstancestatus). |
+| `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`enrolled_at` for the initial INSERT, `updated_at` thereafter). |
+
+Indexes: **none beyond the PK** — write-only CDC source (read only by Debezium snapshot/WAL); analytical queries run in ClickHouse, so secondary indexes here would be INSERT overhead with no reader.
+
+### step_instance_history
+
+| Column | Type | Nullable | Description |
+|--------|------|----------|-------------|
+| `id` | `BIGSERIAL` | **NOT NULL** | Primary key (insertion order). |
+| `step_instance_id` | `UUID` | **NOT NULL** | The step whose state changed. |
+| `protocol_instance_id` | `UUID` | **NOT NULL** | Denormalized from the parent (immutable) for backfill grouping. |
+| `state` | `VARCHAR` | **NOT NULL** | The state value *after* this transition. See [StepState](#stepstate). |
+| `completion_status` | `VARCHAR` | Yes | EARLY / ON_TIME / LATE — set when `state` becomes COMPLETED. See [CompletionStatus](#completionstatus). |
+| `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`created_at` for the initial INSERT, `updated_at` thereafter). |
+
+Indexes: **none beyond the PK** (same rationale as `protocol_instance_history`).
+
+> **Seed accuracy caveat (`step_instance` only):** for rows that existed before the V4 triggers
+> were deployed, intermediate states are reconstructed from the row's leftover timestamps —
+> exact for PENDING (`created_at`) and COMPLETED (`completed_at`), approximate for DUE/OVERDUE/MISSED
+> (planned threshold dates), and SKIPPED has no stored timestamp. Transitions *after* deployment
+> are exact.
+
+---
+
+## 14. Enumerated Value Reference
 
 ### ProtocolDefinitionStatus
 
@@ -695,7 +752,7 @@ The `intelligence_destination` field on `intelligence_event_log` is a **free-for
 
 ---
 
-## 13. Relationships & Foreign Keys
+## 15. Relationships & Foreign Keys
 
 | Parent Table | Child Table | FK Column | Cascade | Description |
 |-------------|-------------|-----------|---------|-------------|
@@ -713,7 +770,7 @@ The `intelligence_destination` field on `intelligence_event_log` is a **free-for
 
 ---
 
-## 14. JSONB Column Schemas
+## 16. JSONB Column Schemas
 
 ### protocol_definition — `definition`
 
