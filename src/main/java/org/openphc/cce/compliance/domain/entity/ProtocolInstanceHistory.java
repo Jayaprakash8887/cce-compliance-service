@@ -29,10 +29,6 @@ public class ProtocolInstanceHistory {
     @Column(name = "protocol_instance_id", nullable = false)
     private UUID protocolInstanceId;
 
-    /** Denormalized (immutable on the base row) for backfill grouping. */
-    @Column(name = "protocol_definition_id", nullable = false)
-    private UUID protocolDefinitionId;
-
     /** Recorded as-is from protocol_instance.status (already validated there). */
     @Column(name = "status", nullable = false)
     private String status;

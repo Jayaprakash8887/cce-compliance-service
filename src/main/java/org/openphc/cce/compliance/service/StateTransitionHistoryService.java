@@ -15,12 +15,11 @@ import java.time.OffsetDateTime;
 /**
  * Writes append-only state-transition history for protocol and step instances.
  *
- * <p>This replaces the former database triggers (V4) with application-level capture. Callers
- * invoke a {@code record*} method immediately after each status/state change. Because these
- * methods run with {@link Propagation#MANDATORY} inside the caller's already-open transaction,
- * the history INSERT commits atomically with the base-row change — the same no-gap, all-or-nothing
- * guarantee the trigger provided. Any code path that mutates a lifecycle column MUST call the
- * matching method here, or that transition will be missing from history.
+ * <p>Callers invoke a {@code record*} method immediately after each status/state change. Because
+ * these methods run with {@link Propagation#MANDATORY} inside the caller's already-open transaction,
+ * the history INSERT commits atomically with the base-row change — a no-gap, all-or-nothing
+ * guarantee. Any code path that mutates a lifecycle column MUST call the matching method here, or
+ * that transition will be missing from history.
  *
  * <p>Rows are only ever INSERTed; the history tables are never updated or deleted.
  */
@@ -47,7 +46,6 @@ public class StateTransitionHistoryService {
     public void recordProtocolInstanceTransition(ProtocolInstance protocolInstance, OffsetDateTime changedAt) {
         protocolInstanceHistoryRepository.save(ProtocolInstanceHistory.builder()
                 .protocolInstanceId(protocolInstance.getId())
-                .protocolDefinitionId(protocolInstance.getProtocolDefinition().getId())
                 .status(protocolInstance.getStatus().name())
                 .changedAt(changedAt)
                 .build());
@@ -63,7 +61,6 @@ public class StateTransitionHistoryService {
     public void recordStepInstanceTransition(StepInstance stepInstance, OffsetDateTime changedAt) {
         stepInstanceHistoryRepository.save(StepInstanceHistory.builder()
                 .stepInstanceId(stepInstance.getId())
-                .protocolInstanceId(stepInstance.getProtocolInstance().getId())
                 .state(stepInstance.getState().name())
                 .completionStatus(stepInstance.getCompletionStatus() != null
                         ? stepInstance.getCompletionStatus().name()

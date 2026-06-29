@@ -71,7 +71,7 @@ public class ProtocolInstanceService {
 
         instance = protocolInstanceRepository.save(instance);
 
-        // Capture the initial ACTIVE status in append-only history (replaces the former DB trigger).
+        // Capture the initial ACTIVE status in append-only history.
         stateTransitionHistoryService.recordProtocolInstanceTransition(instance, instance.getEnrolledAt());
 
         auditService.audit("COMPLIANCE", "PROTOCOL_ENROLLED", "system",
@@ -109,7 +109,7 @@ public class ProtocolInstanceService {
             instance.setStatus(ProtocolInstanceStatus.COMPLETED);
             protocolInstanceRepository.save(instance);
 
-            // Capture the COMPLETED transition in append-only history (replaces the former DB trigger).
+            // Capture the COMPLETED transition in append-only history.
             stateTransitionHistoryService.recordProtocolInstanceTransition(instance, OffsetDateTime.now(ZoneOffset.UTC));
 
             log.info("Protocol instance {} completed — all {} steps in terminal state",

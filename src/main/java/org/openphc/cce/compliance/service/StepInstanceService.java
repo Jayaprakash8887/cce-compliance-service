@@ -83,7 +83,7 @@ public class StepInstanceService {
 
         step = stepInstanceRepository.save(step);
 
-        // Capture the initial PENDING state in append-only history (replaces the former DB trigger).
+        // Capture the initial PENDING state in append-only history.
         stateTransitionHistoryService.recordStepInstanceTransition(step, step.getCreatedAt());
 
         log.info("Created step instance: actionId={}, repeatIndex={}, instanceId={}, stepId={}",
@@ -113,7 +113,7 @@ public class StepInstanceService {
 
         stepInstanceRepository.save(step);
 
-        // Capture the COMPLETED transition in append-only history (replaces the former DB trigger).
+        // Capture the COMPLETED transition in append-only history.
         stateTransitionHistoryService.recordStepInstanceTransition(step, now);
 
         auditService.audit("COMPLIANCE", "STEP_COMPLETED", "system",
@@ -206,7 +206,7 @@ public class StepInstanceService {
         step.setState(newState);
         stepInstanceRepository.save(step);
 
-        // Capture the scheduler-driven transition in append-only history (replaces the former DB trigger).
+        // Capture the scheduler-driven transition in append-only history.
         stateTransitionHistoryService.recordStepInstanceTransition(step, OffsetDateTime.now(ZoneOffset.UTC));
 
         log.info("Transitioned step {} from {} to {} (actionId={})",
@@ -388,7 +388,7 @@ public class StepInstanceService {
             sibling.setState(StepState.SKIPPED);
             stepInstanceRepository.save(sibling);
 
-            // Capture the auto-skip transition in append-only history (replaces the former DB trigger).
+            // Capture the auto-skip transition in append-only history.
             stateTransitionHistoryService.recordStepInstanceTransition(sibling, OffsetDateTime.now(ZoneOffset.UTC));
 
             log.info("Auto-skipped predecessor optional step {} (actionId={}) " +

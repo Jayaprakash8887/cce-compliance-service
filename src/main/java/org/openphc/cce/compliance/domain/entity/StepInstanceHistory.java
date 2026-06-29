@@ -30,10 +30,6 @@ public class StepInstanceHistory {
     @Column(name = "step_instance_id", nullable = false)
     private UUID stepInstanceId;
 
-    /** Denormalized (immutable on the base row) for backfill grouping. */
-    @Column(name = "protocol_instance_id", nullable = false)
-    private UUID protocolInstanceId;
-
     /** Recorded as-is from step_instance.state (already validated there). */
     @Column(name = "state", nullable = false)
     private String state;

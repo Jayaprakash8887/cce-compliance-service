@@ -614,16 +614,19 @@ and historical rebuilds of the ClickHouse daily-summary MVs are otherwise imposs
   (enrollment, event-driven completion, scheduler-driven DUE/OVERDUE/MISSED, auto-skip). The
   history INSERT runs in the **same transaction** as the parent change (`Propagation.MANDATORY`),
   so it is atomic with the transition — no gaps across the service layer. (`V4__state_history.sql`
-  creates the tables only; it no longer installs triggers.) Caveat: unlike a DB trigger this does
-  **not** capture raw out-of-band SQL UPDATEs — all lifecycle mutations must go through the service layer.
+  creates the tables only.) Caveat: it does **not** capture raw out-of-band SQL UPDATEs — all
+  lifecycle mutations must go through the service layer.
 - **Append-only:** rows are only ever INSERTed. Never UPDATEd or DELETEd.
-- **Seed** of existing rows from current state is included in the migration but **disabled by
-  default** — forward capture doesn't need it; enable it only to backfill pre-V4 rows for a
-  re-snapshot (exact for `protocol_instance`; best-effort for `step_instance` from its planned/actual timestamps).
 - **CDC-synced to ClickHouse** — added to `cce_analytics_pub` and granted in the data-pipeline's
   `cdc/01-configure-replication.sql` (not in the V4 migration). Append-only, so the default PK
-  replica identity suffices. Not part of the ER diagram — they reference parents by ID but
-  enforce no FK (logs must survive independently).
+  replica identity suffices. Not part of the ER diagram — they reference their direct parent by ID
+  (`protocol_instance_id` / `step_instance_id`) but enforce no FK.
+- **Lean schema — no denormalized grouping keys.** These tables carry only the direct parent id;
+  the backfill recovers `protocol_definition_id` (for protocol history) and `protocol_instance_id`
+  (for step history) by joining the immutable base tables (`protocol_instance` / `step_instance`).
+  Trade-off: if a base row is hard-deleted (only manual/out-of-band SQL does this — the app never
+  deletes these rows), its history can no longer be grouped and drops out of the backfill. Accepted:
+  a deleted instance is treated as removed from historical rollups too.
 - Consumed **only** by the historical-backfill job (`data-pipeline/schema/09-historical-backfill.sql`),
   run after a full re-snapshot. Normal forward operation never reads them.
 
@@ -632,8 +635,7 @@ and historical rebuilds of the ClickHouse daily-summary MVs are otherwise imposs
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | `BIGSERIAL` | **NOT NULL** | Primary key (insertion order). |
-| `protocol_instance_id` | `UUID` | **NOT NULL** | The enrollment whose status changed. |
-| `protocol_definition_id` | `UUID` | **NOT NULL** | Denormalized from the parent (immutable) for backfill grouping. |
+| `protocol_instance_id` | `UUID` | **NOT NULL** | The enrollment whose status changed. Backfill joins `protocol_instance` on this id to recover `protocol_definition_id`. |
 | `status` | `VARCHAR` | **NOT NULL** | The status value *after* this transition. See [ProtocolInstanceStatus](#protocolinstancestatus). |
 | `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`enrolled_at` for the initial enrollment, the transition time for subsequent status changes). |
 
@@ -644,19 +646,12 @@ Indexes: **none beyond the PK** — write-only CDC source (read only by Debezium
 | Column | Type | Nullable | Description |
 |--------|------|----------|-------------|
 | `id` | `BIGSERIAL` | **NOT NULL** | Primary key (insertion order). |
-| `step_instance_id` | `UUID` | **NOT NULL** | The step whose state changed. |
-| `protocol_instance_id` | `UUID` | **NOT NULL** | Denormalized from the parent (immutable) for backfill grouping. |
+| `step_instance_id` | `UUID` | **NOT NULL** | The step whose state changed. Backfill joins `step_instance` on this id to recover `protocol_instance_id`. |
 | `state` | `VARCHAR` | **NOT NULL** | The state value *after* this transition. See [StepState](#stepstate). |
 | `completion_status` | `VARCHAR` | Yes | EARLY / ON_TIME / LATE — set when `state` becomes COMPLETED. See [CompletionStatus](#completionstatus). |
 | `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`created_at` for the initial creation, the transition time thereafter). |
 
 Indexes: **none beyond the PK** (same rationale as `protocol_instance_history`).
-
-> **Seed accuracy caveat (`step_instance` only):** for rows that existed before V4 application-level
-> capture began, intermediate states are reconstructed from the row's leftover timestamps —
-> exact for PENDING (`created_at`) and COMPLETED (`completed_at`), approximate for DUE/OVERDUE/MISSED
-> (planned threshold dates), and SKIPPED has no stored timestamp. Transitions *after* deployment
-> are exact.
 
 ---
 
