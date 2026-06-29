@@ -609,9 +609,13 @@ columns. They exist because `protocol_instance.status` and `step_instance.state`
 in place — the prior value is lost — so point-in-time analytics ("what state was this on date D")
 and historical rebuilds of the ClickHouse daily-summary MVs are otherwise impossible.
 
-- **Populated by triggers** (`V4__state_history.sql`): `AFTER INSERT OR UPDATE` on the parent
-  table. This captures every code path (event-driven completion, scheduler-driven DUE/OVERDUE/MISSED,
-  auto-skip) atomically with the change — no gaps.
+- **Populated at the application layer** by `StateTransitionHistoryService`, invoked from
+  `ProtocolInstanceService` / `StepInstanceService` immediately after every status/state write
+  (enrollment, event-driven completion, scheduler-driven DUE/OVERDUE/MISSED, auto-skip). The
+  history INSERT runs in the **same transaction** as the parent change (`Propagation.MANDATORY`),
+  so it is atomic with the transition — no gaps across the service layer. (`V4__state_history.sql`
+  creates the tables only; it no longer installs triggers.) Caveat: unlike a DB trigger this does
+  **not** capture raw out-of-band SQL UPDATEs — all lifecycle mutations must go through the service layer.
 - **Append-only:** rows are only ever INSERTed. Never UPDATEd or DELETEd.
 - **Seed** of existing rows from current state is included in the migration but **disabled by
   default** — forward capture doesn't need it; enable it only to backfill pre-V4 rows for a
@@ -631,7 +635,7 @@ and historical rebuilds of the ClickHouse daily-summary MVs are otherwise imposs
 | `protocol_instance_id` | `UUID` | **NOT NULL** | The enrollment whose status changed. |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | Denormalized from the parent (immutable) for backfill grouping. |
 | `status` | `VARCHAR` | **NOT NULL** | The status value *after* this transition. See [ProtocolInstanceStatus](#protocolinstancestatus). |
-| `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`enrolled_at` for the initial INSERT, `updated_at` thereafter). |
+| `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`enrolled_at` for the initial enrollment, the transition time for subsequent status changes). |
 
 Indexes: **none beyond the PK** — write-only CDC source (read only by Debezium snapshot/WAL); analytical queries run in ClickHouse, so secondary indexes here would be INSERT overhead with no reader.
 
@@ -644,12 +648,12 @@ Indexes: **none beyond the PK** — write-only CDC source (read only by Debezium
 | `protocol_instance_id` | `UUID` | **NOT NULL** | Denormalized from the parent (immutable) for backfill grouping. |
 | `state` | `VARCHAR` | **NOT NULL** | The state value *after* this transition. See [StepState](#stepstate). |
 | `completion_status` | `VARCHAR` | Yes | EARLY / ON_TIME / LATE — set when `state` becomes COMPLETED. See [CompletionStatus](#completionstatus). |
-| `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`created_at` for the initial INSERT, `updated_at` thereafter). |
+| `changed_at` | `TIMESTAMPTZ` | **NOT NULL** | When the transition occurred (`created_at` for the initial creation, the transition time thereafter). |
 
 Indexes: **none beyond the PK** (same rationale as `protocol_instance_history`).
 
-> **Seed accuracy caveat (`step_instance` only):** for rows that existed before the V4 triggers
-> were deployed, intermediate states are reconstructed from the row's leftover timestamps —
+> **Seed accuracy caveat (`step_instance` only):** for rows that existed before V4 application-level
+> capture began, intermediate states are reconstructed from the row's leftover timestamps —
 > exact for PENDING (`created_at`) and COMPLETED (`completed_at`), approximate for DUE/OVERDUE/MISSED
 > (planned threshold dates), and SKIPPED has no stored timestamp. Transitions *after* deployment
 > are exact.

@@ -39,11 +39,15 @@ class ProtocolInstanceServiceTest {
     @Mock
     private AuditService auditService;
 
+    @Mock
+    private StateTransitionHistoryService stateTransitionHistoryService;
+
     private ProtocolInstanceService service;
 
     @BeforeEach
     void setUp() {
-        service = new ProtocolInstanceService(protocolInstanceRepository, stepInstanceRepository, auditService);
+        service = new ProtocolInstanceService(protocolInstanceRepository, stepInstanceRepository,
+                auditService, stateTransitionHistoryService);
     }
 
     @Nested
@@ -75,6 +79,8 @@ class ProtocolInstanceServiceTest {
             verify(protocolInstanceRepository).save(any(ProtocolInstance.class));
             verify(auditService).audit(eq("COMPLIANCE"), eq("PROTOCOL_ENROLLED"),
                     eq("system"), eq("ProtocolInstance"), anyString(), anyMap());
+            // The initial ACTIVE status is recorded in append-only history at the enrollment time.
+            verify(stateTransitionHistoryService).recordProtocolInstanceTransition(result, enrolledAt);
         }
 
         @Test
@@ -98,6 +104,7 @@ class ProtocolInstanceServiceTest {
             verify(protocolInstanceRepository, never()).save(any());
             verify(auditService, never()).audit(anyString(), anyString(), anyString(),
                     anyString(), anyString(), anyMap());
+            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
         }
     }
 
@@ -118,6 +125,8 @@ class ProtocolInstanceServiceTest {
 
             assertEquals(ProtocolInstanceStatus.COMPLETED, instance.getStatus());
             verify(protocolInstanceRepository).save(instance);
+            // The COMPLETED transition is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordProtocolInstanceTransition(eq(instance), any(OffsetDateTime.class));
         }
 
         @Test
@@ -133,6 +142,7 @@ class ProtocolInstanceServiceTest {
 
             assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
             verify(protocolInstanceRepository, never()).save(any());
+            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
         }
 
         @Test
@@ -147,6 +157,7 @@ class ProtocolInstanceServiceTest {
 
             assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
             verify(protocolInstanceRepository, never()).save(any());
+            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
         }
 
         @Test
@@ -159,6 +170,7 @@ class ProtocolInstanceServiceTest {
             service.checkAndCompleteProtocol(instanceId);
 
             verify(protocolInstanceRepository, never()).save(any());
+            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
         }
     }
 

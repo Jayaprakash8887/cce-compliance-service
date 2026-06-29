@@ -10,10 +10,14 @@
 --   rebuild via CDC re-snapshot) reconstructible.
 --
 -- DESIGN
---   - Append-only: rows are only ever INSERTed (by triggers). Never UPDATE/DELETE.
---   - Captured by AFTER INSERT OR UPDATE triggers — fires on EVERY code path
---     (event-driven completion, scheduler-driven DUE/OVERDUE/MISSED, auto-skip,
---      manual SQL) and is transactional with the row change (no gaps).
+--   - Append-only: rows are only ever INSERTed (by the application). Never UPDATE/DELETE.
+--   - Captured at the APPLICATION layer by StateTransitionHistoryService, invoked from
+--     ProtocolInstanceService / StepInstanceService immediately after every status/state
+--     write — enrollment, event-driven completion, scheduler-driven DUE/OVERDUE/MISSED,
+--     and auto-skip. The history INSERT runs in the SAME transaction as the base-row change
+--     (Propagation.MANDATORY), so it is all-or-nothing with the transition (no gaps).
+--     NOTE: unlike a DB trigger, this does NOT capture changes made by raw out-of-band SQL.
+--     All lifecycle mutations must go through the service layer.
 --   - A one-time seed from current state is included but DISABLED by default (section 2) —
 --     enable it only when a re-snapshot backfill needs pre-V4 rows. Forward capture does not
 --     depend on it.
@@ -22,7 +26,7 @@
 --     FULL on every CDC table uniformly; for these append-only tables that is a harmless no-op
 --     (the default PK identity would also suffice), kept for consistency.
 --
--- ORDER: tables -> (optional seed, disabled) -> triggers.
+-- ORDER: tables -> (optional seed, disabled).
 -- =============================================================================
 
 -- =============================================
@@ -37,9 +41,9 @@ CREATE TABLE protocol_instance_history (
     changed_at              TIMESTAMPTZ     NOT NULL DEFAULT now(),
 
     CONSTRAINT protocol_instance_history_pkey PRIMARY KEY (id)
-    -- No enum CHECK on purpose: the value is copied by the trigger from the parent row, which
+    -- No enum CHECK on purpose: the value is copied by the application from the parent row, which
     -- already enforces its own status CHECK. Re-checking here is redundant AND a drift hazard —
-    -- the trigger runs in the parent's transaction, so a history CHECK that lags a future parent
+    -- the INSERT runs in the parent's transaction, so a history CHECK that lags a future parent
     -- enum change would fail the INSERT and roll back the parent write. History records faithfully.
 );
 -- No secondary indexes on purpose: this is a write-only CDC source table. Nothing in PostgreSQL
@@ -58,7 +62,7 @@ CREATE TABLE step_instance_history (
 
     CONSTRAINT step_instance_history_pkey PRIMARY KEY (id)
     -- No enum CHECK on purpose (same rationale as protocol_instance_history): values are copied by
-    -- the trigger from the parent row, which already enforces its state/completion_status CHECKs.
+    -- the application from the parent row, which already enforces its state/completion_status CHECKs.
     -- A history CHECK lagging a future parent enum change would roll back the parent write.
 );
 -- No secondary indexes (same rationale as protocol_instance_history): write-only CDC source,
@@ -67,16 +71,16 @@ CREATE TABLE step_instance_history (
 -- =============================================
 -- 2. Seed from current state — DISABLED (intentionally commented out)
 -- =============================================
--- The triggers in section 3 capture every transition going FORWARD. This seed only matters for
--- reconstructing rows that existed BEFORE this migration during a full ClickHouse re-snapshot
--- backfill (data-pipeline/schema/09). With no re-snapshot planned, it is not needed yet, so it is
--- left disabled to keep the deploy minimal.
+-- The application captures every transition going FORWARD (StateTransitionHistoryService). This seed only
+-- matters for reconstructing rows that existed BEFORE this migration during a full ClickHouse
+-- re-snapshot backfill (data-pipeline/schema/09). With no re-snapshot planned, it is not needed
+-- yet, so it is left disabled to keep the deploy minimal.
 --
 -- TO ENABLE:
 --   * Before an environment's FIRST deploy — simply uncomment the block below.
 --   * AFTER V4 has already been applied (Flyway migrations are immutable — you cannot edit this
 --     file) — run the INSERTs manually once, OR add them as a new V5 migration. In BOTH of those
---     later cases add a guard so rows the triggers already captured are not duplicated, e.g.:
+--     later cases add a guard so rows the application already captured are not duplicated, e.g.:
 --       ... WHERE NOT EXISTS (SELECT 1 FROM protocol_instance_history h WHERE h.protocol_instance_id = protocol_instance.id)
 --
 -- DR NOTE: an UNPLANNED re-snapshot (DISASTER-RECOVERY scenarios C/D) will not recover history for
@@ -139,54 +143,7 @@ WHERE state = 'SKIPPED';
 */
 
 -- =============================================
--- 3. Trigger functions + triggers (capture every transition going forward)
--- =============================================
-
-CREATE OR REPLACE FUNCTION log_protocol_instance_status() RETURNS trigger AS $$
-BEGIN
-    IF (TG_OP = 'INSERT') THEN
-        INSERT INTO protocol_instance_history
-            (protocol_instance_id, protocol_definition_id, status, changed_at)
-        VALUES (NEW.id, NEW.protocol_definition_id, NEW.status,
-                COALESCE(NEW.enrolled_at, NEW.created_at, now()));
-    ELSIF (NEW.status IS DISTINCT FROM OLD.status) THEN
-        INSERT INTO protocol_instance_history
-            (protocol_instance_id, protocol_definition_id, status, changed_at)
-        VALUES (NEW.id, NEW.protocol_definition_id, NEW.status,
-                COALESCE(NEW.updated_at, now()));
-    END IF;
-    RETURN NULL;  -- AFTER trigger: return value is ignored
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_protocol_instance_history
-    AFTER INSERT OR UPDATE ON protocol_instance
-    FOR EACH ROW EXECUTE FUNCTION log_protocol_instance_status();
-
-CREATE OR REPLACE FUNCTION log_step_instance_state() RETURNS trigger AS $$
-BEGIN
-    IF (TG_OP = 'INSERT') THEN
-        INSERT INTO step_instance_history
-            (step_instance_id, protocol_instance_id, state, completion_status, changed_at)
-        VALUES (NEW.id, NEW.protocol_instance_id, NEW.state, NEW.completion_status,
-                COALESCE(NEW.created_at, now()));
-    ELSIF (NEW.state IS DISTINCT FROM OLD.state
-           OR NEW.completion_status IS DISTINCT FROM OLD.completion_status) THEN
-        INSERT INTO step_instance_history
-            (step_instance_id, protocol_instance_id, state, completion_status, changed_at)
-        VALUES (NEW.id, NEW.protocol_instance_id, NEW.state, NEW.completion_status,
-                COALESCE(NEW.updated_at, now()));
-    END IF;
-    RETURN NULL;  -- AFTER trigger: return value is ignored
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_step_instance_history
-    AFTER INSERT OR UPDATE ON step_instance
-    FOR EACH ROW EXECUTE FUNCTION log_step_instance_state();
-
--- =============================================
--- 4. CDC plumbing — managed centrally in the data-pipeline
+-- 3. CDC plumbing — managed centrally in the data-pipeline
 -- =============================================
 -- REPLICA IDENTITY, publication membership, and CDC-user SELECT grants are all set in
 -- data-pipeline/cdc/01-configure-replication.sql (single source of truth for CDC config).
