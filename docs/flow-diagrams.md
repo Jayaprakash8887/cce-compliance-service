@@ -194,23 +194,31 @@ sequenceDiagram
     StepSvc->>DB: findById(stepInstanceId)
     DB-->>StepSvc: StepInstance
 
+    Note over StepSvc: applyTransition returns true only if the step is<br/>in the expected source state. A redelivered trigger finds<br/>the step already transitioned → returns false → deviation skipped.
+
     alt PENDING_TO_DUE
-        StepSvc->>StepSvc: Verify state == PENDING
-        StepSvc->>DB: UPDATE state = DUE
+        StepSvc->>StepSvc: applyTransition(PENDING → DUE)
+        StepSvc->>DB: UPDATE state = DUE (if applied)
     else DUE_TO_OVERDUE
-        StepSvc->>StepSvc: Verify state == DUE
-        StepSvc->>DB: UPDATE state = OVERDUE
-        StepSvc->>DevSvc: recordDeviation(OVERDUE)
-        DevSvc->>DB: INSERT INTO deviation
+        StepSvc->>StepSvc: applyTransition(DUE → OVERDUE)
+        opt transition applied
+            StepSvc->>DB: UPDATE state = OVERDUE
+            StepSvc->>DevSvc: createDeviation(OVERDUE)
+            DevSvc->>DB: SELECT existing (step, OVERDUE)
+            Note right of DevSvc: Insert only if none exists;<br/>unique constraint (step_instance_id, deviation_type)<br/>is the backstop against concurrent inserts
+            DevSvc->>DB: INSERT INTO deviation
+        end
     else OVERDUE_TO_MISSED
-        StepSvc->>StepSvc: Verify state == OVERDUE
         alt requiredBehavior == could
-            StepSvc->>DB: UPDATE state = SKIPPED
+            StepSvc->>StepSvc: applyTransition(OVERDUE → SKIPPED)
             Note right of StepSvc: No deviation for optional steps
         else requiredBehavior == must (or null)
-            StepSvc->>DB: UPDATE state = MISSED
-            StepSvc->>DevSvc: recordDeviation(MISSED)
-            DevSvc->>DB: INSERT INTO deviation
+            StepSvc->>StepSvc: applyTransition(OVERDUE → MISSED)
+            opt transition applied
+                StepSvc->>DB: UPDATE state = MISSED
+                StepSvc->>DevSvc: createDeviation(MISSED)
+                DevSvc->>DB: INSERT INTO deviation (idempotent)
+            end
         end
     end
 
@@ -276,7 +284,9 @@ flowchart TD
     T2 -->|"type=MISSED"| RD
 
     RD["DeviationService.recordDeviation()"]
-    RD --> D1["Create Deviation entity"]
+    RD --> DX{"Deviation of this type<br/>already exists for step?"}
+    DX -->|"Yes (redelivery / concurrent)"| DXR["Return DeviationResult(existing, created=false)<br/>— no insert, no audit, caller skips intelligence eval"]
+    DX -->|"No"| D1["Create Deviation entity"]
     D1 --> D2["Set deviationType"]
     D2 --> D3["Set detectedAt = now()"]
     D3 --> D4["Build metadata:<br/>daysOverdue/daysPastMissedDate"]

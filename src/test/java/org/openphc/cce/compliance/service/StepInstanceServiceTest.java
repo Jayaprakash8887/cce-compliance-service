@@ -402,7 +402,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
-                    .thenReturn(deviation);
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -419,6 +419,67 @@ class StepInstanceServiceTest {
         }
 
         @Test
+        void dueToOverdue_redelivered_createsDeviationOnlyOnce() {
+            // Kafka is at-least-once: the same DUE_TO_OVERDUE trigger may arrive twice.
+            // The first delivery transitions DUE->OVERDUE and raises the deviation; the
+            // redelivery finds the step already OVERDUE, so applyTransition returns false
+            // and no second (duplicate) deviation is created.
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.DUE, null, null);
+            step.setId(stepId);
+
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_OVERDUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            // First delivery + redelivery of the same trigger
+            service.applySchedulerTransition(trigger);
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.OVERDUE, step.getState());
+            verify(deviationService, times(1)).createDeviation(eq(step), eq(DeviationType.OVERDUE));
+            verify(intelligenceActionEvaluator, times(1)).evaluateOnDeviation(step, deviation);
+        }
+
+        @Test
+        void dueToOverdue_deviationAlreadyExisted_skipsIntelligenceEvaluation() {
+            // Concurrent race: the transition applies, but createDeviation finds a deviation
+            // another thread already created (created=false). Intelligence must NOT be
+            // evaluated again, otherwise a duplicate intelligence event would fire.
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.DUE, null, null);
+            step.setId(stepId);
+
+            Deviation existing = Deviation.builder().id(UUID.randomUUID()).build();
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
+                    .thenReturn(new DeviationService.DeviationResult(existing, false));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_OVERDUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.OVERDUE, step.getState());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.OVERDUE));
+            verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
+        }
+
+        @Test
         void overdueToMissed_createsDeviationAndChecksProtocol() {
             UUID stepId = UUID.randomUUID();
             StepInstance step = buildStep(StepState.OVERDUE, null, null);
@@ -429,7 +490,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
-                    .thenReturn(deviation);
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -714,7 +775,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
-                    .thenReturn(deviation);
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -742,7 +803,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
-                    .thenReturn(deviation);
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
@@ -809,7 +870,7 @@ class StepInstanceServiceTest {
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
             when(deviationService.createDeviation(any(), eq(DeviationType.ORDER_VIOLATION), any()))
-                    .thenReturn(deviation);
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source");
 

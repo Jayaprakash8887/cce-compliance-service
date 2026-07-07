@@ -299,7 +299,9 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 
 ## 6. deviation
 
-Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`. When intelligence actions are configured on the step's PlanDefinition action, the `IntelligenceActionEvaluator` is invoked and the `intelligence_event_id` is populated with the published event's UUID.
+Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`, or when an order violation is detected on completion. When intelligence actions are configured on the step's PlanDefinition action, the `IntelligenceActionEvaluator` is invoked and the `intelligence_event_id` is populated with the published event's UUID.
+
+A step has **at most one deviation per type** — enforced by the `deviation_step_type_key` unique constraint on `(step_instance_id, deviation_type)`. This makes deviation creation idempotent against redelivered scheduler triggers (Kafka is at-least-once) and concurrent consumer threads: `DeviationService.createDeviation` pre-checks for an existing deviation and returns it instead of inserting a duplicate, with the unique constraint as the ultimate backstop. It returns a `DeviationResult(deviation, created)`; the `created` flag lets callers fire one-time side effects (intelligence action evaluation) **only** when a new deviation was actually inserted, so a redelivered or concurrent trigger produces neither a duplicate deviation row nor a duplicate intelligence event.
 
 ### Columns
 
@@ -321,6 +323,7 @@ Records **compliance deviations** detected during protocol execution. Created wh
 | Primary Key | `deviation_pkey` | `id` |
 | Foreign Key | `deviation_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Foreign Key | `deviation_step_instance_id_fkey` | `step_instance_id` → `step_instance(id)` |
+| Unique | `deviation_step_type_key` | `(step_instance_id, deviation_type)` — At most one deviation per type per step. Idempotency guard against redelivered / concurrent scheduler triggers. |
 | Check | — | `deviation_type IN ('OVERDUE', 'MISSED', 'ORDER_VIOLATION')` |
 | B-tree Index | `idx_deviation_protocol` | `protocol_instance_id` |
 | B-tree Index | `idx_deviation_type` | `deviation_type` |

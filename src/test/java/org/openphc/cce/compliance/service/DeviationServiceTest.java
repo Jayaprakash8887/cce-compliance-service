@@ -56,14 +56,15 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.createDeviation(step, DeviationType.OVERDUE);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
 
-        assertNotNull(result.getId());
-        assertEquals(DeviationType.OVERDUE, result.getDeviationType());
-        assertEquals(protocolInstance, result.getProtocolInstance());
-        assertEquals(step, result.getStepInstance());
-        assertNotNull(result.getDetectedAt());
-        assertNotNull(result.getMetadata());
+        assertTrue(result.created(), "A newly inserted deviation should signal created=true");
+        assertNotNull(result.deviation().getId());
+        assertEquals(DeviationType.OVERDUE, result.deviation().getDeviationType());
+        assertEquals(protocolInstance, result.deviation().getProtocolInstance());
+        assertEquals(step, result.deviation().getStepInstance());
+        assertNotNull(result.deviation().getDetectedAt());
+        assertNotNull(result.deviation().getMetadata());
 
         verify(deviationRepository).save(any(Deviation.class));
     }
@@ -80,12 +81,12 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.createDeviation(step, DeviationType.MISSED);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.MISSED);
 
-        assertNotNull(result.getId());
-        assertEquals(DeviationType.MISSED, result.getDeviationType());
-        assertEquals(protocolInstance, result.getProtocolInstance());
-        assertEquals(step, result.getStepInstance());
+        assertNotNull(result.deviation().getId());
+        assertEquals(DeviationType.MISSED, result.deviation().getDeviationType());
+        assertEquals(protocolInstance, result.deviation().getProtocolInstance());
+        assertEquals(step, result.deviation().getStepInstance());
     }
 
     @Test
@@ -117,10 +118,10 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.createDeviation(step, DeviationType.OVERDUE);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
 
-        assertNotNull(result.getId());
-        assertNull(result.getMetadata());
+        assertNotNull(result.deviation().getId());
+        assertNull(result.deviation().getMetadata());
     }
 
     @Test
@@ -135,10 +136,36 @@ class DeviationServiceTest {
         });
 
         Map<String, Object> additional = Map.of("incompletePrerequisites", java.util.List.of("step-a"));
-        Deviation result = service.createDeviation(step, DeviationType.ORDER_VIOLATION, additional);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.ORDER_VIOLATION, additional);
 
-        assertNotNull(result.getId());
-        assertNotNull(result.getMetadata());
+        assertNotNull(result.deviation().getId());
+        assertNotNull(result.deviation().getMetadata());
+    }
+
+    @Test
+    void createDeviation_whenSameTypeAlreadyExists_returnsExistingWithoutInserting() {
+        // Idempotency: a redelivered / concurrent trigger must not create a second
+        // deviation of the same type for the same step.
+        ProtocolInstance protocolInstance = buildProtocolInstance();
+        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
+
+        Deviation existing = Deviation.builder()
+                .id(UUID.randomUUID())
+                .protocolInstance(protocolInstance)
+                .stepInstance(step)
+                .deviationType(DeviationType.OVERDUE)
+                .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .build();
+
+        when(deviationRepository.findByStepInstanceIdAndDeviationType(step.getId(), DeviationType.OVERDUE))
+                .thenReturn(java.util.Optional.of(existing));
+
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
+
+        assertFalse(result.created(), "Should signal the deviation already existed");
+        assertSame(existing, result.deviation(), "Should return the pre-existing deviation");
+        verify(deviationRepository, never()).save(any(Deviation.class));
+        verify(auditService, never()).audit(any(), any(), any(), any(), any(), anyMap());
     }
 
     @Test
@@ -152,10 +179,10 @@ class DeviationServiceTest {
             return d;
         });
 
-        Deviation result = service.createDeviation(step, DeviationType.OVERDUE);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
 
         // Intelligence trigger publishing is deferred to a future phase
-        assertNull(result.getIntelligenceEventId());
+        assertNull(result.deviation().getIntelligenceEventId());
     }
 
     // --- Helpers ---
