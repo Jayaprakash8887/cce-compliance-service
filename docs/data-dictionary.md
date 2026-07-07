@@ -210,7 +210,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
-| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
+| `id` | `UUID` | **NOT NULL** | — (app-generated) | Primary key. Time-ordered **UUID v7** assigned by the application (`UuidV7Generator`), so rows sort by creation time — see [Scheduler watermark cursor](architecture-overview.md#11-scheduler-service-contract). The prior `gen_random_uuid()` (v4) default was dropped in `V4`. |
 | `patient_id` | `VARCHAR` | **NOT NULL** | — | UPID of the enrolled patient (e.g., `260115-0001-7823`). Derived from the CloudEvent `subject` field. |
 | `protocol_canonical` | `VARCHAR` | **NOT NULL** | — | Denormalized `url|version` reference. Stored for fast display without joining `protocol_definition`. |
 | `protocol_definition_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_definition.id`. |
@@ -239,7 +239,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
-| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
+| `id` | `UUID` | **NOT NULL** | — (app-generated) | Primary key. Time-ordered **UUID v7** assigned by the application (`UuidV7Generator`); rows sort by creation time, which the Scheduler uses as a [watermark cursor](architecture-overview.md#11-scheduler-service-contract) for incremental polling. The prior `gen_random_uuid()` (v4) default was dropped in `V4`. |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. |
 | `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). Must be unique within a PlanDefinition. |
 | `repeat_index` | `INTEGER` | **NOT NULL** | `0` | Zero-based occurrence counter for repeating actions. Non-repeating actions always have index 0. |
@@ -307,7 +307,7 @@ A step has **at most one deviation per type** — enforced by the `deviation_ste
 
 | Column | Data Type | Nullable | Default | Description |
 |--------|-----------|----------|---------|-------------|
-| `id` | `UUID` | **NOT NULL** | `gen_random_uuid()` | Primary key. |
+| `id` | `UUID` | **NOT NULL** | — (app-generated) | Primary key. Time-ordered **UUID v7** assigned by the application (`UuidV7Generator`), so rows sort by creation time — see [Scheduler watermark cursor](architecture-overview.md#11-scheduler-service-contract). The prior `gen_random_uuid()` (v4) default was dropped in `V4`. |
 | `protocol_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `protocol_instance.id`. |
 | `step_instance_id` | `UUID` | **NOT NULL** | — | Foreign key → `step_instance.id`. |
 | `deviation_type` | `VARCHAR` | **NOT NULL** | — | Type classification. See [DeviationType](#deviationtype). |

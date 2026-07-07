@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.annotations.UuidGenerator;
 import org.hibernate.type.SqlTypes;
 import org.openphc.cce.compliance.domain.enums.DeviationType;
+import org.openphc.cce.compliance.domain.support.UuidV7Generator;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -23,7 +25,7 @@ import java.util.UUID;
 public class Deviation {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @UuidGenerator(algorithm = UuidV7Generator.class)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)

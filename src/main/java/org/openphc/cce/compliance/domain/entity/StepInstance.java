@@ -2,7 +2,9 @@ package org.openphc.cce.compliance.domain.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.UuidGenerator;
 import org.openphc.cce.compliance.domain.enums.CompletionStatus;
+import org.openphc.cce.compliance.domain.support.UuidV7Generator;
 import org.openphc.cce.compliance.domain.enums.StepState;
 
 import java.time.OffsetDateTime;
@@ -18,7 +20,7 @@ import java.util.UUID;
 public class StepInstance {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @UuidGenerator(algorithm = UuidV7Generator.class)
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
