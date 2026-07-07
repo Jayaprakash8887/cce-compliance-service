@@ -144,17 +144,21 @@ public class StepInstanceService {
         switch (trigger.getTransitionType()) {
             case "PENDING_TO_DUE" -> applyTransition(step, StepState.PENDING, StepState.DUE);
             case "DUE_TO_OVERDUE" -> {
-                applyTransition(step, StepState.DUE, StepState.OVERDUE);
-                Deviation deviation = deviationService.createDeviation(step, DeviationType.OVERDUE);
-                intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
+                // Only raise a deviation if the transition actually happened. A redelivered
+                // or duplicate scheduler trigger finds the step already OVERDUE, so
+                // applyTransition returns false and we skip the (otherwise duplicate) deviation.
+                if (applyTransition(step, StepState.DUE, StepState.OVERDUE)) {
+                    Deviation deviation = deviationService.createDeviation(step, DeviationType.OVERDUE);
+                    intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
+                }
             }
             case "OVERDUE_TO_MISSED" -> {
                 if ("could".equals(step.getRequiredBehavior())) {
-                    applyTransition(step, StepState.OVERDUE, StepState.SKIPPED);
-                    log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
-                            step.getId());
-                } else {
-                    applyTransition(step, StepState.OVERDUE, StepState.MISSED);
+                    if (applyTransition(step, StepState.OVERDUE, StepState.SKIPPED)) {
+                        log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
+                                step.getId());
+                    }
+                } else if (applyTransition(step, StepState.OVERDUE, StepState.MISSED)) {
                     Deviation deviation = deviationService.createDeviation(step, DeviationType.MISSED);
                     intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
                 }
@@ -187,11 +191,17 @@ public class StepInstanceService {
         return steps.isEmpty() ? null : steps.get(0);
     }
 
-    private void applyTransition(StepInstance step, StepState expectedState, StepState newState) {
+    /**
+     * Apply a state transition if the step is in the expected state.
+     *
+     * @return true if the transition was applied, false if it was skipped because the
+     *         step was not in the expected state (e.g. a redelivered/duplicate trigger).
+     */
+    private boolean applyTransition(StepInstance step, StepState expectedState, StepState newState) {
         if (step.getState() != expectedState) {
             log.warn("Step {} is in state {} — expected {} for transition to {}. Skipping.",
                     step.getId(), step.getState(), expectedState, newState);
-            return;
+            return false;
         }
 
         step.setState(newState);
@@ -199,6 +209,7 @@ public class StepInstanceService {
 
         log.info("Transitioned step {} from {} to {} (actionId={})",
                 step.getId(), expectedState, newState, step.getActionId());
+        return true;
     }
 
 

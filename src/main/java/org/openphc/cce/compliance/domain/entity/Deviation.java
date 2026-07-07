@@ -12,7 +12,9 @@ import java.time.ZoneOffset;
 import java.util.UUID;
 
 @Entity
-@Table(name = "deviation")
+@Table(name = "deviation", uniqueConstraints = @UniqueConstraint(
+        name = "deviation_step_type_key",
+        columnNames = {"step_instance_id", "deviation_type"}))
 @Getter
 @Setter
 @NoArgsConstructor
