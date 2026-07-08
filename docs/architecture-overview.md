@@ -101,6 +101,22 @@ Each condition maps to a specific `transitionType`:
 | `state = DUE` AND `overdueDate ≤ now` | `DUE_TO_OVERDUE` | Deviation recorded (`OVERDUE`) |
 | `state = OVERDUE` AND `missedDate ≤ now` | `OVERDUE_TO_MISSED` | `MISSED` (must) or `SKIPPED` (could) |
 
+#### Watermark Cursor (Time-Ordered IDs)
+
+The `id` columns of `protocol_instance`, `step_instance`, and `deviation` are **UUID v7** (RFC 9562) values generated application-side by `UuidV7Generator` (wired via Hibernate `@UuidGenerator`), replacing the previous random v4 (`gen_random_uuid()`) defaults, which were dropped in migration `V4`. A v7 UUID encodes a 48-bit millisecond creation timestamp in its most-significant bytes; because PostgreSQL orders the `uuid` type by a byte-wise comparison, sorting by `id` is (approximately) creation order — no separate timestamp column or index is required.
+
+This lets the Scheduler Service treat `step_instance.id` as a **monotonic watermark**. Instead of rescanning the table, it persists the highest id it has already examined and, on the next poll, discovers newly created steps with a cursor scan:
+
+```sql
+SELECT s FROM StepInstance s WHERE s.id > :watermark ORDER BY s.id ASC
+```
+
+The date-threshold query above (overdue/missed detection) remains the mechanism for *time-based transitions*; the watermark is a complementary cursor for **incremental discovery of newly enrolled work** in creation order.
+
+**Guarantees & limits:**
+- Ordering holds at **millisecond** granularity. Within a millisecond, `UuidV7Generator` uses a 12-bit monotonic counter so ids from a single Compliance Service process stay strictly increasing; across multiple instances or under clock skew, same-millisecond ordering is best-effort.
+- The watermark is therefore an **at-least-once** cursor, not exactly-once — a boundary row may be re-observed, so consumers must stay idempotent (scheduler-driven deviation creation already is, via the `deviation_step_type_key` guard).
+
 #### Ownership & Coordination
 
 | Aspect | Owner | Details |

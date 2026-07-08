@@ -3,7 +3,6 @@ package org.openphc.cce.compliance.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import jakarta.persistence.EntityNotFoundException;
 import org.hl7.fhir.r4.model.PlanDefinition;
-import org.openphc.cce.compliance.domain.entity.Deviation;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
 import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.CompletionStatus;
@@ -153,19 +152,31 @@ public class StepInstanceService {
         switch (trigger.getTransitionType()) {
             case "PENDING_TO_DUE" -> applyTransition(step, StepState.PENDING, StepState.DUE);
             case "DUE_TO_OVERDUE" -> {
-                applyTransition(step, StepState.DUE, StepState.OVERDUE);
-                Deviation deviation = deviationService.createDeviation(step, DeviationType.OVERDUE);
-                intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
+                // Only raise a deviation if the transition actually happened. A redelivered
+                // or duplicate scheduler trigger finds the step already OVERDUE, so
+                // applyTransition returns false and we skip the (otherwise duplicate) deviation.
+                if (applyTransition(step, StepState.DUE, StepState.OVERDUE)) {
+                    DeviationService.DeviationResult result =
+                            deviationService.createDeviation(step, DeviationType.OVERDUE);
+                    // Only evaluate intelligence for a freshly created deviation. If a
+                    // concurrent thread already created it, skip to avoid a duplicate event.
+                    if (result.created()) {
+                        intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
+                    }
+                }
             }
             case "OVERDUE_TO_MISSED" -> {
                 if ("could".equals(step.getRequiredBehavior())) {
-                    applyTransition(step, StepState.OVERDUE, StepState.SKIPPED);
-                    log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
-                            step.getId());
-                } else {
-                    applyTransition(step, StepState.OVERDUE, StepState.MISSED);
-                    Deviation deviation = deviationService.createDeviation(step, DeviationType.MISSED);
-                    intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
+                    if (applyTransition(step, StepState.OVERDUE, StepState.SKIPPED)) {
+                        log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
+                                step.getId());
+                    }
+                } else if (applyTransition(step, StepState.OVERDUE, StepState.MISSED)) {
+                    DeviationService.DeviationResult result =
+                            deviationService.createDeviation(step, DeviationType.MISSED);
+                    if (result.created()) {
+                        intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
+                    }
                 }
                 // Check if protocol is now complete (MISSED/SKIPPED are terminal)
                 protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -196,11 +207,17 @@ public class StepInstanceService {
         return steps.isEmpty() ? null : steps.get(0);
     }
 
-    private void applyTransition(StepInstance step, StepState expectedState, StepState newState) {
+    /**
+     * Apply a state transition if the step is in the expected state.
+     *
+     * @return true if the transition was applied, false if it was skipped because the
+     *         step was not in the expected state (e.g. a redelivered/duplicate trigger).
+     */
+    private boolean applyTransition(StepInstance step, StepState expectedState, StepState newState) {
         if (step.getState() != expectedState) {
             log.warn("Step {} is in state {} — expected {} for transition to {}. Skipping.",
                     step.getId(), step.getState(), expectedState, newState);
-            return;
+            return false;
         }
 
         step.setState(newState);
@@ -211,6 +228,7 @@ public class StepInstanceService {
 
         log.info("Transitioned step {} from {} to {} (actionId={})",
                 step.getId(), expectedState, newState, step.getActionId());
+        return true;
     }
 
 
@@ -258,14 +276,18 @@ public class StepInstanceService {
             metadata.put("incompletePrerequisites", incompletePrerequisites);
             metadata.put("completedActionId", completedActionId);
 
-            Deviation deviation = deviationService.createDeviation(completedStep,
+            DeviationService.DeviationResult result = deviationService.createDeviation(completedStep,
                     DeviationType.ORDER_VIOLATION, metadata);
 
-            log.warn("Order violation detected: step {} (actionId={}) completed while "
-                            + "prerequisite steps {} are still incomplete",
-                    completedStep.getId(), completedActionId, incompletePrerequisites);
+            // Skip the warning + intelligence evaluation if this order violation was already
+            // recorded (idempotent under redelivered / concurrent completion processing).
+            if (result.created()) {
+                log.warn("Order violation detected: step {} (actionId={}) completed while "
+                                + "prerequisite steps {} are still incomplete",
+                        completedStep.getId(), completedActionId, incompletePrerequisites);
 
-            intelligenceActionEvaluator.evaluateOnDeviation(completedStep, deviation);
+                intelligenceActionEvaluator.evaluateOnDeviation(completedStep, result.deviation());
+            }
         }
     }
 

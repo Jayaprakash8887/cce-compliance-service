@@ -2,7 +2,9 @@ package org.openphc.cce.compliance.domain.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.UuidGenerator;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
+import org.openphc.cce.compliance.domain.support.UuidV7Generator;
 
 import java.time.OffsetDateTime;
 import java.util.HashSet;
@@ -19,7 +21,7 @@ import java.util.UUID;
 public class ProtocolInstance {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.AUTO)
+    @UuidGenerator(algorithm = UuidV7Generator.class)
     private UUID id;
 
     @Column(name = "patient_id", nullable = false)
