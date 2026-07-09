@@ -341,6 +341,19 @@ public class StepInstanceService {
 
             String requiredBehavior = targetAction != null ? targetAction.requiredBehavior() : null;
 
+            // Only pre-create PENDING instances for mandatory (must) steps. Optional steps
+            // (could / unspecified) are not instantiated on predecessor completion:
+            // we may never receive their events, and a dangling PENDING row would later be
+            // driven to OVERDUE/MISSED and raise a spurious deviation. When an optional step's
+            // event does arrive, ComplianceEngine.processMatch creates the instance on the fly
+            // (createInitialStep) and completes it in the same transaction.
+            if (!"must".equals(requiredBehavior)) {
+                log.debug("Skipping progressive instantiation of non-mandatory step {} "
+                                + "(requiredBehavior={}, instanceId={})",
+                        relatedStep.actionId(), requiredBehavior, protocolInstance.getId());
+                continue;
+            }
+
             // Create step instances — if timing specifies recurring, create N instances
             int repeatCount = 1;
             java.math.BigDecimal repeatPeriod = null;
