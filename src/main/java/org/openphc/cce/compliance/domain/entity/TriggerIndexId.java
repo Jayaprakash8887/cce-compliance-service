@@ -5,6 +5,7 @@ import jakarta.persistence.Embeddable;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import lombok.*;
+import org.hl7.fhir.r4.model.ResourceType;
 
 import java.io.Serializable;
 import java.util.UUID;
@@ -20,7 +21,7 @@ public class TriggerIndexId implements Serializable {
 
     @Enumerated(EnumType.STRING)
     @Column(name = "resource_type", nullable = false)
-    private String resourceType;
+    private ResourceType resourceType;
 
     @Column(nullable = false)
     private String path;

@@ -19,14 +19,22 @@ public class ResourceInfoExtractor {
      * Extract the FHIR resource type from the event data payload.
      *
      * @param data the event payload (JsonNode representation of FHIR resource)
-     * @return the resourceType string, or null if not present
+     * @return the {@link ResourceType}, or null if absent or not a known FHIR resource type
+     * (e.g. non-FHIR {@code application/json} payloads) — such events simply match no triggers
      */
     public ResourceType extractResourceType(JsonNode data) {
         if (data == null || data.isNull()) {
             return null;
         }
         JsonNode resourceType = data.get("resourceType");
-        return resourceType != null && resourceType.isTextual() ? ResourceType.valueOf(resourceType.asText()) : null;
+        if (resourceType == null || !resourceType.isTextual()) {
+            return null;
+        }
+        try {
+            return ResourceType.valueOf(resourceType.asText());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /**

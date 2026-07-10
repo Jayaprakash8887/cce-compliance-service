@@ -87,8 +87,8 @@ public class PlanDefinitionParser {
 
         for (TriggerDefinition trigger : action.getTrigger()) {
             for (DataRequirement dataReq : trigger.getData()) {
-                String resourceType = dataReq.getType();
-                if (resourceType == null) continue;
+                if (dataReq.getType() == null) continue;
+                ResourceType resourceType = parseResourceType(dataReq.getType());
 
                 List<DataRequirement.DataRequirementCodeFilterComponent> codeFilters = dataReq.getCodeFilter();
                 if (codeFilters == null || codeFilters.isEmpty()) {
@@ -472,7 +472,20 @@ public class PlanDefinitionParser {
         return null;
     }
 
-    private TriggerIndex buildTriggerIndex(String resourceType, String path, String codeSystem,
+    /**
+     * Parse a FHIR {@code DataRequirement.type} code into a {@link ResourceType}. Rejected at
+     * protocol load time (mapped to 400) if the code is not a known FHIR resource type.
+     */
+    private ResourceType parseResourceType(String code) {
+        try {
+            return ResourceType.valueOf(code);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Unknown FHIR resource type in trigger data.type: " + code, e);
+        }
+    }
+
+    private TriggerIndex buildTriggerIndex(ResourceType resourceType, String path, String codeSystem,
                                            String codeValue, UUID protocolDefinitionId, String actionId) {
         return TriggerIndex.builder()
                 .id(TriggerIndexId.builder()

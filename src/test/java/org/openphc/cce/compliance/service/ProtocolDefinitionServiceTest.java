@@ -370,7 +370,7 @@ class ProtocolDefinitionServiceTest {
     private TriggerIndex buildTriggerIndex(String resourceType, String path, String system, String code) {
         return TriggerIndex.builder()
                 .id(TriggerIndexId.builder()
-                        .resourceType(resourceType)
+                        .resourceType(org.hl7.fhir.r4.model.ResourceType.valueOf(resourceType))
                         .path(path)
                         .codeSystem(system)
                         .codeValue(code)
