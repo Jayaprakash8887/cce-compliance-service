@@ -90,16 +90,23 @@ public class StepInstanceService {
      * triggers progressive step instantiation for dependent steps, and checks
      * if the protocol is now complete.
      */
-    public void completeStep(StepInstance step, UUID matchedEventId, String completedBySource) {
+    public void completeStep(StepInstance step, UUID matchedEventId, String completedBySource,
+                             OffsetDateTime occurredAt) {
         if (!ACTIONABLE_STATES.contains(step.getState())) {
             throw new IllegalStateException(
                     "Cannot complete step in state " + step.getState() + ": " + step.getId());
         }
 
+        // completedAt is the clinical occurrence time (when the act happened), not the ingestion
+        // time — so dependent steps' due/overdue/missed dates and the completion status reflect
+        // real-world timing rather than how long the event took to reach us. Clamp to now(): a step
+        // cannot have completed in the future, and a bad/future source clock must not push
+        // downstream schedules out. Fall back to now() when no occurrence time was resolved.
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        CompletionStatus completionStatus = determineCompletionStatus(step, now);
+        OffsetDateTime completedAt = (occurredAt != null && !occurredAt.isAfter(now)) ? occurredAt : now;
+        CompletionStatus completionStatus = determineCompletionStatus(step, completedAt);
         step.setState(StepState.COMPLETED);
-        step.setCompletedAt(now);
+        step.setCompletedAt(completedAt);
         step.setCompletedByEventId(matchedEventId);
         step.setCompletedBySource(completedBySource);
         step.setCompletionStatus(completionStatus);

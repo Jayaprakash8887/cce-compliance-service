@@ -256,6 +256,35 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 | `resourceType` | `data.resourceType` (e.g., `"Observation"`, `"Encounter"`) |
 | `allCodes` | `data.code.coding[*]`, `data.type.coding[*]`, `data.category[*].coding[*]`, `data.clinicalStatus.coding[*]`, `data.identifier[*]` (system+value), `data.status` |
 
+### 4.2 Clinical Event Time Extraction
+
+When an inbound event **completes** a step, the completion is attributed to the **clinical occurrence time** — when the act actually happened — rather than the time the event reached the service. This keeps a completed step's `completed_at`, its `completionStatus`, and the calculated due/overdue/missed dates of any **dependent steps** accurate even when events arrive late (offline sync, batch upload, retries, DLQ replay).
+
+`ClinicalEventTimeExtractor` derives this time from the FHIR payload using a resource-type → clinical-time-field table, handling FHIR's polymorphic `[x]` choice types by probing concrete field names in priority order:
+
+| Resource type | Clinical-time fields (first match wins) |
+|---|---|
+| `Observation` | `effectiveDateTime` → `effectiveInstant` → `effectivePeriod.end` → `effectivePeriod.start` → `issued` |
+| `Encounter` | `period.end` → `period.start` |
+| `Procedure` | `performedDateTime` → `performedPeriod.end` → `performedPeriod.start` |
+| `Immunization` | `occurrenceDateTime` |
+| `MedicationAdministration` | `effectiveDateTime` → `effectivePeriod.end` → `effectivePeriod.start` |
+| `Condition` | `onsetDateTime` → `onsetPeriod.start` → `recordedDate` |
+| `ServiceRequest` | `occurrenceDateTime` → `occurrencePeriod.end` → `authoredOn` |
+| `DiagnosticReport` | `effectiveDateTime` → `effectivePeriod.end` → `issued` |
+
+Values are parsed leniently (partial precision `2026` / `2026-03` / full timestamps with offset). The extractor is **best-effort** — an unmapped resource type, missing field, or unparseable value returns nothing and the caller falls back.
+
+**Resolution order** for the completion time (`ComplianceEngine.resolveOccurredAt`):
+
+1. **Clinical time from the FHIR payload** (above) — only for FHIR payloads (`application/fhir+json`).
+2. **CloudEvent envelope `time`** — the emitter/adaptor's transmission clock; stable across retries/DLQ replay. Used for non-FHIR (`application/json`) payloads and as the FHIR fallback.
+3. **`now()`** — defensive last resort.
+
+The resolved time is **clamped to `now()`** in `StepInstanceService.completeStep` (a step cannot have completed in the future; a bad or skewed source clock must not push downstream schedules out). Because the result only ever *improves* on the previously-used ingestion time, unmapped resource types degrade safely to prior behavior.
+
+> **Late-arriving completions:** when ingestion lag exceeds a dependent step's offset, that step can be created with `overdue_date`/`missed_date` already in the past and transition (possibly recording a deviation) at the next scheduler cycle. This is real-world-accurate — the step genuinely is overdue — and is a consequence of anchoring to clinical time.
+
 ## 5. Two-Tier Matching Algorithm
 
 ### 5.1 Tier 1 — Structural Match
@@ -467,7 +496,7 @@ stateDiagram-v2
     SKIPPED --> [*]
 ```
 
-**Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE).
+**Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE). Timing is judged against the **clinical occurrence time** of the completing event (see §4.2), not the ingestion time — so a visit that happened on time but was reported late is still `ON_TIME`.
 
 **Intelligence action evaluation:** On step completion and on deviation detection (OVERDUE, MISSED), the intelligence action evaluator is invoked. See §6.3 for details.
 
@@ -772,6 +801,8 @@ See [API Reference](api-reference.md) for endpoint details.
 | `cce.consumer.inbound.errors` | Counter | Inbound event consumer processing errors |
 | `cce.consumer.scheduler.errors` | Counter | Scheduler trigger consumer processing errors |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |
+| `cce.clinical_time.unmapped` | Counter (tagged by `resourceType`) | FHIR events whose resource type has no clinical-time mapping — fell back to envelope time (see §4.2) |
+| `cce.clinical_time.unparseable` | Counter (tagged by `resourceType`) | Clinical-time fields present but unparseable — fell back to envelope time |
 
 ### 8.2 Logging & Tracing
 

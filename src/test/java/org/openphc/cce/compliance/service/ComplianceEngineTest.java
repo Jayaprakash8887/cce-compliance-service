@@ -48,6 +48,7 @@ class ComplianceEngineTest {
     @Mock private PlanDefinitionParser planDefinitionParser;
     @Mock private AuditService auditService;
     @Mock private IntelligenceActionEvaluator intelligenceActionEvaluator;
+    @Mock private ClinicalEventTimeExtractor clinicalEventTimeExtractor;
 
     private MeterRegistry meterRegistry;
     private ComplianceEngine engine;
@@ -62,7 +63,7 @@ class ComplianceEngineTest {
                 triggerMatchingService, expressionEvaluationService,
                 protocolDefinitionService, protocolInstanceService,
                 stepInstanceService, planDefinitionParser, auditService,
-                intelligenceActionEvaluator, meterRegistry);
+                intelligenceActionEvaluator, clinicalEventTimeExtractor, meterRegistry);
     }
 
     @Nested
@@ -79,7 +80,7 @@ class ComplianceEngineTest {
 
             verify(eventLogService).recordEvent(event, ProcessingStatus.DUPLICATE);
             verify(triggerMatchingService, never()).findStructuralMatches(any(), any());
-            verify(stepInstanceService, never()).completeStep(any(), any(), any());
+            verify(stepInstanceService, never()).completeStep(any(), any(), any(), any());
 
             assertEquals(1.0, meterRegistry.counter("cce.events.duplicate").count());
         }
@@ -136,7 +137,7 @@ class ComplianceEngineTest {
             engine.processInboundEvent(event);
 
             verify(protocolInstanceService).enrollPatient(eq("patient-1"), eq(protocolDef), any());
-            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(step), any());
             verify(eventLogService).updateStatus(eventLog, ProcessingStatus.MATCHED);
             assertEquals(1.0, meterRegistry.counter("cce.events.matched", "status", "matched").count());
@@ -190,8 +191,8 @@ class ComplianceEngineTest {
 
             engine.processInboundEvent(event);
 
-            verify(stepInstanceService).completeStep(eq(step1), eq(eventLog.getId()), eq(event.getSource()));
-            verify(stepInstanceService).completeStep(eq(step2), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(step1), eq(eventLog.getId()), eq(event.getSource()), any());
+            verify(stepInstanceService).completeStep(eq(step2), eq(eventLog.getId()), eq(event.getSource()), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(step1), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(step2), any());
             verify(eventLogService).updateStatus(eventLog, ProcessingStatus.MATCHED);
@@ -228,7 +229,7 @@ class ComplianceEngineTest {
 
             engine.processInboundEvent(event);
 
-            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(step), any());
             verify(eventLogService).updateStatus(eventLog, ProcessingStatus.MATCHED);
         }
@@ -259,7 +260,7 @@ class ComplianceEngineTest {
 
             engine.processInboundEvent(event);
 
-            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(step), any());
             verify(eventLogService).updateStatus(eventLog, ProcessingStatus.MATCHED);
             // Should NOT call tier matching
@@ -293,7 +294,7 @@ class ComplianceEngineTest {
 
             verify(stepInstanceService).createStep(eq(protocolInstance), eq("new-action"),
                     eq(0), any(), any(), any(), eq("must"));
-            verify(stepInstanceService).completeStep(eq(newStep), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(newStep), eq(eventLog.getId()), eq(event.getSource()), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(newStep), any());
         }
     }
@@ -328,7 +329,7 @@ class ComplianceEngineTest {
 
             // enrollPatient is called but returns existing instance (idempotent)
             verify(protocolInstanceService).enrollPatient(eq("patient-1"), eq(protocolDef), any());
-            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(step), eq(eventLog.getId()), eq(event.getSource()), any());
             verify(intelligenceActionEvaluator).evaluateOnCompletion(eq(step), any());
         }
     }
@@ -360,7 +361,7 @@ class ComplianceEngineTest {
 
             engine.processInboundEvent(event);
 
-            verify(stepInstanceService, never()).completeStep(any(), any(), any());
+            verify(stepInstanceService, never()).completeStep(any(), any(), any(), any());
             verify(eventLogService, never()).updateStatus(any(), eq(ProcessingStatus.MATCHED));
             assertEquals(1.0, meterRegistry.counter("cce.events.matched", "status", "zero_match").count());
         }
@@ -429,7 +430,7 @@ class ComplianceEngineTest {
 
             verify(stepInstanceService).createStep(eq(protocolInstance), eq("first-step"),
                     eq(0), any(), any(), any(), eq("must"));
-            verify(stepInstanceService).completeStep(eq(newStep), eq(eventLog.getId()), eq(event.getSource()));
+            verify(stepInstanceService).completeStep(eq(newStep), eq(eventLog.getId()), eq(event.getSource()), any());
         }
     }
 
