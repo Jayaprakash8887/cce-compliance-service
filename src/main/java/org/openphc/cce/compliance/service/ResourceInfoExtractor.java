@@ -1,6 +1,8 @@
 package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
+
+import org.hl7.fhir.r4.model.ResourceType;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -19,12 +21,12 @@ public class ResourceInfoExtractor {
      * @param data the event payload (JsonNode representation of FHIR resource)
      * @return the resourceType string, or null if not present
      */
-    public String extractResourceType(JsonNode data) {
+    public ResourceType extractResourceType(JsonNode data) {
         if (data == null || data.isNull()) {
             return null;
         }
         JsonNode resourceType = data.get("resourceType");
-        return resourceType != null && resourceType.isTextual() ? resourceType.asText() : null;
+        return resourceType != null && resourceType.isTextual() ? ResourceType.valueOf(resourceType.asText()) : null;
     }
 
     /**

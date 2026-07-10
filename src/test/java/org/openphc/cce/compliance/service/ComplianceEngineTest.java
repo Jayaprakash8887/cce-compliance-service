@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.hl7.fhir.r4.model.PlanDefinition;
+import org.hl7.fhir.r4.model.ResourceType;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
@@ -96,9 +97,9 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Observation);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
-            when(triggerMatchingService.findStructuralMatches(eq("Observation"), any())).thenReturn(List.of());
+            when(triggerMatchingService.findStructuralMatches(eq(ResourceType.Observation), any())).thenReturn(List.of());
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
 
             engine.processInboundEvent(event);
@@ -122,9 +123,9 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Observation);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
-            when(triggerMatchingService.findStructuralMatches(eq("Observation"), any()))
+            when(triggerMatchingService.findStructuralMatches(eq(ResourceType.Observation), any()))
                     .thenReturn(List.of(new MatchedStep(protocolDefId, "bp-check")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
@@ -162,9 +163,9 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Encounter");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Encounter);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
-            when(triggerMatchingService.findStructuralMatches(eq("Encounter"), any()))
+            when(triggerMatchingService.findStructuralMatches(eq(ResourceType.Encounter), any()))
                     .thenReturn(List.of(
                             new MatchedStep(protocolDefId1, "action-a"),
                             new MatchedStep(protocolDefId2, "action-b")));
@@ -213,7 +214,7 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Observation);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(any(), any())).thenReturn(List.of());
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of(
@@ -313,9 +314,9 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Observation);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
-            when(triggerMatchingService.findStructuralMatches(eq("Observation"), any()))
+            when(triggerMatchingService.findStructuralMatches(eq(ResourceType.Observation), any()))
                     .thenReturn(List.of(new MatchedStep(protocolDefId, "follow-up")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
@@ -346,9 +347,9 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Observation);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
-            when(triggerMatchingService.findStructuralMatches(eq("Observation"), any()))
+            when(triggerMatchingService.findStructuralMatches(eq(ResourceType.Observation), any()))
                     .thenReturn(List.of(new MatchedStep(protocolDefId, "conditional-action")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);
@@ -378,7 +379,7 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Observation");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Observation);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
             when(triggerMatchingService.findStructuralMatches(any(), any())).thenReturn(List.of());
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of(
@@ -406,9 +407,9 @@ class ComplianceEngineTest {
 
             when(eventLogService.isDuplicate(anyString(), anyString())).thenReturn(false);
             when(eventLogService.recordEvent(event, ProcessingStatus.ZERO_MATCH)).thenReturn(eventLog);
-            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn("Encounter");
+            when(resourceInfoExtractor.extractResourceType(event.getData())).thenReturn(ResourceType.Encounter);
             when(resourceInfoExtractor.extractCodes(event.getData())).thenReturn(List.of());
-            when(triggerMatchingService.findStructuralMatches(eq("Encounter"), any()))
+            when(triggerMatchingService.findStructuralMatches(eq(ResourceType.Encounter), any()))
                     .thenReturn(List.of(new MatchedStep(protocolDefId, "first-step")));
             when(triggerMatchingService.getConditionOnlyTriggers()).thenReturn(List.of());
             when(protocolDefinitionService.findById(protocolDefId)).thenReturn(protocolDef);

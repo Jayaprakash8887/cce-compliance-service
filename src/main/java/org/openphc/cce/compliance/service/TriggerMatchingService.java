@@ -1,5 +1,6 @@
 package org.openphc.cce.compliance.service;
 
+import org.hl7.fhir.r4.model.ResourceType;
 import org.openphc.cce.compliance.domain.repository.TriggerIndexRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,8 +41,8 @@ public class TriggerMatchingService {
      * @param codes        the coded values extracted from the event payload
      * @return list of matched (protocolDefinitionId, actionId) pairs
      */
-    public List<MatchedStep> findStructuralMatches(String resourceType, List<CodePathTriple> codes) {
-        if (resourceType == null || resourceType.isBlank()) {
+    public List<MatchedStep> findStructuralMatches(ResourceType resourceType, List<CodePathTriple> codes) {
+        if (resourceType == null) {
             return List.of();
         }
 

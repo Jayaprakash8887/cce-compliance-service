@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.hl7.fhir.r4.model.PlanDefinition;
+import org.hl7.fhir.r4.model.ResourceType;
 import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
@@ -113,7 +114,7 @@ public class ComplianceEngine {
 
         // Step 3: Extract resource info from payload
         JsonNode data = event.getData();
-        String resourceType = resourceInfoExtractor.extractResourceType(data);
+        ResourceType resourceType = resourceInfoExtractor.extractResourceType(data);
         List<CodePathTriple> codes = resourceInfoExtractor.extractCodes(data);
 
         // Step 4: Check for explicit match
@@ -179,7 +180,7 @@ public class ComplianceEngine {
                 event.getId(), actionId, protocolInstanceId);
     }
 
-    private List<MatchedStep> performTwoTierMatching(String resourceType, List<CodePathTriple> codes,
+    private List<MatchedStep> performTwoTierMatching(ResourceType resourceType, List<CodePathTriple> codes,
                                                        JsonNode eventData,
                                                        Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache) {
         List<MatchedStep> finalMatches = new ArrayList<>();
@@ -295,7 +296,7 @@ public class ComplianceEngine {
      */
     private OffsetDateTime resolveOccurredAt(CloudEventMessage event) {
         if (isFhir(event)) {
-            String resourceType = resourceInfoExtractor.extractResourceType(event.getData());
+            ResourceType resourceType = resourceInfoExtractor.extractResourceType(event.getData());
             OffsetDateTime clinical = clinicalEventTimeExtractor.extract(resourceType, event.getData());
             if (clinical != null) {
                 return clinical;

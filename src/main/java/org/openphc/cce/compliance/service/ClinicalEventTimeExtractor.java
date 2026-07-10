@@ -78,13 +78,13 @@ public class ClinicalEventTimeExtractor {
      * @return the clinical occurrence time, or {@code null} if it cannot be derived (unmapped type,
      * missing field, or unparseable value) — the caller should then fall back to the envelope time
      */
-    public OffsetDateTime extract(String resourceType, JsonNode data) {
+    public OffsetDateTime extract(ResourceType resourceType, JsonNode data) {
         if (resourceType == null || data == null || data.isNull()) {
             return null;
         }
         List<TimeCandidate> candidates = CANDIDATES.get(resourceType);
         if (candidates == null) {
-            meterRegistry.counter("cce.clinical_time.unmapped", "resourceType", resourceType).increment();
+            meterRegistry.counter("cce.clinical_time.unmapped", "resourceType", resourceType.toString()).increment();
             log.debug("No clinical-time mapping for resourceType={} — falling back to envelope time", resourceType);
             return null;
         }
@@ -103,7 +103,7 @@ public class ClinicalEventTimeExtractor {
      * ({@code 2026}, {@code 2026-03}, {@code 2026-03-15}) as well as full timestamps with offsets.
      * Returns {@code null} (and meters) for unparseable values rather than throwing.
      */
-    private OffsetDateTime parseFhirDate(String resourceType, String raw) {
+    private OffsetDateTime parseFhirDate(ResourceType resourceType, String raw) {
         if (raw == null || raw.isBlank()) {
             return null;
         }
@@ -111,7 +111,7 @@ public class ClinicalEventTimeExtractor {
             Date value = new DateTimeType(raw).getValue();
             return value == null ? null : value.toInstant().atOffset(ZoneOffset.UTC);
         } catch (Exception e) {
-            meterRegistry.counter("cce.clinical_time.unparseable", "resourceType", resourceType).increment();
+            meterRegistry.counter("cce.clinical_time.unparseable", "resourceType", resourceType.toString()).increment();
             log.warn("Unparseable clinical date '{}' on resourceType={} — falling back", raw, resourceType);
             return null;
         }
