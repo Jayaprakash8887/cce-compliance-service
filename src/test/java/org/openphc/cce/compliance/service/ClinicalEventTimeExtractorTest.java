@@ -3,6 +3,8 @@ package org.openphc.cce.compliance.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
+import org.hl7.fhir.r4.model.ResourceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -41,7 +43,7 @@ class ClinicalEventTimeExtractorTest {
                     { "resourceType": "Observation", "effectiveDateTime": "2026-03-15T09:00:00Z" }
                     """);
             assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 0, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Observation", data));
+                    extractor.extract(ResourceType.Observation, data));
         }
 
         @Test
@@ -51,7 +53,7 @@ class ClinicalEventTimeExtractorTest {
                       "effectivePeriod": { "start": "2026-03-15T08:00:00Z", "end": "2026-03-15T10:00:00Z" } }
                     """);
             assertEquals(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Observation", data));
+                    extractor.extract(ResourceType.Observation, data));
         }
 
         @Test
@@ -62,7 +64,7 @@ class ClinicalEventTimeExtractorTest {
                       "issued": "2026-03-20T00:00:00Z" }
                     """);
             assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 0, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Observation", data));
+                    extractor.extract(ResourceType.Observation, data));
         }
 
         @Test
@@ -71,7 +73,7 @@ class ClinicalEventTimeExtractorTest {
                     { "resourceType": "Observation", "issued": "2026-03-20T12:00:00Z" }
                     """);
             assertEquals(OffsetDateTime.of(2026, 3, 20, 12, 0, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Observation", data));
+                    extractor.extract(ResourceType.Observation, data));
         }
 
         @Test
@@ -81,7 +83,7 @@ class ClinicalEventTimeExtractorTest {
                       "period": { "start": "2026-03-15T08:00:00Z", "end": "2026-03-15T09:30:00Z" } }
                     """);
             assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 30, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Encounter", data));
+                    extractor.extract(ResourceType.Encounter, data));
         }
 
         @Test
@@ -90,7 +92,7 @@ class ClinicalEventTimeExtractorTest {
                     { "resourceType": "Encounter", "period": { "start": "2026-03-15T08:00:00Z" } }
                     """);
             assertEquals(OffsetDateTime.of(2026, 3, 15, 8, 0, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Encounter", data));
+                    extractor.extract(ResourceType.Encounter, data));
         }
 
         @Test
@@ -99,7 +101,7 @@ class ClinicalEventTimeExtractorTest {
                     { "resourceType": "Immunization", "occurrenceDateTime": "2026-01-02T00:00:00Z" }
                     """);
             assertEquals(OffsetDateTime.of(2026, 1, 2, 0, 0, 0, 0, ZoneOffset.UTC),
-                    extractor.extract("Immunization", data));
+                    extractor.extract(ResourceType.Immunization, data));
         }
     }
 
@@ -113,7 +115,7 @@ class ClinicalEventTimeExtractorTest {
             JsonNode data = json("""
                     { "resourceType": "Observation", "effectiveDateTime": "2026-03" }
                     """);
-            assertNotNull(extractor.extract("Observation", data));
+            assertNotNull(extractor.extract(ResourceType.Observation, data));
         }
     }
 
@@ -125,7 +127,7 @@ class ClinicalEventTimeExtractorTest {
             JsonNode data = json("""
                     { "resourceType": "CarePlan", "created": "2026-03-15T09:00:00Z" }
                     """);
-            assertNull(extractor.extract("CarePlan", data));
+            assertNull(extractor.extract(ResourceType.CarePlan, data));
             assertEquals(1.0, meterRegistry.counter("cce.clinical_time.unmapped",
                     "resourceType", "CarePlan").count());
         }
@@ -135,7 +137,7 @@ class ClinicalEventTimeExtractorTest {
             JsonNode data = json("""
                     { "resourceType": "Observation", "status": "final" }
                     """);
-            assertNull(extractor.extract("Observation", data));
+            assertNull(extractor.extract(ResourceType.Observation, data));
         }
 
         @Test
@@ -143,7 +145,7 @@ class ClinicalEventTimeExtractorTest {
             JsonNode data = json("""
                     { "resourceType": "Observation", "effectiveDateTime": "not-a-date" }
                     """);
-            assertNull(extractor.extract("Observation", data));
+            assertNull(extractor.extract(ResourceType.Observation, data));
             assertEquals(1.0, meterRegistry.counter("cce.clinical_time.unparseable",
                     "resourceType", "Observation").count());
         }
@@ -155,7 +157,7 @@ class ClinicalEventTimeExtractorTest {
 
         @Test
         void nullData_returnsNull() {
-            assertNull(extractor.extract("Observation", null));
+            assertNull(extractor.extract(ResourceType.Observation, null));
         }
     }
 }
