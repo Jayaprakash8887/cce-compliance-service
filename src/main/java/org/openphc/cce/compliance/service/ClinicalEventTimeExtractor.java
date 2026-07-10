@@ -3,6 +3,7 @@ package org.openphc.cce.compliance.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.hl7.fhir.r4.model.DateTimeType;
+import org.hl7.fhir.r4.model.ResourceType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -44,22 +45,22 @@ public class ClinicalEventTimeExtractor {
      * finished" semantics; {@code end} is preferred, with {@code start} as a secondary candidate.
      */
     private static final Map<String, List<TimeCandidate>> CANDIDATES = Map.of(
-            "Observation", List.of(
+            ResourceType.Observation.toString(), List.of(
                     field("effectiveDateTime"), field("effectiveInstant"),
                     periodEnd("effectivePeriod"), periodStart("effectivePeriod"), field("issued")),
-            "Encounter", List.of(
+            ResourceType.Encounter.toString(), List.of(
                     periodEnd("period"), periodStart("period")),
-            "Procedure", List.of(
+            ResourceType.Procedure.toString(), List.of(
                     field("performedDateTime"), periodEnd("performedPeriod"), periodStart("performedPeriod")),
-            "Immunization", List.of(
+            ResourceType.Immunization.toString(), List.of(
                     field("occurrenceDateTime")),
-            "MedicationAdministration", List.of(
+            ResourceType.MedicationAdministration.toString(), List.of(
                     field("effectiveDateTime"), periodEnd("effectivePeriod"), periodStart("effectivePeriod")),
-            "Condition", List.of(
+            ResourceType.Condition.toString(), List.of(
                     field("onsetDateTime"), periodStart("onsetPeriod"), field("recordedDate")),
-            "ServiceRequest", List.of(
+            ResourceType.ServiceRequest.toString(), List.of(
                     field("occurrenceDateTime"), periodEnd("occurrencePeriod"), field("authoredOn")),
-            "DiagnosticReport", List.of(
+            ResourceType.DiagnosticReport.toString(), List.of(
                     field("effectiveDateTime"), periodEnd("effectivePeriod"), field("issued"))
     );
 
