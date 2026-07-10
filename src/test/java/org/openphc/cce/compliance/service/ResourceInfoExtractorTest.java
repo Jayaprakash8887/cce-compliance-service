@@ -2,6 +2,8 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.hl7.fhir.r4.model.ResourceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -29,13 +31,13 @@ class ResourceInfoExtractorTest {
     @Test
     void extractResourceType_encounter() {
         JsonNode data = toJsonNode(Map.of("resourceType", "Encounter"));
-        assertEquals("Encounter", extractor.extractResourceType(data));
+        assertEquals(ResourceType.Encounter, extractor.extractResourceType(data));
     }
 
     @Test
     void extractResourceType_observation() {
         JsonNode data = toJsonNode(Map.of("resourceType", "Observation"));
-        assertEquals("Observation", extractor.extractResourceType(data));
+        assertEquals(ResourceType.Observation, extractor.extractResourceType(data));
     }
 
     @Test

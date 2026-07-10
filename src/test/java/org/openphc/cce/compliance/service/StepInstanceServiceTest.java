@@ -111,7 +111,7 @@ class StepInstanceServiceTest {
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
             UUID eventId = UUID.randomUUID();
-            service.completeStep(step, eventId, "test-source");
+            service.completeStep(step, eventId, "test-source", null);
 
             assertEquals(StepState.COMPLETED, step.getState());
             assertNotNull(step.getCompletedAt());
@@ -135,7 +135,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
-            service.completeStep(step, UUID.randomUUID(), "test-source");
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
 
             assertEquals(StepState.COMPLETED, step.getState());
             assertEquals(CompletionStatus.ON_TIME, step.getCompletionStatus());
@@ -150,7 +150,7 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
             lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
 
-            service.completeStep(step, UUID.randomUUID(), "test-source");
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
 
             assertEquals(StepState.COMPLETED, step.getState());
             assertEquals(CompletionStatus.LATE, step.getCompletionStatus());
@@ -161,7 +161,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.COMPLETED, null, null);
 
             assertThrows(IllegalStateException.class,
-                    () -> service.completeStep(step, UUID.randomUUID(), "src"));
+                    () -> service.completeStep(step, UUID.randomUUID(), "src", null));
         }
 
         @Test
@@ -169,7 +169,7 @@ class StepInstanceServiceTest {
             StepInstance step = buildStep(StepState.MISSED, null, null);
 
             assertThrows(IllegalStateException.class,
-                    () -> service.completeStep(step, UUID.randomUUID(), "src"));
+                    () -> service.completeStep(step, UUID.randomUUID(), "src", null));
         }
     }
 
@@ -204,7 +204,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), null, 3, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(step, UUID.randomUUID(), "test-source");
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
 
             // Verify: the completed step + the dependent step
             ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
@@ -252,7 +252,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), null, 3, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(step, UUID.randomUUID(), "test-source");
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
 
             ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
             verify(stepInstanceRepository, atLeast(2)).save(captor.capture());
@@ -299,7 +299,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), timing, 3, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(step, UUID.randomUUID(), "test-source");
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
 
             ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
             verify(stepInstanceRepository, atLeast(4)).save(captor.capture());
@@ -363,7 +363,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), null, 3, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(step, UUID.randomUUID(), "test-source");
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
 
             ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
             verify(stepInstanceRepository, atLeastOnce()).save(captor.capture());
@@ -618,7 +618,7 @@ class StepInstanceServiceTest {
             when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src", null);
 
             assertEquals(StepState.SKIPPED, optionalStep.getState());
             // The auto-skip transition of the ancestor optional step is recorded in append-only history.
@@ -669,7 +669,7 @@ class StepInstanceServiceTest {
             when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src", null);
 
             // pregnancy-profile should NOT be skipped — it's a parallel sibling, not an ancestor
             assertEquals(StepState.PENDING, parallelSibling.getState());
@@ -707,7 +707,7 @@ class StepInstanceServiceTest {
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src", null);
 
             assertEquals(StepState.DUE, mustStep.getState());
         }
@@ -744,7 +744,7 @@ class StepInstanceServiceTest {
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of());
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-src");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-src", null);
 
             assertEquals(StepState.COMPLETED, completedOptional.getState());
         }
@@ -887,7 +887,7 @@ class StepInstanceServiceTest {
             when(deviationService.createDeviation(any(), eq(DeviationType.ORDER_VIOLATION), any()))
                     .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
 
             verify(deviationService).createDeviation(
                     eq(completedStep), eq(DeviationType.ORDER_VIOLATION),
@@ -941,7 +941,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), null, 1, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
 
             verify(deviationService, never()).createDeviation(
                     any(), eq(DeviationType.ORDER_VIOLATION), any());
@@ -990,7 +990,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), null, 1, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
 
             verify(deviationService, never()).createDeviation(
                     any(), eq(DeviationType.ORDER_VIOLATION), any());
@@ -1030,7 +1030,7 @@ class StepInstanceServiceTest {
                             List.of(), List.of(), null, 1, "must", List.of()));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
-            service.completeStep(completedStep, UUID.randomUUID(), "test-source");
+            service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
 
             verify(deviationService, never()).createDeviation(
                     any(), eq(DeviationType.ORDER_VIOLATION), any());

@@ -1,5 +1,6 @@
 package org.openphc.cce.compliance.service;
 
+import org.hl7.fhir.r4.model.ResourceType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -39,13 +40,13 @@ class TriggerMatchingServiceTest {
             UUID protDefId = UUID.randomUUID();
             String actionId = "blood-pressure-check";
 
-            when(triggerIndexRepository.findStructuralMatches(eq("Observation"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Observation), anyList()))
                     .thenReturn(List.<Object[]>of(new Object[]{protDefId, actionId}));
 
             List<CodePathTriple> codes = List.of(
                     new CodePathTriple("code", "http://loinc.org", "85354-9")
             );
-            List<MatchedStep> matches = service.findStructuralMatches("Observation", codes);
+            List<MatchedStep> matches = service.findStructuralMatches(ResourceType.Observation, codes);
 
             assertEquals(1, matches.size());
             assertEquals(protDefId, matches.get(0).protocolDefinitionId());
@@ -57,14 +58,14 @@ class TriggerMatchingServiceTest {
             UUID protDefId = UUID.randomUUID();
             String actionId = "lab-work";
 
-            when(triggerIndexRepository.findStructuralMatches(eq("Observation"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Observation), anyList()))
                     .thenReturn(List.<Object[]>of(new Object[]{protDefId, actionId}));
 
             List<CodePathTriple> codes = List.of(
                     new CodePathTriple("code", "http://loinc.org", "85354-9"),
                     new CodePathTriple("category", "http://terminology.hl7.org/CodeSystem/observation-category", "laboratory")
             );
-            List<MatchedStep> matches = service.findStructuralMatches("Observation", codes);
+            List<MatchedStep> matches = service.findStructuralMatches(ResourceType.Observation, codes);
 
             assertEquals(1, matches.size());
             assertEquals(actionId, matches.get(0).actionId());
@@ -72,13 +73,13 @@ class TriggerMatchingServiceTest {
 
         @Test
         void noMatch_returnsEmptyList() {
-            when(triggerIndexRepository.findStructuralMatches(eq("Observation"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Observation), anyList()))
                     .thenReturn(List.of());
 
             List<CodePathTriple> codes = List.of(
                     new CodePathTriple("code", "http://unknown.org", "unknown")
             );
-            List<MatchedStep> matches = service.findStructuralMatches("Observation", codes);
+            List<MatchedStep> matches = service.findStructuralMatches(ResourceType.Observation, codes);
 
             assertTrue(matches.isEmpty());
         }
@@ -92,21 +93,21 @@ class TriggerMatchingServiceTest {
 
         @Test
         void blankResourceType_returnsEmptyList() {
-            List<MatchedStep> matches = service.findStructuralMatches("  ", List.of());
+            List<MatchedStep> matches = service.findStructuralMatches(null, List.of());
             assertTrue(matches.isEmpty());
             verifyNoInteractions(triggerIndexRepository);
         }
 
         @Test
         void emptyCodesList_includesEmptyTriple() {
-            when(triggerIndexRepository.findStructuralMatches(eq("Encounter"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Encounter), anyList()))
                     .thenReturn(List.of());
 
-            service.findStructuralMatches("Encounter", List.of());
+            service.findStructuralMatches(ResourceType.Encounter, List.of());
 
             @SuppressWarnings("unchecked")
             ArgumentCaptor<List<String>> triplesCaptor = ArgumentCaptor.forClass(List.class);
-            verify(triggerIndexRepository).findStructuralMatches(eq("Encounter"), triplesCaptor.capture());
+            verify(triggerIndexRepository).findStructuralMatches(eq(ResourceType.Encounter), triplesCaptor.capture());
 
             List<String> triples = triplesCaptor.getValue();
             assertTrue(triples.contains("||"), "Should include empty triple for F1 matching");
@@ -114,17 +115,17 @@ class TriggerMatchingServiceTest {
 
         @Test
         void alwaysIncludesEmptyTriple_forResourceTypeOnlyMatching() {
-            when(triggerIndexRepository.findStructuralMatches(eq("Observation"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Observation), anyList()))
                     .thenReturn(List.of());
 
             List<CodePathTriple> codes = List.of(
                     new CodePathTriple("code", "http://loinc.org", "85354-9")
             );
-            service.findStructuralMatches("Observation", codes);
+            service.findStructuralMatches(ResourceType.Observation, codes);
 
             @SuppressWarnings("unchecked")
             ArgumentCaptor<List<String>> triplesCaptor = ArgumentCaptor.forClass(List.class);
-            verify(triggerIndexRepository).findStructuralMatches(eq("Observation"), triplesCaptor.capture());
+            verify(triggerIndexRepository).findStructuralMatches(eq(ResourceType.Observation), triplesCaptor.capture());
 
             List<String> triples = triplesCaptor.getValue();
             assertEquals(2, triples.size());
@@ -137,13 +138,13 @@ class TriggerMatchingServiceTest {
             UUID protDefId1 = UUID.randomUUID();
             UUID protDefId2 = UUID.randomUUID();
 
-            when(triggerIndexRepository.findStructuralMatches(eq("Encounter"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Encounter), anyList()))
                     .thenReturn(List.of(
                             new Object[]{protDefId1, "action-a"},
                             new Object[]{protDefId2, "action-b"}
                     ));
 
-            List<MatchedStep> matches = service.findStructuralMatches("Encounter",
+            List<MatchedStep> matches = service.findStructuralMatches(ResourceType.Encounter,
                     List.of(new CodePathTriple("type", "http://snomed.info/sct", "11429006")));
 
             assertEquals(2, matches.size());
@@ -153,7 +154,7 @@ class TriggerMatchingServiceTest {
         void samePathDifferentSystems_passesDistinctTriples() {
             // RMNCH pattern: two codeFilters on path "identifier" with different systems
             // e.g., encounter-type=ANC AND visit-count=1
-            when(triggerIndexRepository.findStructuralMatches(eq("Encounter"), anyList()))
+            when(triggerIndexRepository.findStructuralMatches(eq(ResourceType.Encounter), anyList()))
                     .thenReturn(List.of());
 
             List<CodePathTriple> codes = List.of(
@@ -162,11 +163,11 @@ class TriggerMatchingServiceTest {
                     new CodePathTriple("identifier", "http://mdtlabs.com/type", "assessment"),
                     new CodePathTriple("identifier", "http://mdtlabs.com/village-id", "312")
             );
-            service.findStructuralMatches("Encounter", codes);
+            service.findStructuralMatches(ResourceType.Encounter, codes);
 
             @SuppressWarnings("unchecked")
             ArgumentCaptor<List<String>> triplesCaptor = ArgumentCaptor.forClass(List.class);
-            verify(triggerIndexRepository).findStructuralMatches(eq("Encounter"), triplesCaptor.capture());
+            verify(triggerIndexRepository).findStructuralMatches(eq(ResourceType.Encounter), triplesCaptor.capture());
 
             List<String> triples = triplesCaptor.getValue();
             assertEquals(5, triples.size()); // 4 identifiers + 1 empty F1 triple

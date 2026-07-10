@@ -1,5 +1,6 @@
 package org.openphc.cce.compliance.domain.repository;
 
+import org.hl7.fhir.r4.model.ResourceType;
 import org.openphc.cce.compliance.domain.entity.TriggerIndex;
 import org.openphc.cce.compliance.domain.entity.TriggerIndexId;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -29,7 +30,7 @@ public interface TriggerIndexRepository extends JpaRepository<TriggerIndex, Trig
             )
             """)
     List<Object[]> findStructuralMatches(
-            @Param("resourceType") String resourceType,
+            @Param("resourceType") ResourceType resourceType,
             @Param("codeTriples") List<String> codeTriples);
 
     @Modifying

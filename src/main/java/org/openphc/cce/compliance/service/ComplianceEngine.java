@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 import org.hl7.fhir.r4.model.PlanDefinition;
+import org.hl7.fhir.r4.model.ResourceType;
 import org.openphc.cce.compliance.domain.entity.ComplianceEventLog;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
@@ -47,6 +48,7 @@ public class ComplianceEngine {
     private final PlanDefinitionParser planDefinitionParser;
     private final AuditService auditService;
     private final IntelligenceActionEvaluator intelligenceActionEvaluator;
+    private final ClinicalEventTimeExtractor clinicalEventTimeExtractor;
 
     private final Counter eventsProcessedCounter;
     private final Counter eventsMatchedCounter;
@@ -65,6 +67,7 @@ public class ComplianceEngine {
                             PlanDefinitionParser planDefinitionParser,
                             AuditService auditService,
                             IntelligenceActionEvaluator intelligenceActionEvaluator,
+                            ClinicalEventTimeExtractor clinicalEventTimeExtractor,
                             MeterRegistry meterRegistry) {
         this.eventLogService = eventLogService;
         this.resourceInfoExtractor = resourceInfoExtractor;
@@ -76,6 +79,7 @@ public class ComplianceEngine {
         this.planDefinitionParser = planDefinitionParser;
         this.auditService = auditService;
         this.intelligenceActionEvaluator = intelligenceActionEvaluator;
+        this.clinicalEventTimeExtractor = clinicalEventTimeExtractor;
 
         this.eventsProcessedCounter = meterRegistry.counter("cce.events.processed");
         this.eventsMatchedCounter = Counter.builder("cce.events.matched")
@@ -110,7 +114,7 @@ public class ComplianceEngine {
 
         // Step 3: Extract resource info from payload
         JsonNode data = event.getData();
-        String resourceType = resourceInfoExtractor.extractResourceType(data);
+        ResourceType resourceType = resourceInfoExtractor.extractResourceType(data);
         List<CodePathTriple> codes = resourceInfoExtractor.extractCodes(data);
 
         // Step 4: Check for explicit match
@@ -164,7 +168,7 @@ public class ComplianceEngine {
             step = createInitialStep(protocolInstance, actionId, stepCache);
         }
 
-        stepInstanceService.completeStep(step, eventLog.getId(), event.getSource());
+        stepInstanceService.completeStep(step, eventLog.getId(), event.getSource(), resolveOccurredAt(event));
 
         // Evaluate intelligence actions after step completion
         intelligenceActionEvaluator.evaluateOnCompletion(step, event.getData());
@@ -176,7 +180,7 @@ public class ComplianceEngine {
                 event.getId(), actionId, protocolInstanceId);
     }
 
-    private List<MatchedStep> performTwoTierMatching(String resourceType, List<CodePathTriple> codes,
+    private List<MatchedStep> performTwoTierMatching(ResourceType resourceType, List<CodePathTriple> codes,
                                                        JsonNode eventData,
                                                        Map<UUID, List<PlanDefinitionParser.StepMetadata>> stepCache) {
         List<MatchedStep> finalMatches = new ArrayList<>();
@@ -265,7 +269,7 @@ public class ComplianceEngine {
         }
 
         // Complete the step
-        stepInstanceService.completeStep(step, eventLog.getId(), event.getSource());
+        stepInstanceService.completeStep(step, eventLog.getId(), event.getSource(), resolveOccurredAt(event));
 
         // Evaluate intelligence actions after step completion
         intelligenceActionEvaluator.evaluateOnCompletion(step, event.getData());
@@ -276,6 +280,38 @@ public class ComplianceEngine {
                         "actionId", actionId,
                         "protocolInstanceId", protocolInstance.getId().toString(),
                         "patientId", patientId));
+    }
+
+    /**
+     * Resolve the clinical occurrence time to attribute a completion to. Precedence:
+     * <ol>
+     *   <li>Clinical time extracted from the FHIR payload (when the datacontenttype is FHIR and a
+     *       clinical field is present) — the real-world time the act happened;</li>
+     *   <li>the CloudEvent envelope {@code time} — the emitter-adaptor's transmission clock, which
+     *       is stable across retries/DLQ replay and closer to the event than our processing time;</li>
+     *   <li>{@code now()} — defensive last resort (the envelope time is expected to always be present).</li>
+     * </ol>
+     * Non-FHIR ({@code application/json}) payloads skip extraction and use the envelope time directly.
+     * completeStep clamps the result to now(), so a bad/future source clock cannot push schedules out.
+     */
+    private OffsetDateTime resolveOccurredAt(CloudEventMessage event) {
+        if (isFhir(event)) {
+            ResourceType resourceType = resourceInfoExtractor.extractResourceType(event.getData());
+            OffsetDateTime clinical = clinicalEventTimeExtractor.extract(resourceType, event.getData());
+            if (clinical != null) {
+                return clinical;
+            }
+        }
+        return event.getTime() != null ? event.getTime() : OffsetDateTime.now(ZoneOffset.UTC);
+    }
+
+    /**
+     * Whether the payload is FHIR (and thus a candidate for clinical-time extraction). The Collector
+     * defaults to {@code application/fhir+json}, so a null/absent content type is treated as FHIR.
+     */
+    private boolean isFhir(CloudEventMessage event) {
+        String contentType = event.getDatacontenttype();
+        return contentType == null || contentType.toLowerCase().contains("fhir");
     }
 
     private StepInstance createInitialStep(ProtocolInstance protocolInstance, String actionId,

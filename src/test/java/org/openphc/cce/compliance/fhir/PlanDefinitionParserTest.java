@@ -3,6 +3,7 @@ package org.openphc.cce.compliance.fhir;
 import ca.uhn.fhir.context.FhirContext;
 import ca.uhn.fhir.parser.DataFormatException;
 import org.hl7.fhir.r4.model.PlanDefinition;
+import org.hl7.fhir.r4.model.ResourceType;
 import org.hl7.fhir.r4.model.TriggerDefinition;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -153,7 +154,7 @@ class PlanDefinitionParserTest {
         TriggerIndex typeEntry = enrollmentEntries.stream()
                 .filter(e -> "type".equals(e.getPath()))
                 .findFirst().orElseThrow();
-        assertEquals("Encounter", typeEntry.getResourceType());
+        assertEquals(ResourceType.Encounter, typeEntry.getResourceType());
         assertEquals("http://openphc.org/encounter-types", typeEntry.getCodeSystem());
         assertEquals("anc-visit", typeEntry.getCodeValue());
         assertEquals(protocolDefId, typeEntry.getProtocolDefinitionId());
@@ -193,7 +194,7 @@ class PlanDefinitionParserTest {
                 .filter(e -> "any-encounter-log".equals(e.getActionId()))
                 .toList();
         assertEquals(1, anyEncounter.size());
-        assertEquals("Encounter", anyEncounter.get(0).getResourceType());
+        assertEquals(ResourceType.Encounter, anyEncounter.get(0).getResourceType());
         assertEquals("", anyEncounter.get(0).getPath());
         assertEquals("", anyEncounter.get(0).getCodeSystem());
         assertEquals("", anyEncounter.get(0).getCodeValue());

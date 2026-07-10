@@ -97,9 +97,11 @@ sequenceDiagram
                 DB-->>ProtoInst: ProtocolInstance
                 ProtoInst-->>Engine: protocolInstance
 
+                Engine->>Engine: resolveOccurredAt(event)<br/>(clinical time from payload → envelope time → now)
                 Engine->>StepInst: createStep(protocol, actionId, ...)
                 StepInst->>DB: INSERT INTO step_instance
-                Engine->>StepInst: completeStep(stepId, eventLogId, source)
+                Engine->>StepInst: completeStep(stepId, eventLogId, source, occurredAt)
+                Note over StepInst: completed_at = clinical occurrence time (clamped to now)
                 StepInst->>DB: UPDATE step_instance SET state=COMPLETED
 
                 Note over Engine,DB: Progressive Step Instantiation
@@ -107,7 +109,7 @@ sequenceDiagram
                 Parser-->>Engine: dependent actions
                 loop For each dependent action
                     Engine->>Parser: computeRelatedActionOffset(action, actionId)
-                    Note over StepInst: Relationship determines base time:<br/>after-end → completedAt, after-start → dueDate
+                    Note over StepInst: Relationship determines base time:<br/>after-end → completedAt (clinical), after-start → dueDate
                     Note over StepInst: If TimingInfo.count > 1 → create N recurring<br/>instances with staggered due dates
                     Engine->>StepInst: createDependentSteps(protocol, depAction, base, offset)
                     StepInst->>DB: INSERT INTO step_instance(s) (state=PENDING)
@@ -268,7 +270,7 @@ flowchart TD
     N --> P
     O --> P
 
-    P --> Q{"Determine<br/>CompletionStatus"}
+    P --> Q{"Determine CompletionStatus<br/>(completedAt = clinical occurrence time)"}
     Q -->|"completedAt < dueDate"| R["EARLY"]
     Q -->|"dueDate ≤ completedAt ≤ overdueDate"| S["ON_TIME"]
     Q -->|"completedAt > overdueDate"| T["LATE"]
@@ -518,7 +520,7 @@ When any step completes, `createDependentSteps()` finds all steps whose `related
 flowchart TD
     START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → completedStep.actionId"]
     FIND --> LOOP{"For each dependent step"}
-    LOOP --> CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt, after-start → dueDate)"]
+    LOOP --> CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
     CALC --> RECURRING{"TimingInfo.count > 1?"}
 
     RECURRING -->|"Yes"| MULTI["Create N recurring instances with staggered due dates"]

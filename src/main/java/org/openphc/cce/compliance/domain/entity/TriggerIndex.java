@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.domain.entity;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hl7.fhir.r4.model.ResourceType;
 
 import java.util.UUID;
 
@@ -21,7 +22,7 @@ public class TriggerIndex {
     @JoinColumn(name = "protocol_definition_id", insertable = false, updatable = false)
     private ProtocolDefinition protocolDefinition;
 
-    public String getResourceType() {
+    public ResourceType getResourceType() {
         return id != null ? id.getResourceType() : null;
     }
 
