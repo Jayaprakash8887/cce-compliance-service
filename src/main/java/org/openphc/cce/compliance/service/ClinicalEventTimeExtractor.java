@@ -44,23 +44,23 @@ public class ClinicalEventTimeExtractor {
      * a parseable value wins. For {@code Period} fields the bound (end/start) reflects "when it
      * finished" semantics; {@code end} is preferred, with {@code start} as a secondary candidate.
      */
-    private static final Map<String, List<TimeCandidate>> CANDIDATES = Map.of(
-            ResourceType.Observation.toString(), List.of(
+    private static final Map<ResourceType, List<TimeCandidate>> CANDIDATES = Map.of(
+            ResourceType.Observation, List.of(
                     field("effectiveDateTime"), field("effectiveInstant"),
                     periodEnd("effectivePeriod"), periodStart("effectivePeriod"), field("issued")),
-            ResourceType.Encounter.toString(), List.of(
+            ResourceType.Encounter, List.of(
                     periodEnd("period"), periodStart("period")),
-            ResourceType.Procedure.toString(), List.of(
+            ResourceType.Procedure, List.of(
                     field("performedDateTime"), periodEnd("performedPeriod"), periodStart("performedPeriod")),
-            ResourceType.Immunization.toString(), List.of(
+            ResourceType.Immunization, List.of(
                     field("occurrenceDateTime")),
-            ResourceType.MedicationAdministration.toString(), List.of(
+            ResourceType.MedicationAdministration, List.of(
                     field("effectiveDateTime"), periodEnd("effectivePeriod"), periodStart("effectivePeriod")),
-            ResourceType.Condition.toString(), List.of(
+            ResourceType.Condition, List.of(
                     field("onsetDateTime"), periodStart("onsetPeriod"), field("recordedDate")),
-            ResourceType.ServiceRequest.toString(), List.of(
+            ResourceType.ServiceRequest, List.of(
                     field("occurrenceDateTime"), periodEnd("occurrencePeriod"), field("authoredOn")),
-            ResourceType.DiagnosticReport.toString(), List.of(
+            ResourceType.DiagnosticReport, List.of(
                     field("effectiveDateTime"), periodEnd("effectivePeriod"), field("issued"))
     );
 
