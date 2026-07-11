@@ -103,6 +103,53 @@ class ClinicalEventTimeExtractorTest {
             assertEquals(OffsetDateTime.of(2026, 1, 2, 0, 0, 0, 0, ZoneOffset.UTC),
                     extractor.extract(ResourceType.Immunization, data));
         }
+
+        @Test
+        void medicationRequest_authoredOn() {
+            JsonNode data = json("""
+                    { "resourceType": "MedicationRequest", "authoredOn": "2026-03-15T09:00:00Z" }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.MedicationRequest, data));
+        }
+
+        @Test
+        void medicationDispense_prefersWhenHandedOver() {
+            JsonNode data = json("""
+                    { "resourceType": "MedicationDispense",
+                      "whenPrepared": "2026-03-15T08:00:00Z", "whenHandedOver": "2026-03-15T11:00:00Z" }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 11, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.MedicationDispense, data));
+        }
+
+        @Test
+        void medicationDispense_fallsBackToWhenPrepared() {
+            JsonNode data = json("""
+                    { "resourceType": "MedicationDispense", "whenPrepared": "2026-03-15T08:00:00Z" }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 8, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.MedicationDispense, data));
+        }
+
+        @Test
+        void consent_dateTime() {
+            JsonNode data = json("""
+                    { "resourceType": "Consent", "dateTime": "2026-03-15T09:00:00Z" }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.Consent, data));
+        }
+
+        @Test
+        void allergyIntolerance_prefersOnsetOverRecordedDate() {
+            JsonNode data = json("""
+                    { "resourceType": "AllergyIntolerance",
+                      "onsetDateTime": "2026-03-10T00:00:00Z", "recordedDate": "2026-03-15T00:00:00Z" }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 10, 0, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.AllergyIntolerance, data));
+        }
     }
 
     @Nested

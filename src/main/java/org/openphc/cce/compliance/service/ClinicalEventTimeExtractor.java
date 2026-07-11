@@ -44,24 +44,32 @@ public class ClinicalEventTimeExtractor {
      * a parseable value wins. For {@code Period} fields the bound (end/start) reflects "when it
      * finished" semantics; {@code end} is preferred, with {@code start} as a secondary candidate.
      */
-    private static final Map<ResourceType, List<TimeCandidate>> CANDIDATES = Map.of(
-            ResourceType.Observation, List.of(
+    private static final Map<ResourceType, List<TimeCandidate>> CANDIDATES = Map.ofEntries(
+            Map.entry(ResourceType.Observation, List.of(
                     field("effectiveDateTime"), field("effectiveInstant"),
-                    periodEnd("effectivePeriod"), periodStart("effectivePeriod"), field("issued")),
-            ResourceType.Encounter, List.of(
-                    periodEnd("period"), periodStart("period")),
-            ResourceType.Procedure, List.of(
-                    field("performedDateTime"), periodEnd("performedPeriod"), periodStart("performedPeriod")),
-            ResourceType.Immunization, List.of(
-                    field("occurrenceDateTime")),
-            ResourceType.MedicationAdministration, List.of(
-                    field("effectiveDateTime"), periodEnd("effectivePeriod"), periodStart("effectivePeriod")),
-            ResourceType.Condition, List.of(
-                    field("onsetDateTime"), periodStart("onsetPeriod"), field("recordedDate")),
-            ResourceType.ServiceRequest, List.of(
-                    field("occurrenceDateTime"), periodEnd("occurrencePeriod"), field("authoredOn")),
-            ResourceType.DiagnosticReport, List.of(
-                    field("effectiveDateTime"), periodEnd("effectivePeriod"), field("issued"))
+                    periodEnd("effectivePeriod"), periodStart("effectivePeriod"), field("issued"))),
+            Map.entry(ResourceType.Encounter, List.of(
+                    periodEnd("period"), periodStart("period"))),
+            Map.entry(ResourceType.Procedure, List.of(
+                    field("performedDateTime"), periodEnd("performedPeriod"), periodStart("performedPeriod"))),
+            Map.entry(ResourceType.Immunization, List.of(
+                    field("occurrenceDateTime"))),
+            Map.entry(ResourceType.MedicationAdministration, List.of(
+                    field("effectiveDateTime"), periodEnd("effectivePeriod"), periodStart("effectivePeriod"))),
+            Map.entry(ResourceType.MedicationDispense, List.of(
+                    field("whenHandedOver"), field("whenPrepared"))),
+            Map.entry(ResourceType.MedicationRequest, List.of(
+                    field("authoredOn"))),
+            Map.entry(ResourceType.Condition, List.of(
+                    field("onsetDateTime"), periodStart("onsetPeriod"), field("recordedDate"))),
+            Map.entry(ResourceType.AllergyIntolerance, List.of(
+                    field("onsetDateTime"), field("recordedDate"), field("lastOccurrence"))),
+            Map.entry(ResourceType.ServiceRequest, List.of(
+                    field("occurrenceDateTime"), periodEnd("occurrencePeriod"), field("authoredOn"))),
+            Map.entry(ResourceType.Consent, List.of(
+                    field("dateTime"))),
+            Map.entry(ResourceType.DiagnosticReport, List.of(
+                    field("effectiveDateTime"), periodEnd("effectivePeriod"), field("issued")))
     );
 
     private final MeterRegistry meterRegistry;
