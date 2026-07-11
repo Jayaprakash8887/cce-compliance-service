@@ -269,8 +269,12 @@ When an inbound event **completes** a step, the completion is attributed to the 
 | `Procedure` | `performedDateTime` → `performedPeriod.end` → `performedPeriod.start` |
 | `Immunization` | `occurrenceDateTime` |
 | `MedicationAdministration` | `effectiveDateTime` → `effectivePeriod.end` → `effectivePeriod.start` |
+| `MedicationDispense` | `whenHandedOver` → `whenPrepared` |
+| `MedicationRequest` | `authoredOn` |
 | `Condition` | `onsetDateTime` → `onsetPeriod.start` → `recordedDate` |
+| `AllergyIntolerance` | `onsetDateTime` → `recordedDate` → `lastOccurrence` |
 | `ServiceRequest` | `occurrenceDateTime` → `occurrencePeriod.end` → `authoredOn` |
+| `Consent` | `dateTime` |
 | `DiagnosticReport` | `effectiveDateTime` → `effectivePeriod.end` → `issued` |
 
 Values are parsed leniently (partial precision `2026` / `2026-03` / full timestamps with offset). The extractor is **best-effort** — an unmapped resource type, missing field, or unparseable value returns nothing and the caller falls back.
