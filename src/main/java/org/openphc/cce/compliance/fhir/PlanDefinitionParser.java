@@ -8,7 +8,9 @@ import org.openphc.cce.compliance.domain.entity.TriggerIndexId;
 import org.openphc.cce.compliance.domain.enums.PlanDefinitionActionType;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -45,6 +47,29 @@ public class PlanDefinitionParser {
             flattenAction(action, null, result);
         }
         return result;
+    }
+
+    /**
+     * Compute all transitive ancestors of an action in the dependency graph.
+     * An ancestor of X is any action A such that A's relatedSteps (directly or transitively)
+     * lead to X being created.
+     */
+    public static Set<String> computeAncestors(String actionId, List<StepMetadata> steps) {
+        Set<String> ancestors = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(actionId);
+
+        while (!queue.isEmpty()) {
+            String current = queue.poll();
+            for (StepMetadata action : steps) {
+                boolean createsTarget = action.relatedSteps().stream()
+                        .anyMatch(ra -> current.equals(ra.actionId()));
+                if (createsTarget && ancestors.add(action.id())) {
+                    queue.add(action.id());
+                }
+            }
+        }
+        return ancestors;
     }
 
     /**
