@@ -287,7 +287,22 @@ Values are parsed leniently (partial precision `2026` / `2026-03` / full timesta
 
 The resolved time is **clamped to `now()`** in `StepInstanceService.completeStep` (a step cannot have completed in the future; a bad or skewed source clock must not push downstream schedules out). Because the result only ever *improves* on the previously-used ingestion time, unmapped resource types degrade safely to prior behavior.
 
+**Enrollment anchoring:** the same `resolveOccurredAt(event)` result is also used as a new `ProtocolInstance.enrolled_at` (previously `now()`). So a patient's enrollment — and any downstream analytics that date-filter cohorts on `enrolled_at` — reflects when they *clinically* entered care, not when the event was processed, consistent with step completion. Enrollment is idempotent, so `enrolled_at` is fixed by the first matching event to be processed. Unlike `completed_at`, enrollment does **not** apply the `completeStep` future-clamp (it does not anchor step schedules — those anchor on `completed_at`), so its only clock guard is `resolveOccurredAt`'s own `now()` last resort.
+
 > **Late-arriving completions:** when ingestion lag exceeds a dependent step's offset, that step can be created with `overdue_date`/`missed_date` already in the past and transition (possibly recording a deviation) at the next scheduler cycle. This is real-world-accurate — the step genuinely is overdue — and is a consequence of anchoring to clinical time.
+
+### 4.3 Metric time semantics
+
+Every number CCE reports is measured on one of two clocks, chosen by what the metric is about. Getting this distinction right is what keeps clinical KPIs stable when events arrive late:
+
+> **Metric time semantics** — two clocks, chosen by metric type:
+>
+> - **Functional metrics** — clinical/business KPIs (e.g. adoption, compliance, deviations, event volume, referrals, patient cohorts). Measured on **clinical `event_time`**: when the clinical act actually happened, as carried on the inbound event. Date filters and daily rollups for these use `event_time`, so ingestion lag (offline sync, batch upload, retries, DLQ replay) never shifts the numbers.
+> - **Technical / operational metrics** — pipeline health and ingestion throughput (e.g. events received, connector/queue health). Measured on **processing / system time** (`received_at` / `now()`): when the platform physically received or processed the data.
+>
+> Rule of thumb: "when did it happen clinically?" → `event_time`; "when did our system handle it?" → `received_at` / `now()`.
+
+Within this service, `resolveOccurredAt(event)` — clinical payload time → CloudEvent envelope `time` → `now()` fallback (see §4.2) — is the concrete implementation of the clinical clock. It anchors **both** step-completion timing (`step_instance.completed_at`) and protocol enrollment (`protocol_instance.enrolled_at`), so the functional metrics that date-filter off those columns are all measured on `event_time`. Technical metrics stay on system time — `compliance_event_log.received_at` records ingestion, and the ingestion/consumer counters in §8.1 count processing events as they happen.
 
 ## 5. Two-Tier Matching Algorithm
 

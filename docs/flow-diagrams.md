@@ -251,7 +251,7 @@ flowchart TD
     B -->|"No"| D["Create new<br/>ProtocolInstance"]
 
     D --> E["Set status = ACTIVE"]
-    E --> F["Set enrolledAt = now()"]
+    E --> F["Set enrolledAt = clinical occurrence time<br/>(resolveOccurredAt: payload → envelope → now)"]
     F --> G["Link to ProtocolDefinitionEntity"]
     G --> H["Set protocolCanonical = url|version"]
 
