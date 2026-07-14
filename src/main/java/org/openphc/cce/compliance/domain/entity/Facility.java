@@ -29,8 +29,8 @@ public class Facility {
     @Column(name = "expected_patients_per_day")
     private Integer expectedPatientsPerDay;
 
-    @Column(name = "district")
-    private String district;
+    @Column(name = "district_name")
+    private String districtName;
 
     @Column(name = "created_at", nullable = false)
     private OffsetDateTime createdAt;
