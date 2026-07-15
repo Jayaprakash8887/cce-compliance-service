@@ -8,6 +8,7 @@ import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
 import org.openphc.cce.compliance.domain.enums.StepState;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
 import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
+import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -15,10 +16,13 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -29,19 +33,25 @@ public class ProtocolInstanceService {
     private static final Set<StepState> TERMINAL_STATES = Set.of(
             StepState.COMPLETED, StepState.MISSED, StepState.SKIPPED);
 
+    private static final Set<StepState> ACTIONABLE_STATES = Set.of(
+            StepState.PENDING, StepState.DUE, StepState.OVERDUE);
+
     private final ProtocolInstanceRepository protocolInstanceRepository;
     private final StepInstanceRepository stepInstanceRepository;
     private final AuditService auditService;
     private final StateTransitionHistoryService stateTransitionHistoryService;
+    private final PlanDefinitionParser planDefinitionParser;
 
     public ProtocolInstanceService(ProtocolInstanceRepository protocolInstanceRepository,
                                    StepInstanceRepository stepInstanceRepository,
                                    AuditService auditService,
-                                   StateTransitionHistoryService stateTransitionHistoryService) {
+                                   StateTransitionHistoryService stateTransitionHistoryService,
+                                   PlanDefinitionParser planDefinitionParser) {
         this.protocolInstanceRepository = protocolInstanceRepository;
         this.stepInstanceRepository = stepInstanceRepository;
         this.auditService = auditService;
         this.stateTransitionHistoryService = stateTransitionHistoryService;
+        this.planDefinitionParser = planDefinitionParser;
     }
 
     /**
@@ -87,9 +97,22 @@ public class ProtocolInstanceService {
     }
 
     /**
-     * Check if all steps in a protocol instance have reached terminal states.
-     * If so, automatically set the protocol instance status to COMPLETED.
-     * Uses count queries to avoid loading the entire step collection.
+     * Complete the protocol instance only when there is no outstanding mandatory work.
+     *
+     * <p>Under progressive instantiation a step can be created directly from its own trigger
+     * (see {@code ComplianceEngine.createInitialStep}) without its mandatory predecessors ever
+     * being instantiated. Judging completion purely from the materialized step rows would then
+     * mark such an instance COMPLETED after a single terminal step (e.g. a lone
+     * {@code consultation} in emr-service-protocol). So completion requires BOTH:
+     * <ol>
+     *   <li>no materialized step is still actionable (PENDING/DUE/OVERDUE), and</li>
+     *   <li>every mandatory ("must") action on the path leading to any observed step has a
+     *       terminal step instance — where "on the path" means the action itself or a
+     *       transitive predecessor (ancestor) of an observed action. A mandatory step is
+     *       therefore only required once progress that depends on it has actually been seen,
+     *       which keeps genuinely short journeys completable while blocking premature
+     *       completion when a mandatory prerequisite was skipped.</li>
+     * </ol>
      */
     public void checkAndCompleteProtocol(UUID instanceId) {
         ProtocolInstance instance = findByIdOrThrow(instanceId);
@@ -98,23 +121,79 @@ public class ProtocolInstanceService {
             return;
         }
 
-        long totalSteps = stepInstanceRepository.countByProtocolInstanceId(instanceId);
-        if (totalSteps == 0) {
+        List<StepInstance> materializedSteps = stepInstanceRepository.findByProtocolInstanceId(instanceId);
+        if (materializedSteps.isEmpty()) {
             return;
         }
 
-        long nonTerminalSteps = stepInstanceRepository.countNonTerminalSteps(instanceId, TERMINAL_STATES);
-
-        if (nonTerminalSteps == 0) {
-            instance.setStatus(ProtocolInstanceStatus.COMPLETED);
-            protocolInstanceRepository.save(instance);
-
-            // Capture the COMPLETED transition in append-only history.
-            stateTransitionHistoryService.recordProtocolInstanceTransition(instance, OffsetDateTime.now(ZoneOffset.UTC));
-
-            log.info("Protocol instance {} completed — all {} steps in terminal state",
-                    instanceId, totalSteps);
+        // (1) any still-actionable step means there is outstanding work
+        boolean anyActionable = materializedSteps.stream()
+                .anyMatch(s -> ACTIONABLE_STATES.contains(s.getState()));
+        if (anyActionable) {
+            return;
         }
+
+        // (2) every mandatory action expected by the progress observed so far must be terminal
+        Set<String> terminalActionIds = materializedSteps.stream()
+                .filter(s -> TERMINAL_STATES.contains(s.getState()))
+                .map(StepInstance::getActionId)
+                .collect(Collectors.toSet());
+
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(
+                planDefinitionParser.parse(
+                        instance.getProtocolDefinition().getDefinition().toString()));
+
+        List<String> unsatisfiedMustActions = computeExpectedMustActions(materializedSteps, steps).stream()
+                .filter(actionId -> !terminalActionIds.contains(actionId))
+                .toList();
+
+        if (!unsatisfiedMustActions.isEmpty()) {
+            log.info("Protocol instance {} not completed — mandatory steps outstanding: {}",
+                    instanceId, unsatisfiedMustActions);
+            return;
+        }
+
+        instance.setStatus(ProtocolInstanceStatus.COMPLETED);
+        protocolInstanceRepository.save(instance);
+
+        // Capture the COMPLETED transition in append-only history.
+        stateTransitionHistoryService.recordProtocolInstanceTransition(instance, OffsetDateTime.now(ZoneOffset.UTC));
+
+        log.info("Protocol instance {} completed — all mandatory steps satisfied ({} steps materialized)",
+                instanceId, materializedSteps.size());
+    }
+
+    /**
+     * The mandatory ("must") action ids the instance is expected to satisfy given the progress
+     * observed so far: for every materialized step, itself plus all its transitive predecessors,
+     * restricted to actions whose requiredBehavior is "must".
+     */
+    private Set<String> computeExpectedMustActions(List<StepInstance> materializedSteps,
+                                                   List<PlanDefinitionParser.StepMetadata> steps) {
+        Set<String> mustActionIds = steps.stream()
+                .filter(a -> "must".equals(a.requiredBehavior()))
+                .map(PlanDefinitionParser.StepMetadata::id)
+                .collect(Collectors.toSet());
+        if (mustActionIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<String> observedActionIds = materializedSteps.stream()
+                .map(StepInstance::getActionId)
+                .collect(Collectors.toSet());
+
+        Set<String> expected = new HashSet<>();
+        for (String actionId : observedActionIds) {
+            if (mustActionIds.contains(actionId)) {
+                expected.add(actionId);
+            }
+            for (String ancestorId : PlanDefinitionParser.computeAncestors(actionId, steps)) {
+                if (mustActionIds.contains(ancestorId)) {
+                    expected.add(ancestorId);
+                }
+            }
+        }
+        return expected;
     }
 
     @Transactional(readOnly = true)

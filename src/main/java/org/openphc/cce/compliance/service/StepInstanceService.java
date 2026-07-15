@@ -19,10 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Deque;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -412,7 +409,8 @@ public class StepInstanceService {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
         // Compute all ancestor actionIds of the completed step (transitive predecessors)
-        Set<String> ancestorActionIds = computeAncestors(completedStep.getActionId(), steps);
+        Set<String> ancestorActionIds = PlanDefinitionParser.computeAncestors(
+                completedStep.getActionId(), steps);
 
         if (ancestorActionIds.isEmpty()) {
             return;
@@ -438,32 +436,6 @@ public class StepInstanceService {
                     sibling.getId(), sibling.getActionId(),
                     completedStep.getId(), completedStep.getActionId());
         }
-    }
-
-    /**
-     * Compute all transitive ancestors of a given actionId in the dependency graph.
-     * An ancestor of X is any action A such that A's relatedSteps (directly or transitively)
-     * lead to X being created.
-     */
-    private Set<String> computeAncestors(String actionId,
-                                         List<PlanDefinitionParser.StepMetadata> steps) {
-        Set<String> ancestors = new HashSet<>();
-        Deque<String> queue = new ArrayDeque<>();
-        queue.add(actionId);
-
-        while (!queue.isEmpty()) {
-            String current = queue.poll();
-            // Find all actions whose relatedSteps contain 'current'
-            for (PlanDefinitionParser.StepMetadata action : steps) {
-                boolean createsTarget = action.relatedSteps().stream()
-                        .anyMatch(ra -> current.equals(ra.actionId()));
-                if (createsTarget && !ancestors.contains(action.id())) {
-                    ancestors.add(action.id());
-                    queue.add(action.id());
-                }
-            }
-        }
-        return ancestors;
     }
 
     private OffsetDateTime calculateDueDate(OffsetDateTime baseTime,
