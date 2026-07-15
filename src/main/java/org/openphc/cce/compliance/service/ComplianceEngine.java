@@ -255,9 +255,14 @@ public class ComplianceEngine {
         ProtocolDefinition protocolDef = protocolDefinitionService.findById(match.protocolDefinitionId());
         String patientId = event.getSubject();
 
-        // Enroll patient (idempotent — returns existing if already enrolled)
+        // Enroll patient (idempotent — returns existing if already enrolled).
+        // enrolledAt is the CLINICAL occurrence time of the first qualifying event (same source as a
+        // completed step's occurredAt), NOT the processing clock. This keeps enrolled_at on clinical
+        // time so downstream cohort date-filtering (compliance/patients/deviations) reflects when the
+        // patient actually entered care, unaffected by ingestion lag (offline sync, batch, DLQ replay).
+        // resolveOccurredAt falls back to the envelope time, then now(), when no clinical field exists.
         ProtocolInstance protocolInstance = protocolInstanceService.enrollPatient(
-                patientId, protocolDef, OffsetDateTime.now(ZoneOffset.UTC));
+                patientId, protocolDef, resolveOccurredAt(event));
 
         String actionId = match.actionId();
 
