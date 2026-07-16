@@ -217,10 +217,10 @@ class ComplianceEngineTest {
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                     new PlanDefinitionParser.StepMetadata("action-a", "Action A",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                            List.of(), null, null, null, List.of()),
+                            List.of(), null, null, null, List.of(), null),
                     new PlanDefinitionParser.StepMetadata("action-b", "Action B",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                            List.of(), null, null, null, List.of())));
+                            List.of(), null, null, null, List.of(), null)));
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef1), any()))
                     .thenReturn(instance1);
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef2), any()))
@@ -457,7 +457,7 @@ class ComplianceEngineTest {
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                     new PlanDefinitionParser.StepMetadata("first-step", "First Step",
                             List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                            List.of(), null, 5, "must", List.of())));
+                            List.of(), null, 5, "must", List.of(), null)));
             when(protocolInstanceService.enrollPatient(eq("patient-1"), eq(protocolDef), any()))
                     .thenReturn(protocolInstance);
             when(stepInstanceService.findActionableStep(protocolInstance.getId(), "first-step"))
@@ -568,7 +568,7 @@ class ComplianceEngineTest {
         when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(actionId, "Test Action",
                         List.of(new PlanDefinitionParser.TriggerInfo(List.of(), null)),
-                        List.of(), null, null, null, List.of())));
+                        List.of(), null, null, null, List.of(), null)));
     }
 
     /**
@@ -582,7 +582,7 @@ class ComplianceEngineTest {
                 new PlanDefinitionParser.StepMetadata(actionId, "Conditional Action",
                         List.of(new PlanDefinitionParser.TriggerInfo(List.of(),
                                 new PlanDefinitionParser.ConditionInfo(language, expression))),
-                        List.of(), null, null, null, List.of())));
+                        List.of(), null, null, null, List.of(), null)));
     }
 
     /**
@@ -594,6 +594,6 @@ class ComplianceEngineTest {
         when(planDefinitionParser.parse(protocolDef.getDefinition().toString())).thenReturn(mockPlanDef);
         when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
                 new PlanDefinitionParser.StepMetadata(actionId, "Test Action",
-                        List.of(), List.of(), null, toleranceDays, requiredBehavior, List.of())));
+                        List.of(), List.of(), null, toleranceDays, requiredBehavior, List.of(), null)));
     }
 }

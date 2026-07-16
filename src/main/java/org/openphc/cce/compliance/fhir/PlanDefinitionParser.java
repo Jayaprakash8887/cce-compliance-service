@@ -13,8 +13,10 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Component
 public class PlanDefinitionParser {
@@ -70,6 +72,51 @@ public class PlanDefinitionParser {
             }
         }
         return ancestors;
+    }
+
+    /**
+     * Compute the "must" action ids nested under the same top-level PlanDefinition action as the
+     * given action — i.e. all mandatory descendants of its root ancestor (the top-level action it
+     * is nested under, per {@code action.action} in the PlanDefinition JSON).
+     *
+     * <p>Nesting groups sub-steps under a parent for indexing purposes only and does not create an
+     * implicit step dependency (see {@link #extractSteps}). But once any sub-step in a group has
+     * been observed, progress on that group has started, so its other mandatory sub-steps — even
+     * ones whose own trigger never fired and were therefore never materialized — must also be
+     * satisfied before the protocol instance can be considered complete.
+     */
+    public static Set<String> computeMustGroupActions(String actionId, List<StepMetadata> steps) {
+        Map<String, StepMetadata> byId = steps.stream()
+                .collect(Collectors.toMap(StepMetadata::id, s -> s, (a, b) -> a));
+
+        String rootId = actionId;
+        StepMetadata current = byId.get(rootId);
+        while (current != null && current.parentActionId() != null) {
+            rootId = current.parentActionId();
+            current = byId.get(rootId);
+        }
+
+        Set<String> group = new HashSet<>();
+        Deque<String> queue = new ArrayDeque<>();
+        queue.add(rootId);
+        group.add(rootId);
+        while (!queue.isEmpty()) {
+            String parent = queue.poll();
+            for (StepMetadata s : steps) {
+                if (parent.equals(s.parentActionId()) && group.add(s.id())) {
+                    queue.add(s.id());
+                }
+            }
+        }
+
+        Set<String> mustGroupActions = new HashSet<>();
+        for (String memberId : group) {
+            StepMetadata member = byId.get(memberId);
+            if (member != null && "must".equals(member.requiredBehavior())) {
+                mustGroupActions.add(memberId);
+            }
+        }
+        return mustGroupActions;
     }
 
     /**
@@ -307,7 +354,8 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                intelligenceActions
+                intelligenceActions,
+                parentActionId
         ));
 
         // Recursively flatten nested step-type actions
@@ -534,7 +582,8 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            List<IntelligenceActionInfo> intelligenceActions
+            List<IntelligenceActionInfo> intelligenceActions,
+            String parentActionId
     ) {}
 
     public record TriggerInfo(

@@ -193,6 +193,39 @@ class ProtocolInstanceServiceTest {
         }
 
         @Test
+        void mustSiblingUnderSameParentNeverMaterialized_doesNotComplete() {
+            // Regression: clinical-consultation groups chief-complaints, history-of-illness,
+            // laboratory-order, clinical-diagnosis, treatment-prescription and referral as
+            // nested sub-steps (organizational only — no relatedAction between them). Only
+            // chief-complaints, history-of-illness and clinical-diagnosis were triggered and
+            // completed; laboratory-order (a mandatory sibling) never fired its own trigger and
+            // so was never materialized as a step_instance. The protocol must NOT complete while
+            // that mandatory sibling is outstanding.
+            UUID instanceId = UUID.randomUUID();
+            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
+
+            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
+            when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of(
+                    buildStep("chief-complaints", StepState.COMPLETED),
+                    buildStep("history-of-illness", StepState.COMPLETED),
+                    buildStep("clinical-diagnosis", StepState.COMPLETED)));
+            stubGraph(List.of(
+                    step("clinical-consultation", "must"),
+                    childStep("chief-complaints", "must", "clinical-consultation"),
+                    childStep("history-of-illness", "must", "clinical-consultation"),
+                    childStep("laboratory-order", "must", "clinical-consultation"),
+                    childStep("clinical-diagnosis", "must", "clinical-consultation"),
+                    childStep("treatment-prescription", "must", "clinical-consultation"),
+                    childStep("referral", "could", "clinical-consultation")));
+
+            service.checkAndCompleteProtocol(instanceId);
+
+            assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
+            verify(protocolInstanceRepository, never()).save(any());
+            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
+        }
+
+        @Test
         void noMandatorySteps_allTerminal_completes() {
             UUID instanceId = UUID.randomUUID();
             ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
@@ -294,11 +327,16 @@ class ProtocolInstanceServiceTest {
 
     private PlanDefinitionParser.StepMetadata step(String id, String requiredBehavior,
                                                    String... relatedActionIds) {
+        return childStep(id, requiredBehavior, null, relatedActionIds);
+    }
+
+    private PlanDefinitionParser.StepMetadata childStep(String id, String requiredBehavior, String parentActionId,
+                                                        String... relatedActionIds) {
         List<PlanDefinitionParser.RelatedStepInfo> related = new java.util.ArrayList<>();
         for (String target : relatedActionIds) {
             related.add(new PlanDefinitionParser.RelatedStepInfo(target, "after-end", BigDecimal.ZERO, "d"));
         }
         return new PlanDefinitionParser.StepMetadata(
-                id, id, List.of(), related, null, null, requiredBehavior, List.of());
+                id, id, List.of(), related, null, null, requiredBehavior, List.of(), parentActionId);
     }
 }

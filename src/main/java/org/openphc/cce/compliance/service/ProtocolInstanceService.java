@@ -107,11 +107,14 @@ public class ProtocolInstanceService {
      * <ol>
      *   <li>no materialized step is still actionable (PENDING/DUE/OVERDUE), and</li>
      *   <li>every mandatory ("must") action on the path leading to any observed step has a
-     *       terminal step instance — where "on the path" means the action itself or a
-     *       transitive predecessor (ancestor) of an observed action. A mandatory step is
-     *       therefore only required once progress that depends on it has actually been seen,
-     *       which keeps genuinely short journeys completable while blocking premature
-     *       completion when a mandatory prerequisite was skipped.</li>
+     *       terminal step instance — where "on the path" means the action itself, a transitive
+     *       predecessor (ancestor) of an observed action, or a mandatory action nested under the
+     *       same top-level PlanDefinition action as an observed action (a "group sibling") —
+     *       even one whose own trigger never fired and was therefore never materialized. A
+     *       mandatory step is therefore only required once progress that depends on it, or that
+     *       shares its nesting group, has actually been seen, which keeps genuinely short
+     *       journeys completable while blocking premature completion when a mandatory
+     *       prerequisite or sibling sub-step was skipped.</li>
      * </ol>
      */
     public void checkAndCompleteProtocol(UUID instanceId) {
@@ -165,8 +168,9 @@ public class ProtocolInstanceService {
 
     /**
      * The mandatory ("must") action ids the instance is expected to satisfy given the progress
-     * observed so far: for every materialized step, itself plus all its transitive predecessors,
-     * restricted to actions whose requiredBehavior is "must".
+     * observed so far: for every materialized step, itself, all its transitive predecessors, and
+     * all mandatory actions nested under the same top-level PlanDefinition action (group
+     * siblings) — restricted to actions whose requiredBehavior is "must".
      */
     private Set<String> computeExpectedMustActions(List<StepInstance> materializedSteps,
                                                    List<PlanDefinitionParser.StepMetadata> steps) {
@@ -192,6 +196,7 @@ public class ProtocolInstanceService {
                     expected.add(ancestorId);
                 }
             }
+            expected.addAll(PlanDefinitionParser.computeMustGroupActions(actionId, steps));
         }
         return expected;
     }
