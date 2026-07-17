@@ -75,8 +75,8 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Compute the "must" action ids nested under the same top-level PlanDefinition action as the
-     * given action — i.e. all mandatory descendants of its root ancestor (the top-level action it
+     * Compute the "must" step ids nested under the same top-level PlanDefinition action as the
+     * given step — i.e. all mandatory descendants of its root ancestor (the top-level action it
      * is nested under, per {@code action.action} in the PlanDefinition JSON).
      *
      * <p>Nesting groups sub-steps under a parent for indexing purposes only and does not create an
@@ -85,15 +85,15 @@ public class PlanDefinitionParser {
      * ones whose own trigger never fired and were therefore never materialized — must also be
      * satisfied before the protocol instance can be considered complete.
      */
-    public static Set<String> computeMustGroupActions(String actionId, List<StepMetadata> steps) {
-        Map<String, StepMetadata> byId = steps.stream()
+    public static Set<String> computeMustGroupActions(String stepId, List<StepMetadata> allSteps) {
+        Map<String, StepMetadata> stepsById = allSteps.stream()
                 .collect(Collectors.toMap(StepMetadata::id, s -> s, (a, b) -> a));
 
-        String rootId = actionId;
-        StepMetadata current = byId.get(rootId);
+        String rootId = stepId;
+        StepMetadata current = stepsById.get(rootId);
         while (current != null && current.parentActionId() != null) {
             rootId = current.parentActionId();
-            current = byId.get(rootId);
+            current = stepsById.get(rootId);
         }
 
         Set<String> group = new HashSet<>();
@@ -101,17 +101,17 @@ public class PlanDefinitionParser {
         queue.add(rootId);
         group.add(rootId);
         while (!queue.isEmpty()) {
-            String parent = queue.poll();
-            for (StepMetadata s : steps) {
-                if (parent.equals(s.parentActionId()) && group.add(s.id())) {
-                    queue.add(s.id());
+            String parentId = queue.poll();
+            for (StepMetadata step : allSteps) {
+                if (parentId.equals(step.parentActionId()) && group.add(step.id())) {
+                    queue.add(step.id());
                 }
             }
         }
 
         Set<String> mustGroupActions = new HashSet<>();
         for (String memberId : group) {
-            StepMetadata member = byId.get(memberId);
+            StepMetadata member = stepsById.get(memberId);
             if (member != null && "must".equals(member.requiredBehavior())) {
                 mustGroupActions.add(memberId);
             }

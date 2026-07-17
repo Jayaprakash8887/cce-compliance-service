@@ -2,7 +2,7 @@
 
 > **CCE Compliance Service** — Complete database schema reference  
 > **Database**: PostgreSQL 16 | **Schema**: `public` | **Migration**: Flyway  
-> **Last Updated**: 2026-06-23
+> **Last Updated**: 2026-07-17
 
 ---
 
@@ -101,7 +101,7 @@ erDiagram
 
     COMPLIANCE_EVENT_LOG {
         uuid id PK
-        varchar cloudeventsid
+        varchar cloudevents_id
         varchar source
         varchar correlation_id
         varchar processing_status
@@ -159,6 +159,7 @@ erDiagram
         varchar facility_id UK
         varchar facility_name
         integer expected_patients_per_day
+        varchar district_name
         timestamptz created_at
         timestamptz updated_at
     }
@@ -561,6 +562,7 @@ Reference lookup table of known facilities, auto-populated from inbound FHIR eve
 | `facility_id` | `VARCHAR` | **NOT NULL** | — | The bare facility identifier extracted from the FHIR resource location reference (e.g., `"1302"` from `"Location/1302"`). Unique across the table. |
 | `facility_name` | `VARCHAR` | Yes | `NULL` | Human-readable facility display name extracted from the FHIR `display` field of the same reference node. Null when the payload carries no display value — updated on the next event that does. |
 | `expected_patients_per_day` | `INTEGER` | Yes | `NULL` | Programme-configured daily patient volume baseline. Updated directly in the database by programme staff. Used by analytics MVs to calculate adoption rates. |
+| `district_name` | `VARCHAR` | Yes | `NULL` | District the facility belongs to. Not populated by the compliance service — updated directly in the database by programme staff (added in `V7`). |
 | `created_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Timestamp of first insertion. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Timestamp of last modification. |
 
@@ -602,6 +604,7 @@ If the CloudEvent envelope already carries a `facilityid` extension attribute (s
 - **Owned by the compliance service:** Unlike the CCE Collector Service, which does not extract facility names, this service is the first point where both the bare ID and display name are available together from the FHIR payload.
 - **CDC-synced to ClickHouse:** Via the Debezium connector. Downstream analytics materialized views join against this table for facility-level KPIs and adoption rate calculations.
 - **`expected_patients_per_day` is NULL by default:** Programme staff update this column directly in the database once they know the facility's expected volume. The compliance service never writes to this column.
+- **`district_name` is NULL by default:** Added in `V7__facility_district.sql` with no backfill. Like `expected_patients_per_day`, it is populated directly in the database by programme staff — the compliance service never writes to it.
 
 ---
 
