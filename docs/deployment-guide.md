@@ -1,7 +1,7 @@
 # Deployment Guide
 
 > **CCE Compliance Service** — Production deployment reference  
-> **Version:** 1.1.0 | **Java:** 21 LTS | **Spring Boot:** 3.4.2
+> **Version:** 1.0.0 | **Java:** 21 LTS | **Spring Boot:** 3.4.2
 
 ---
 
@@ -49,7 +49,7 @@ All configuration is externalized via environment variables. Defaults are provid
 
 | Variable | Default | Required | Description |
 |---|---|---|---|
-| `SERVER_PORT` | `8080` | No | HTTP server port |
+| `SERVER_PORT` | `8091` | No | HTTP server port. The Docker image's `EXPOSE`/`HEALTHCHECK` are hardcoded to `8080` — set `SERVER_PORT=8080` explicitly for Docker/Kubernetes deployments (see §3–4) |
 | `SPRING_PROFILES_ACTIVE` | — | Yes (prod) | Set to `prod` for production |
 
 ### Database
@@ -57,7 +57,7 @@ All configuration is externalized via environment variables. Defaults are provid
 | Variable | Default | Required | Description |
 |---|---|---|---|
 | `DB_HOST` | `localhost` | Yes | PostgreSQL host (shared with collector service) |
-| `DB_PORT` | `5433` | No | PostgreSQL port (collector service default) |
+| `DB_PORT` | `5432` | No | PostgreSQL port (standard PostgreSQL default in code — set to `5433` when connecting to the shared instance deployed by the collector service) |
 | `DB_NAME` | `ccedb` | No | Shared database name (all CCE services) |
 | `DB_USERNAME` | `cce_user` | Yes | Database username (shared with collector service) |
 | `DB_PASSWORD` | `cce_pass` | Yes | Database password (shared with collector service) |
@@ -76,6 +76,12 @@ All configuration is externalized via environment variables. Defaults are provid
 | `KAFKA_PARTITIONS` | `25` | No | Default partition count for topics |
 | `KAFKA_RETRY_MAX_ATTEMPTS` | `3` (dev) / `5` (prod) | No | Max retry attempts before DLQ |
 | `KAFKA_RETRY_BACKOFF_MS` | `1000` (dev) / `2000` (prod) | No | Backoff interval between retries |
+
+### Intelligence
+
+| Variable | Default | Required | Description |
+|---|---|---|---|
+| `CCE_PLAN_DEFINITION_CACHE_SIZE` | `256` | No | Max cached compiled `PlanDefinition`s for intelligence action evaluation |
 
 ### Observability
 
@@ -100,6 +106,7 @@ docker run -d \
   --name cce-compliance-service \
   -p 8080:8080 \
   -e SPRING_PROFILES_ACTIVE=prod \
+  -e SERVER_PORT=8080 \
   -e DB_HOST=postgres-host \
   -e DB_PORT=5433 \
   -e DB_NAME=ccedb \
@@ -164,6 +171,8 @@ spec:
           env:
             - name: SPRING_PROFILES_ACTIVE
               value: "prod"
+            - name: SERVER_PORT
+              value: "8080"
             - name: DB_HOST
               valueFrom:
                 configMapKeyRef:
@@ -226,11 +235,16 @@ The database and user are created by the collector service's Docker Compose. The
 Flyway manages all schema migrations automatically on application startup.
 
 - Migrations are located at `classpath:db/migration`
+- Migration history is tracked in a namespaced Flyway table, `flyway_schema_history_compliance` (not the default `flyway_schema_history`), so it doesn't collide with other CCE services' migration history in the shared `ccedb` database
 - `V1__initial_schema.sql` creates the initial 7 tables with indexes, constraints, and ORDER_VIOLATION deviation type
 - `V2__intelligence_tables.sql` adds `action_definition`, `intelligence_event_log` tables (9 total)
 - `V3__facility.sql` adds `facility` table with `REPLICA IDENTITY FULL` for CDC sync (10 total)
-- `V4__state_history.sql` adds the append-only `protocol_instance_history` + `step_instance_history` tables (12 total). Every `status`/`state` transition is recorded at the **application layer** by `StateTransitionHistoryService` (invoked from `ProtocolInstanceService` / `StepInstanceService`, in the same transaction as the change) — the migration creates the tables only. CDC replica identity / publication / grants are configured centrally in the data-pipeline (`cdc/01-configure-replication.sql`), not in this migration. See the [State-Transition History tables](data-dictionary.md#13-state-transition-history-tables) in the data dictionary.
+- `V4__state_history.sql` adds the append-only `protocol_instance_history` + `step_instance_history` tables (13 total). Every `status`/`state` transition is recorded at the **application layer** by `StateTransitionHistoryService` (invoked from `ProtocolInstanceService` / `StepInstanceService`, in the same transaction as the change) — the migration creates the tables only. CDC replica identity / publication / grants are configured centrally in the data-pipeline (`cdc/01-configure-replication.sql`), not in this migration. See the [State-Transition History tables](data-dictionary.md#14-state-transition-history-tables) in the data dictionary.
   - **Pre-deploy check:** if an environment ever applied the legacy `V4__facility_cdc.sql`, `flyway_schema_history` already holds a version-4 row with a different checksum → run `flyway repair` or re-version before deploying. On `release-1.0.0` (facility consolidated into `V3`) version 4 is free.
+- `V5__deviation_unique_constraint.sql` adds a unique constraint on `deviation` (`step_instance_id`, `deviation_type`) — at most one deviation of each type per step. Pre-existing duplicates (e.g., from at-least-once Kafka redelivery or concurrent consumer threads) are deduplicated before the constraint is applied.
+- `V6__drop_uuid_defaults_for_v7.sql` drops the DB-side `gen_random_uuid()` defaults on the `protocol_instance`, `step_instance`, and `deviation` id columns, since ids are now generated application-side as time-ordered UUIDv7 (Hibernate `UuidV7Generator`).
+- `V7__facility_district.sql` adds a `district_name` column to `facility`.
+- `V8__group_step_instance.sql` creates the `group_step_instance` table (one row per repeating-group cycle) and adds the `step_instance.group_step_instance_id` FK column.
 - `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
 - **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
 
@@ -289,11 +303,7 @@ Failed messages are retried with `FixedBackOff` (5 attempts × 2s interval in pr
 
 ## 7. JVM Tuning
 
-The Dockerfile includes container-aware JVM flags:
-
-```
-JAVA_OPTS=-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC
-```
+The Dockerfile does not set a default `JAVA_OPTS` — its entrypoint is `java $JAVA_OPTS -jar app.jar`, so the JVM runs with no extra flags unless `JAVA_OPTS` is supplied at runtime (`docker run -e JAVA_OPTS=...` or a Kubernetes env var).
 
 ### Recommended Production Flags
 

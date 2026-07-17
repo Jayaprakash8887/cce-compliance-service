@@ -207,16 +207,16 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog, Facility)
-│   ├── enums/                                 # 11 value-based enums
-│   └── repository/                            # 10 Spring Data JPA repositories
+│   ├── entity/                                # 13 JPA entities (incl. ActionDefinition, IntelligenceEventLog, Facility, GroupStepInstance)
+│   ├── enums/                                 # 12 value-based enums
+│   └── repository/                            # 13 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
 │   ├── config/                                # Consumer/Producer factories, topic bindings
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
 │   └── producer/                              # IntelligenceTriggerProducer
-├── service/                                   # 12 business logic services + supporting records
+├── service/                                   # 13 business logic services + supporting records/components
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
 
@@ -525,7 +525,19 @@ stateDiagram-v2
 
 `ACTIVE → COMPLETED | WITHDRAWN | EXPIRED`. Terminal states: `COMPLETED`, `WITHDRAWN`, `EXPIRED`.
 
-Protocol completion is **automatic** — when all steps reach terminal states (`COMPLETED`, `MISSED`, `SKIPPED`), the protocol transitions to `COMPLETED`. There is no manual complete endpoint; `WITHDRAWN` covers manual termination.
+Protocol completion is **automatic** — evaluated by `ProtocolInstanceService.checkAndCompleteProtocol` after every step completion and every scheduler-driven `OVERDUE_TO_MISSED` transition. There is no manual complete endpoint; `WITHDRAWN` covers manual termination.
+
+Completion is **not** simply "all materialized steps reached a terminal state." Under progressive instantiation, a step can be created directly from its own trigger (`ComplianceEngine.createInitialStep`) without its mandatory predecessors — or mandatory siblings nested under the same parent action — ever being materialized as `step_instance` rows. Judging completion purely from the rows that happen to exist would then mark an instance `COMPLETED` after a single terminal step, even though other mandatory work was structurally skipped over. So completion requires **both**:
+
+1. **No materialized step is still actionable** (`PENDING`/`DUE`/`OVERDUE`), and
+2. **Every mandatory (`must`) action expected by the progress observed so far is terminal** — computed by `computeExpectedMustActions`, which expands each materialized step's `actionId` to:
+   - the action itself, if its `requiredBehavior` is `must`;
+   - all of its transitive `relatedAction` predecessors (ancestors), via `PlanDefinitionParser.computeAncestors`; and
+   - all `must` actions nested under the same top-level PlanDefinition action — its "group siblings" — via `PlanDefinitionParser.computeMustGroupActions`, which walks up to the action's top-level root ancestor (following `StepMetadata.parentActionId`) and collects every mandatory descendant of that root.
+
+The group-sibling check exists to close a specific gap: a mandatory nested sub-step whose own trigger never fires is never materialized as a `step_instance` row, so without this check it would be invisible to completion — the protocol could complete while that mandatory sub-step was silently never satisfied. A mandatory action is therefore only required once progress that depends on it, or that shares its nesting group, has actually been observed. This keeps genuinely short journeys completable while still blocking premature completion when a mandatory prerequisite or sibling sub-step was skipped over.
+
+**Interaction with repeating groups (§6.5):** `computeExpectedMustActions` keys terminality on the bare `actionId`, so it cannot itself distinguish "this must-action is terminal for the current cycle" from "it was terminal two cycles ago and a fresh instance for the new cycle hasn't completed yet." This is why, when a protocol has a repeating group, `StepInstanceService` runs `checkAndAdvanceGroupCycles` — under a pessimistic lock on the `protocol_instance` row — **before** calling `checkAndCompleteProtocol`: it either advances the current cycle to `COMPLETED` and spawns the next cycle's mandatory children (so a fresh `PENDING` row makes the action visibly non-terminal again), or leaves the cycle in progress. Either outcome resolves before completion is evaluated, so a protocol mid-repeat can never be misjudged as complete. See §6.5 for the full cycle-advancement mechanics and why the lock is needed.
 
 ### 6.3 Intelligence Action Evaluation
 
@@ -580,7 +592,7 @@ The table below maps CCE domain concepts to their FHIR PlanDefinition counterpar
 |---|---|---|
 | **Protocol Definition** | `PlanDefinition` | The clinical protocol (e.g., ANC High-Risk Monitoring) |
 | **Protocol Step** | `PlanDefinition.action` (type=step) | A step in the protocol with its own trigger (e.g., "ANC Visit 2"). Nested actions of type "step" are flattened to peer-level steps. |
-| **Flattened Sub-Step** | `PlanDefinition.action.action` (type=step) | A nested step flattened into a peer-level step linked to its parent via `relatedSteps`. |
+| **Flattened Sub-Step** | `PlanDefinition.action.action` (type=step) | A nested step flattened into a peer-level step. Nesting groups it with its parent for trigger indexing and for the protocol-completion "group sibling" check (§6.2) only — any dependency on the parent or on sibling sub-steps must be declared explicitly via `relatedAction`. |
 | **Intelligence Action** | `PlanDefinition.action.action` (type=fire-event) | A nested action that defines a conditional intelligence evaluation |
 
 ```mermaid
@@ -610,8 +622,8 @@ flowchart LR
         S2["Step: anc-visit-2"]
         R1["Intelligence Action:<br/>overdue-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
-        SUB1["Step: referral<br/>(flattened, relatedStep→anc-visit-2)"]
-        SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral)"]
+        SUB1["Step: referral<br/>(flattened, own trigger — no implicit link to anc-visit-2)"]
+        SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral — explicit relatedAction)"]
         R3["Intelligence Action:<br/>referral-escalation"]
 
         PROTO --> S1
@@ -695,15 +707,17 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 | `trigger_reason` | Why the action fired: `overdue`, `missed`, `completion` |
 | `evaluation_context` | Runtime variables passed to the condition evaluator |
 
-All execution and evaluation context is stored in a single row — no FK constraints, no joins required. See [Data Dictionary §11](data-dictionary.md#11-intelligence_event_log).
+All execution and evaluation context is stored in a single row — no FK constraints, no joins required. See [Data Dictionary §12](data-dictionary.md#12-intelligence_event_log).
 
 ### 6.4 Flat Step Model (Nested Actions Flattened)
 
 Nested `PlanDefinition.action.action[]` entries with type `"step"` are **flattened** into peer-level steps at parse time by `extractSteps()`. There is no parent-child hierarchy in the domain model — all steps (top-level and nested) are stored uniformly in `step_instance` without any `parent_step_id`. Relationships between steps are expressed exclusively via `relatedSteps` (derived from FHIR `relatedAction`).
 
 **Key design decisions:**
-- `StepMetadata` is a flat record with 8 fields (no `subSteps` list): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`
-- Entry-point sub-steps (those with no `relatedAction` dependency on siblings) automatically get a `relatedStep` reference to their parent action (relationship: `after-end`, no offset) added by the parser — this ensures they are created when the parent completes
+- `StepMetadata` is a flat record with 11 fields (no `subSteps` list): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`, `parentActionId`, `groupingBehavior`, `selectionBehavior`. `TimingInfo` (§6.5) has 5 fields: `count`, `frequency`, `period`, `periodUnit`, `boundsEnd`.
+- Nesting is **organizational only** — it groups a sub-step under its enclosing action but does **not** create an implicit `relatedStep`/dependency link. Ordering between a parent and its sub-steps (and among sub-steps) must be expressed explicitly via `relatedAction`. A sub-step with no explicit predecessor is created independently whenever its own trigger fires (`ComplianceEngine.createInitialStep`), exactly like a top-level step — it does not wait for its parent to complete. (An earlier version of the parser auto-added a backward `relatedStep` from child to parent; see the comment in `PlanDefinitionParser.flattenAction` — it was removed because under the forward progressive-instantiation model it meant "completing the child re-creates the parent," spawning duplicate parent steps.)
+- `parentActionId` is retained to reconstruct nesting-group membership for the protocol-completion check (§6.2's "group siblings", via `PlanDefinitionParser.computeMustGroupActions`) and, as of the repeating-step-groups feature, to detect and walk repeating groups (`PlanDefinitionParser.isRepeatingGroupRoot` / `findEnclosingRepeatingGroup`, §6.5) — it is not used to create step dependencies or `relatedAction` links.
+- `groupingBehavior`/`selectionBehavior` (FHIR `PlanDefinition.action.groupingBehavior`/`selectionBehavior`) are parsed onto `StepMetadata` but are **inert metadata** — they do not gate any CCE materialization, completion, or repeat behavior. A repeating group is instead detected structurally, from `timing` + nested children (§6.5). As a CCE-specific convention (not an official FHIR default), `selectionBehavior` defaults to `"one-or-more"` when `groupingBehavior` is present but `selectionBehavior` is absent.
 - Sub-steps with `relatedAction` pointing to siblings are flattened as-is and created progressively via standard `createDependentSteps()` logic
 - All trigger indexing uses the step's **plain action ID** (e.g., `"anc-visit-1-referral"`)
 - Intelligence actions are found via flat lookup by `actionId` (no tree traversal needed)
@@ -759,9 +773,9 @@ Given this PlanDefinition structure:
 ```
 
 `extractSteps()` produces 3 flat `StepMetadata` entries:
-1. `anc-visit-1` — top-level step with its trigger
-2. `anc-visit-1-referral` — flattened with `relatedSteps: [{actionId: "anc-visit-1", relationship: "after-end"}]` (auto-added parent ref, since it has no sibling dependency) + `relatedSteps: [{actionId: "anc-visit-1-referral-ack", relationship: "after-end"}]`
-3. `anc-visit-1-referral-ack` — flattened with `relatedSteps: [{actionId: "anc-visit-1", relationship: "after-end"}]` (auto-added parent ref; its sibling dependency via `relatedAction` to the `-ack` step is on the referral step, not this one)
+1. `anc-visit-1` — top-level step with its trigger; `parentActionId: null`
+2. `anc-visit-1-referral` — flattened with `relatedSteps: [{actionId: "anc-visit-1-referral-ack", relationship: "after-end"}]` (its own explicit `relatedAction`) and `parentActionId: "anc-visit-1"` (nesting-group membership only — no implicit link to the parent). It has its own trigger (`ServiceRequest`), so it is created independently whenever that trigger fires rather than waiting for `anc-visit-1` to complete.
+3. `anc-visit-1-referral-ack` — flattened with no `relatedSteps` of its own and `parentActionId: "anc-visit-1"`; created progressively when `anc-visit-1-referral` completes (via its predecessor's `relatedAction`)
 
 The intelligence action (`anc-visit-1-escalation`) is extracted into `anc-visit-1`'s `intelligenceActions` list.
 
@@ -773,15 +787,18 @@ sequenceDiagram
     participant SIS as StepInstanceService
     participant DB as step_instance
 
-    Note over Engine: Event matches "anc-visit-1" → step created & completed
+    Note over Engine: Event matches "anc-visit-1" → step created & completed (own trigger)
     Engine->>SIS: completeStep(anc-visit-1)
-    SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral"<br/>(has relatedStep to anc-visit-1, relationship after-end)
-    SIS->>DB: Create anc-visit-1-referral (PENDING)
+    Note over SIS: createDependentSteps() — anc-visit-1 has no relatedSteps of its own, nothing created
 
-    Note over Engine: Later — event matches "anc-visit-1-referral" → completed
+    Note over Engine: Later, independently — a ServiceRequest event matches<br/>"anc-visit-1-referral"'s own trigger
+    Engine->>Engine: createInitialStep(anc-visit-1-referral)<br/>(no dependency on anc-visit-1 — nesting is organizational only)
     Engine->>SIS: completeStep(anc-visit-1-referral)
     SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral-ack"<br/>(has relatedStep to anc-visit-1-referral, relationship after-end)
     SIS->>DB: Create anc-visit-1-referral-ack (PENDING)
+
+    Note over Engine: Later — event matches "anc-visit-1-referral-ack" → completed
+    Engine->>SIS: completeStep(anc-visit-1-referral-ack)
 ```
 
 #### Trigger Indexing
@@ -793,6 +810,89 @@ All steps (regardless of original nesting level) are indexed in `trigger_index` 
 | `anc-visit-1` | Top-level action |
 | `anc-visit-1-referral` | Originally nested under anc-visit-1, now a peer |
 | `anc-visit-1-referral-ack` | Originally nested under anc-visit-1, now a peer |
+
+### 6.5 Repeating Step Groups
+
+A **repeating step group** is a parent action whose nested sub-steps (§6.4) recur together as a unit — e.g. a monthly follow-up bundle of a weight check and a lab draw that repeats until a bounded count or end date is reached. FHIR models this with `PlanDefinition.action.groupingBehavior`/`selectionBehavior` on the parent plus a `Timing.repeat` (`period`/`periodUnit`, optionally `count` or `boundsPeriod.end`); CCE detects and drives the recurrence structurally rather than from `groupingBehavior`/`selectionBehavior` themselves (§6.4).
+
+#### Detecting a Repeating Group
+
+`PlanDefinitionParser.isRepeatingGroupRoot(node, steps)` classifies a `StepMetadata` node as a repeating-group root iff **all** of:
+
+| Condition | Check |
+|---|---|
+| Has children | some step's `parentActionId` equals `node.id()` |
+| Carries a repeat cadence | `node.timing()` has `period` and `periodUnit` present |
+| Cadence is an actual repeat | `timing.count()` is `null` (open-ended) **or** `> 1` — a `count` of exactly `1` means "occurs once" and is excluded, matching the semantics already used for the single-action repeat feature (`StepInstanceService.createDependentSteps`'s `count != null && count > 1` check) |
+
+`PlanDefinitionParser.findEnclosingRepeatingGroup(actionId, steps)` walks a step's `parentActionId` chain upward and returns the nearest ancestor (or the step itself) that satisfies `isRepeatingGroupRoot`, or `null` if the step is not part of a repeating group. `PlanDefinitionParser.computeMustDescendants(rootId, steps)` does a `parentActionId` BFS strictly below a given root (excluding the root itself) and filters to `requiredBehavior=="must"` — it identifies a group's mandatory members, and `computeMustGroupActions` (§6.2) is now implemented in terms of it (walk up to the top-level root, then re-add the root itself if it's `"must"` — behavior-preserving).
+
+**Nested repeating groups are rejected at load time.** `PlanDefinitionParser.validateNoNestedRepeatingGroups`, invoked at the end of `extractSteps`, throws `IllegalArgumentException` if a repeating-group root is found nested under another repeating-group root — cycle tracking is keyed to a single enclosing group, and nesting would conflate two independent cycle counters onto the same materialized rows. This mirrors the existing load-time-rejection philosophy of `validateActionTypes`/`validateActionIds`/`validateTriggers`. A group child may still carry its own independent `Timing.repeat` for **single-action** recurrence (the pre-existing `repeat_index` feature) — `cycle_index` (this group) and `repeat_index` (a single action within a cycle) are orthogonal.
+
+#### Persistence: One Row Per Cycle
+
+Migration `V8__group_step_instance.sql` adds a `group_step_instance` table — one row per **cycle** of a repeating group, not one row per group:
+
+| Column | Notes |
+|---|---|
+| `id` | UUID v7, application-generated (`UuidV7Generator`), no DB default — same pattern as `protocol_instance`/`step_instance`/`deviation` |
+| `protocol_instance_id` | FK to `protocol_instance` |
+| `group_action_id` | the repeating-group root's `actionId` |
+| `cycle_index` | `INTEGER NOT NULL DEFAULT 0` — 0-based |
+| `due_date` | the cycle's due date |
+| `status` | `ACTIVE` \| `COMPLETED` (CHECK constraint) |
+| `created_at` / `updated_at` | standard audit timestamps |
+
+`UNIQUE(protocol_instance_id, group_action_id, cycle_index)` guarantees at most one row per cycle. `step_instance` gained a nullable `group_step_instance_id` FK — `null` for every step outside a repeating group, and pointing at the owning cycle's row for a group's must-descendants. The new `GroupStepInstance` entity, `GroupStepInstanceStatus{ACTIVE,COMPLETED}` enum, and `GroupStepInstanceRepository` (`findByProtocolInstanceIdAndGroupActionIdAndCycleIndex`, `findTopByProtocolInstanceIdAndGroupActionIdOrderByCycleIndexDesc`) back this.
+
+```mermaid
+stateDiagram-v2
+    [*] --> ACTIVE : resolveGroupStepInstance()<br/>(cycle seeded reactively)
+    ACTIVE --> COMPLETED : checkAndAdvanceGroupCycles()<br/>[all must-descendants terminal]
+    COMPLETED --> [*]
+```
+
+#### Materialization Model: Reactive, Cycle-by-Cycle
+
+Repeating groups are **not** materialized eagerly. Only the current cycle's steps exist at any time; the next cycle is spawned once the current cycle's mandatory (`must`) descendants are all terminal. This is deliberate: an open-ended group (no `count`) has no fixed number of cycles, so eager pre-creation is not possible without an arbitrary cap, and reactive spawning keeps the model correct regardless of whether the group is bounded or open-ended.
+
+- **Cycle 0** is seeded by the existing reactive (`ComplianceEngine.createInitialStep`) and progressive-instantiation (`StepInstanceService.createDependentSteps`) paths, both of which now resolve a `GroupStepInstance` via `StepInstanceService.resolveGroupStepInstance(protocolInstance, actionId, cycleIndex, dueDate, steps)` — a find-or-create keyed on `(protocolInstance, groupRootId, cycleIndex)`, safe to call redundantly. `createStep` gained a nullable `GroupStepInstance` parameter that `resolveGroupStepInstance`'s result is threaded through to.
+- **Cycle advancement** (`StepInstanceService.checkAndAdvanceGroupCycles`) runs, per repeating-group root, after every step completion and after every scheduler `OVERDUE_TO_MISSED` transition (a must child can reach a terminal state via completion **or** via miss):
+  1. Find the latest `GroupStepInstance` for the group (`findTopBy…OrderByCycleIndexDesc`). If none exists yet, the group hasn't started — nothing to do (cycle 0 is seeded elsewhere, see above).
+  2. Load that cycle's materialized steps and check whether every `must`-descendant action id is both **present** and in a terminal state (`COMPLETED`/`MISSED`/`SKIPPED`). If not — either the cycle is still in progress, or a mandatory child was silently never materialized — do nothing.
+  3. Otherwise mark the cycle `COMPLETED` (idempotent — skipped if already `COMPLETED`) and attempt to spawn cycle `N+1`, subject to the stop conditions below.
+
+#### Stop Conditions
+
+| Condition | Check | Effect |
+|---|---|---|
+| **Bounded by `count`** | `timing.count() != null && nextCycleIndex >= timing.count()` | Cycle `N` stays `COMPLETED`; no cycle `N+1` is created |
+| **Bounded by `boundsEnd`** | the computed next due date is after `timing.boundsEnd()` (parsed from `Timing.repeat.boundsPeriod.end`; `boundsDuration`/`boundsRange` are out of scope and silently ignored) | Same — no cycle `N+1` is created |
+| Neither present | — | Open-ended: cycle `N+1` is always spawned |
+
+#### Next Cycle's Due Date — Clinical-Time Anchored
+
+The next cycle's due date is **not** wall-clock time — it is anchored to when the current cycle's mandatory work clinically finished, consistent with this codebase's existing `resolveOccurredAt`/`completedAt` anchoring (§4.2, §4.3):
+
+```
+cycleAnchor  = max( completedAt ?? missedDate )  across the current cycle's must-descendants, falling back to now()
+nextDueDate  = cycleAnchor + period(periodUnit)
+```
+
+If `nextDueDate` would fall after `timing.boundsEnd()`, the group stops instead of spawning (see above). Otherwise, `resolveGroupStepInstance` finds-or-creates the cycle `N+1` `GroupStepInstance` (`ACTIVE`), and a `PENDING` `step_instance` is created for each must-descendant action (deduplicated via `existsByGroupStepInstanceIdAndActionId`, since `checkAndAdvanceGroupCycles` can be invoked multiple times as sibling must-children complete/miss), with `overdueDate`/`missedDate` computed from that action's `toleranceDays` off the new due date, same as any other step.
+
+#### Concurrency: Pessimistic Locking
+
+This feature introduces the codebase's **first** use of explicit DB row locking: `ProtocolInstanceRepository.findByIdForUpdate` (`@Lock(LockModeType.PESSIMISTIC_WRITE)`). It closes a race specific to repeating groups: two must-children of the *same* cycle can complete or miss concurrently — one via the inbound-event consumer (`completeStep`), the other via the scheduler-trigger consumer (`applySchedulerTransition`'s `OVERDUE_TO_MISSED` branch) — and without a lock, each transaction could see the other's sibling as still non-terminal, so neither would advance the cycle. A later event could then falsely mark the protocol `COMPLETED`, because `computeExpectedMustActions` (§6.2) keys terminality on the bare `actionId` and so collapses progress across cycles.
+
+The lock is acquired **only** when the protocol actually has a repeating group — guarded by a cheap in-memory `StepInstanceService.hasRepeatingGroup(steps)` check (`steps.stream().anyMatch(isRepeatingGroupRoot)`) — immediately before `checkAndAdvanceGroupCycles`/`checkAndCompleteProtocol` are called, in both `completeStep` and the `OVERDUE_TO_MISSED` branch of `applySchedulerTransition`. The latter branch now parses the PlanDefinition unconditionally to run this check, which it previously did not need to do. Protocols with no repeating group pay no locking cost and no added latency.
+
+#### Same-Group Dependent Edges
+
+Two existing behaviors were adjusted so a `relatedAction` edge or an auto-skip **within a single group cycle** doesn't bleed across cycles:
+
+- **`createDependentSteps`:** when a `relatedAction` edge's predecessor and target both belong to the *same* repeating group, the dependent step inherits the predecessor's `GroupStepInstance` (same cycle), and its dedup guard is scoped to that cycle (`existsByGroupStepInstanceIdAndActionId`) instead of the whole protocol instance — otherwise a dependent already created in an earlier cycle would wrongly block re-creating it for a later one. Every other edge (target outside any group, or an edge starting a *different* group's cycle 0) keeps today's exact behavior, deduplicating via `existsByProtocolInstanceIdAndActionId`.
+- **`autoSkipPrecedingOptionalSteps`:** a `could` sibling is now only auto-skipped if it belongs to the *same* group cycle as the just-completed step (compared by `group_step_instance` id). This fixes a cross-cycle bug where a stale `could` sibling left over from an earlier cycle — sharing an `actionId` that's a `relatedAction` ancestor of the completed step — could be wrongly skipped even though it wasn't actually this cycle's predecessor.
 
 ## 7. Security
 
@@ -808,15 +908,15 @@ See [API Reference](api-reference.md) for endpoint details.
 | Metric | Type | Description |
 |---|---|---|
 | `cce.events.processed` | Counter | Total inbound events processed |
-| `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
+| `cce.events.matched` | Counter (tagged) | By `status` tag: `matched`, `zero_match` — no separate `cce.events.zero_match` metric exists |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
-| `cce.events.zero_match` | Counter | Events with zero trigger matches |
 | `cce.events.intelligence.published` | Counter | Intelligence trigger events published to Kafka |
 | `cce.intelligence.actions.evaluated` | Counter | Total intelligence action conditions evaluated |
 | `cce.intelligence.actions.fired` | Counter | Intelligence actions that matched and triggered |
 | `cce.intelligence.publish.duration` | Timer | Time to publish intelligence event to Kafka |
 | `cce.action.definitions.active` | Gauge | Active action definitions |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
+| `cce.events.processing.duration` | Timer | Total time to process an inbound event end-to-end (idempotency check through progressive instantiation) |
 | `cce.consumer.inbound.errors` | Counter | Inbound event consumer processing errors |
 | `cce.consumer.scheduler.errors` | Counter | Scheduler trigger consumer processing errors |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |

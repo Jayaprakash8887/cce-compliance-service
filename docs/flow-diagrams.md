@@ -22,6 +22,7 @@ sequenceDiagram
     participant ExprEval as ExpressionEvaluationService<br/>(JSONLogic + FHIRPath)
     participant ProtoInst as ProtocolInstanceService
     participant StepInst as StepInstanceService
+    participant Intel as IntelligenceActionEvaluator
     participant Audit as AuditService
     participant DB as PostgreSQL
 
@@ -65,60 +66,67 @@ sequenceDiagram
         rect rgb(255, 248, 240)
             Note over Engine: Step 3 — Extract Resource Info
             Engine->>Engine: extractResourceType(data)
-            Engine->>Engine: extractAllCodes(data)
+            Engine->>Engine: extractCodes(data)
             Note over Engine: Extracts codes from code, type,<br/>category, clinicalStatus, identifier fields
         end
 
         rect rgb(248, 240, 255)
             Note over Engine,DB: Step 4 — Tier 1 Structural Match
-            Engine->>TriggerMatch: findStructuralMatches(type, system, code)
-            TriggerMatch->>DB: SELECT FROM trigger_index<br/>WHERE resource_type AND code
-            DB-->>TriggerMatch: List<TriggerIndex>
+            Engine->>TriggerMatch: findStructuralMatches(resourceType, codes)
+            TriggerMatch->>DB: SELECT FROM trigger_index<br/>WHERE resource_type AND code (GROUP BY + HAVING)
+            DB-->>TriggerMatch: List<MatchedStep>
             TriggerMatch-->>Engine: structural matches
         end
 
         rect rgb(255, 245, 245)
             Note over Engine,ExprEval: Step 5 — Tier 2 Condition Evaluation
             loop For each structural match
-                Engine->>Parser: parseFromMap(definition)
-                Parser-->>Engine: PlanDefinition
-                Engine->>TriggerMatch: evaluateCondition(action, variables)
-                TriggerMatch->>ExprEval: evaluate(language, expression, vars)
-                ExprEval-->>TriggerMatch: boolean
-                TriggerMatch-->>Engine: condition result
+                Engine->>Parser: extractSteps(planDefinition)<br/>(cached per protocolDefinitionId for this event)
+                Parser-->>Engine: List<StepMetadata>
+                alt Action's trigger has no condition
+                    Engine->>Engine: Accept match as-is
+                else Trigger has a condition
+                    Engine->>ExprEval: evaluate(language, expression, eventData)
+                    ExprEval-->>Engine: boolean
+                end
+            end
+            Note over Engine,ExprEval: Condition-only triggers (no data[], scenario F3)<br/>are also evaluated here for every inbound event
+            Engine->>TriggerMatch: getConditionOnlyTriggers()
+            TriggerMatch-->>Engine: List<ConditionOnlyTrigger>
+            loop For each condition-only trigger
+                Engine->>ExprEval: evaluate(language, expression, eventData)
+                ExprEval-->>Engine: boolean
             end
         end
 
         rect rgb(240, 255, 240)
             Note over Engine,Audit: Step 6 — Process Result
-            alt Single Match
-                Engine->>ProtoInst: enrollOrGetActive(patientId, planDef)
-                ProtoInst->>DB: Find or create ProtocolInstance
-                DB-->>ProtoInst: ProtocolInstance
-                ProtoInst-->>Engine: protocolInstance
+            alt One or more matches
+                loop For each matched (protocolDefinitionId, actionId)
+                    Engine->>ProtoInst: enrollPatient(patientId, protocolDef, occurredAt)
+                    Note over ProtoInst: Idempotent — returns the existing ACTIVE<br/>instance if the patient is already enrolled
+                    ProtoInst->>DB: Find or create ProtocolInstance
+                    DB-->>ProtoInst: ProtocolInstance
+                    ProtoInst-->>Engine: protocolInstance
 
-                Engine->>Engine: resolveOccurredAt(event)<br/>(clinical time from payload → envelope time → now)
-                Engine->>StepInst: createStep(protocol, actionId, ...)
-                StepInst->>DB: INSERT INTO step_instance
-                Engine->>StepInst: completeStep(stepId, eventLogId, source, occurredAt)
-                Note over StepInst: completed_at = clinical occurrence time (clamped to now)
-                StepInst->>DB: UPDATE step_instance SET state=COMPLETED
+                    Engine->>Engine: resolveOccurredAt(event)<br/>(clinical time from payload → envelope time → now)
+                    Engine->>StepInst: findActionableStep(protocolInstanceId, actionId)
+                    alt No actionable step exists yet
+                        Engine->>StepInst: createStep(protocol, actionId, 0, now, ...)
+                        StepInst->>DB: INSERT INTO step_instance (state=PENDING)
+                    end
 
-                Note over Engine,DB: Progressive Step Instantiation
-                Engine->>Parser: findDependentActions(allActions, actionId)
-                Parser-->>Engine: dependent actions
-                loop For each dependent action
-                    Engine->>Parser: computeRelatedActionOffset(action, actionId)
-                    Note over StepInst: Relationship determines base time:<br/>after-end → completedAt (clinical), after-start → dueDate
-                    Note over StepInst: If TimingInfo.count > 1 → create N recurring<br/>instances with staggered due dates
-                    Engine->>StepInst: createDependentSteps(protocol, depAction, base, offset)
-                    StepInst->>DB: INSERT INTO step_instance(s) (state=PENDING)
+                    Engine->>StepInst: completeStep(step, eventLogId, source, occurredAt)
+                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, then — only if the parsed<br/>steps contain a repeating group — locks the protocol instance<br/>row and advances group cycles (see §9 "Repeating Group Cycle<br/>Advancement"), then calls checkAndCompleteProtocol<br/>(see §9 "Protocol Completion Check")
+                    StepInst->>DB: UPDATE step_instance SET state=COMPLETED
+
+                    Engine->>Intel: evaluateOnCompletion(step, eventPayload)
+
+                    Engine->>Audit: auditSystem("event.processing", "matched", ...)
                 end
-
-                Engine->>EventLog: updateMatchResult(MATCHED)
-                Engine->>Audit: auditSystem("event.processing", "matched", ...)
+                Engine->>EventLog: updateStatus(eventLog, MATCHED)
             else No Matches
-                Engine->>EventLog: updateMatchResult(ZERO_MATCH)
+                Note over Engine,EventLog: eventLog was already recorded with ZERO_MATCH<br/>in Step 2 — no further status update needed
             end
         end
     end
@@ -135,31 +143,38 @@ sequenceDiagram
     participant Controller as ProtocolDefinitionController
     participant Service as ProtocolDefinitionService
     participant Parser as PlanDefinitionParser
-    participant Validator as FhirResourceValidator
+    participant TriggerMatch as TriggerMatchingService
     participant DB as PostgreSQL
     participant Audit as AuditService
 
-    Client->>Controller: POST /v1/protocol-definitions<br/>{ planDefinitionJson: "..." }
-    Controller->>Service: loadProtocolDefinition(json)
+    Client->>Controller: POST /v1/compliance/protocol-definitions<br/>{ planDefinitionJson: "..." }
+    Controller->>Service: loadProtocol(planDefinitionJson)
 
     Service->>Parser: parse(json)
-    Parser->>Parser: FhirContext.parseResource()
-    Parser-->>Service: PlanDefinition
-
-    Service->>Parser: validateActionIds(planDefinition)
-    Note over Service,Parser: Validates all actionIds are<br/>mandatory (non-blank) and unique
-
-    Service->>Validator: validateOrThrow(planDefinition, "PlanDefinition")
-    alt Validation Fails
-        Validator-->>Service: throw FhirValidationException
+    Parser->>Parser: FhirContext.parseResource()<br/>(StrictErrorHandler)
+    alt Malformed FHIR JSON
+        Parser-->>Service: throw DataFormatException
         Service-->>Controller: propagate exception
         Controller-->>Client: 422 Unprocessable Entity
     end
+    Parser-->>Service: PlanDefinition
+
+    Service->>Parser: validateActionIds(planDefinition)
+    Note over Service,Parser: Validates all actionIds (incl. nested sub-steps)<br/>are non-blank and unique
+    Service->>Parser: validateActionTypes(planDefinition)
+    Note over Service,Parser: Validates every action declares an explicit<br/>type coding: 'step' or 'fire-event'
+    Service->>Parser: validateTriggers(planDefinition)
+    Note over Service,Parser: Validates every trigger has data[] and/or a condition
+    alt Any validation fails
+        Parser-->>Service: throw IllegalArgumentException
+        Service-->>Controller: propagate exception
+        Controller-->>Client: 400 Bad Request
+    end
 
     Service->>Service: Extract url & version
-    Service->>DB: existsByUrlAndVersion(url, version)
+    Service->>DB: findByUrlAndVersion(url, version)
     alt Already Exists
-        DB-->>Service: true
+        DB-->>Service: present
         Service-->>Controller: throw IllegalArgumentException
         Controller-->>Client: 400 Bad Request
     end
@@ -169,18 +184,19 @@ sequenceDiagram
 
     rect rgb(245, 255, 245)
         Note over Service,DB: Build Trigger Index
-        Service->>Parser: extractAllActions(planDefinition)
-        Parser-->>Service: List<Action>
+        Service->>Parser: buildTriggerIndexEntries(planDefinition, protocolDefId)
+        Note over Parser: Decomposes each action's trigger data[].codeFilter[]<br/>into individual rows, recursing into nested sub-step actions
+        Parser-->>Service: List<TriggerIndex>
+        Service->>DB: saveAll(indexEntries)
+    end
 
-        loop For each Action
-            Service->>Parser: extractTriggers(action)
-            loop For each Trigger
-                Service->>Parser: extractResourceType(trigger)
-                Service->>Parser: extractCodeFilters(trigger)
-                loop For each CodeFilter
-                    Service->>DB: Save TriggerIndex entry<br/>(resourceType, system, code, protocolDefId, actionId)
-                end
-            end
+    rect rgb(255, 248, 240)
+        Note over Service,TriggerMatch: Register Condition-Only Triggers
+        Service->>Parser: extractConditionOnlyTriggers(planDefinition)
+        Note over Parser: Triggers with no data[], only a condition —<br/>held in-memory, evaluated via Tier 2 for every inbound event
+        Parser-->>Service: List<ConditionOnlyTriggerInfo>
+        opt Any found
+            Service->>TriggerMatch: registerConditionOnlyTriggers(protocolDefId, triggers)
         end
     end
 
@@ -200,7 +216,9 @@ sequenceDiagram
     participant Kafka as Apache Kafka
     participant Consumer as SchedulerTriggerConsumer
     participant StepSvc as StepInstanceService
+    participant Parser as PlanDefinitionParser
     participant DevSvc as DeviationService
+    participant ProtoInst as ProtocolInstanceService
     participant DB as PostgreSQL
 
     Scheduler->>Kafka: Publish SchedulerTriggerMessage
@@ -221,7 +239,7 @@ sequenceDiagram
             StepSvc->>DB: UPDATE state = OVERDUE
             StepSvc->>DevSvc: createDeviation(OVERDUE)
             DevSvc->>DB: SELECT existing (step, OVERDUE)
-            Note right of DevSvc: Insert only if none exists;<br/>unique constraint (step_instance_id, deviation_type)<br/>is the backstop against concurrent inserts
+            Note right of DevSvc: Insert only if none exists —<br/>unique constraint (step_instance_id, deviation_type)<br/>is the backstop against concurrent inserts
             DevSvc->>DB: INSERT INTO deviation
         end
     else OVERDUE_TO_MISSED
@@ -236,6 +254,17 @@ sequenceDiagram
                 DevSvc->>DB: INSERT INTO deviation (idempotent)
             end
         end
+
+        Note over StepSvc,Parser: Unlike the other branches, OVERDUE_TO_MISSED always parses the<br/>plan definition — needed to check whether this step belongs to a<br/>repeating group, since a MISSED "must" child (or SKIPPED "could"<br/>child) can finish out that group's current cycle
+        StepSvc->>Parser: parse(definition) → extractSteps(planDefinition)
+        Parser-->>StepSvc: List<StepMetadata>
+        alt hasRepeatingGroup(steps)
+            StepSvc->>DB: findByIdForUpdate(protocolInstanceId)<br/>(pessimistic write lock)
+            StepSvc->>StepSvc: checkAndAdvanceGroupCycles(protocolInstance, steps)<br/>(see §9 "Repeating Group Cycle Advancement")
+        end
+
+        Note over StepSvc,ProtoInst: MISSED and SKIPPED are both terminal, so completion is<br/>checked unconditionally here — even if the transition above<br/>was a no-op (redelivered trigger, step already terminal)
+        StepSvc->>ProtoInst: checkAndCompleteProtocol(protocolInstanceId)
     end
 
     Consumer->>Kafka: Acknowledge offset
@@ -262,13 +291,11 @@ flowchart TD
     I -->|"No active step"| K["Create new<br/>StepInstance"]
 
     K --> L["Calculate repeatIndex"]
-    L --> M{"dueDate<br/>provided?"}
-    M -->|"Yes"| N["state = PENDING"]
-    M -->|"No"| O["state = DUE"]
+    L --> M["resolveGroupStepInstance(actionId, cycleIndex=0)<br/>find-or-create the GroupStepInstance if actionId is<br/>inside a repeating group; null otherwise"]
+    M --> N["Create StepInstance — state = PENDING<br/>(createStep always starts PENDING; the<br/>PENDING → DUE transition is scheduler-driven, see §3)<br/>attached to the resolved GroupStepInstance, if any"]
 
     J --> P["completeStep()"]
     N --> P
-    O --> P
 
     P --> Q{"Determine CompletionStatus<br/>(completedAt = clinical occurrence time)"}
     Q -->|"completedAt < dueDate"| R["EARLY"]
@@ -331,12 +358,15 @@ sequenceDiagram
     Trigger->>Evaluator: evaluateOnDeviation(step, deviation)<br/>or evaluateOnCompletion(step)
 
     rect rgb(240, 248, 255)
-        Note over Evaluator,Parser: Step 1 — Extract intelligence actions
-        Evaluator->>DB: Load PlanDefinition from step's protocol
-        DB-->>Evaluator: ProtocolDefinition
-        Evaluator->>Parser: extractActions(planDefinition)
-        Evaluator->>Parser: action.intelligenceActions()
-        Parser-->>Evaluator: List<IntelligenceActionInfo>
+        Note over Evaluator,Parser: Step 1 — Resolve plan definition & find intelligence actions
+        Evaluator->>Evaluator: getCachedPlanDefinition(protocolDef)<br/>(in-memory cache keyed by protocolDefinitionId)
+        alt Cache miss
+            Evaluator->>Parser: parse(definition)
+            Parser-->>Evaluator: PlanDefinition
+        end
+        Evaluator->>Parser: extractSteps(planDefinition)
+        Parser-->>Evaluator: List<StepMetadata>
+        Evaluator->>Evaluator: Match StepMetadata by step.actionId,<br/>read its intelligenceActions()
     end
 
     rect rgb(245, 255, 245)
@@ -459,7 +489,7 @@ sequenceDiagram
         Controller->>Service: Business operation
         Service-->>Controller: throw Exception
         Controller->>ExHandler: Exception propagation
-        alt NoSuchElementException
+        alt EntityNotFoundException
             ExHandler-->>Client: 404 Not Found
         else IllegalArgumentException
             ExHandler-->>Client: 400 Bad Request
@@ -467,9 +497,9 @@ sequenceDiagram
             ExHandler-->>Client: 409 Conflict
         else MethodArgumentNotValidException
             ExHandler-->>Client: 400 + field errors
-        else FhirValidationException
-            ExHandler-->>Client: 422 + validation errors
-        else ExpressionEvaluationException
+        else DataFormatException<br/>(malformed FHIR JSON)
+            ExHandler-->>Client: 422 + parse error
+        else UnsupportedExpressionLanguageException
             ExHandler-->>Client: 422 + expression error
         else Exception
             ExHandler-->>Client: 500 Internal Server Error
@@ -509,7 +539,11 @@ flowchart TD
     NORMAL --> COMPLETE["completeStep(step)"]
     COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this actionId)"]
     DEPS --> CREATED["Create dependent steps (PENDING)"]
-    CREATED --> CHECK["Check protocol completion"]
+    CREATED --> HASGROUP{"hasRepeatingGroup(steps)?"}
+    HASGROUP -->|"Yes"| LOCK["Lock protocol instance row<br/>(findByIdForUpdate — pessimistic write)"]
+    LOCK --> ADVANCE["checkAndAdvanceGroupCycles()<br/>(see 'Repeating Group Cycle<br/>Advancement' below)"]
+    ADVANCE --> CHECK
+    HASGROUP -->|"No"| CHECK["Check protocol completion<br/>(see 'Protocol Completion Check' below)"]
 ```
 
 ### Dependent Step Creation on Completion
@@ -520,14 +554,82 @@ When any step completes, `createDependentSteps()` finds all steps whose `related
 flowchart TD
     START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → completedStep.actionId"]
     FIND --> LOOP{"For each dependent step"}
-    LOOP --> CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
-    CALC --> RECURRING{"TimingInfo.count > 1?"}
+    LOOP --> DEDUP{"Step for this action already exists?<br/>(scoped to completedStep's own cycle if the target<br/>is in the SAME repeating group as completedStep,<br/>else anywhere in the instance)"}
+    DEDUP -->|"Yes"| SKIP["Skip — avoid duplicate<br/>(already created reactively via its own<br/>trigger, or by a redelivered predecessor)"]
+    DEDUP -->|"No"| MUST{"target action's<br/>requiredBehavior == must?"}
+    MUST -->|"No (could / unspecified)"| SKIP2["Skip pre-creation — a dangling PENDING row could<br/>later go OVERDUE/MISSED even though its event never<br/>arrives; created on the fly if its own trigger fires"]
+    MUST -->|"Yes"| CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
+    CALC --> GROUP["Resolve target's GroupStepInstance:<br/>same repeating group as completedStep → reuse<br/>completedStep's GroupStepInstance; otherwise<br/>resolveGroupStepInstance(target, cycle=0)<br/>— find-or-create, or null if not grouped"]
+    GROUP --> RECURRING{"TimingInfo.count > 1?"}
 
     RECURRING -->|"Yes"| MULTI["Create N recurring instances with staggered due dates"]
-    RECURRING -->|"No"| SINGLE["createStep(dependent, dueDate)"]
+    RECURRING -->|"No"| SINGLE["createStep(dependent, dueDate,<br/>groupStepInstance) — state=PENDING"]
 
     MULTI --> NEXT["Continue to next"]
     SINGLE --> NEXT
+    SKIP --> NEXT
+    SKIP2 --> NEXT
     NEXT --> LOOP
+    LOOP -->|"Done"| END["Return"]
+```
+
+### Protocol Completion Check (checkAndCompleteProtocol)
+
+Called at the end of `completeStep()` and, unconditionally, from the `OVERDUE_TO_MISSED` scheduler transition (§3). A protocol instance only moves to `COMPLETED` once no materialized step is still actionable **and** every mandatory ("must") action that the observed progress implies is satisfied — where "implied" covers three cases: the observed action itself, its transitive `relatedAction` predecessors (ancestors), and any mandatory action nested under the same top-level PlanDefinition action (a "group sibling"), even one whose own trigger never fired and so was never materialized as a step_instance row.
+
+```mermaid
+flowchart TD
+    START["checkAndCompleteProtocol(instanceId)"] --> ACTIVE{"instance.status == ACTIVE?"}
+    ACTIVE -->|"No"| RETURN1["Return — nothing to do"]
+    ACTIVE -->|"Yes"| LOAD["Load materialized step_instance rows"]
+    LOAD --> EMPTY{"Any steps materialized?"}
+    EMPTY -->|"No"| RETURN2["Return"]
+    EMPTY -->|"Yes"| ACTIONABLE{"Any step still<br/>PENDING/DUE/OVERDUE?"}
+    ACTIONABLE -->|"Yes"| RETURN3["Return — outstanding work"]
+    ACTIONABLE -->|"No"| EXPECT["computeExpectedMustActions:<br/>for every observed actionId, union of<br/>{itself, ancestors, must-group siblings}<br/>restricted to requiredBehavior == must"]
+    EXPECT --> CHECK{"Every expected must-action<br/>has a terminal step<br/>(COMPLETED/MISSED/SKIPPED)?"}
+    CHECK -->|"No"| RETURN4["Return — log outstanding<br/>mandatory actionIds"]
+    CHECK -->|"Yes"| COMPLETE["Set status = COMPLETED<br/>Record state-transition history"]
+```
+
+### Repeating Group Cycle Advancement (checkAndAdvanceGroupCycles)
+
+Called from both `completeStep()` and the `OVERDUE_TO_MISSED` scheduler transition (§3), but only when `hasRepeatingGroup(steps)` is true — a cheap structural check (no query) performed first so protocols without a repeating group pay nothing extra. When true, the caller acquires a pessimistic write lock on the protocol instance row (`findByIdForUpdate` — the first DB lock in this codebase) before calling this method, serializing the cycle-advance/completion decision against concurrent triggers landing on sibling steps of the same instance. Cycle 0 of a repeating group is seeded elsewhere — by `ComplianceEngine.createInitialStep` (reactive path) and `StepInstanceService.createDependentSteps` (progressive path), both via `resolveGroupStepInstance` (see §4 and "Dependent Step Creation on Completion" above) — this method only ever advances an existing cycle N to N+1.
+
+```mermaid
+flowchart TD
+    START["checkAndAdvanceGroupCycles(protocolInstance, steps)"] --> ROOTS["Find repeating-group roots in steps<br/>(isRepeatingGroupRoot)"]
+    ROOTS --> LOOP{"For each group root R"}
+
+    LOOP --> MUST["mustDescendantIds =<br/>computeMustDescendants(R)"]
+    MUST --> MUSTEMPTY{"mustDescendantIds<br/>empty?"}
+    MUSTEMPTY -->|"Yes"| NEXT
+    MUSTEMPTY -->|"No"| CURCYCLE["currentCycle = latest GroupStepInstance<br/>for (protocolInstance, R)<br/>(highest cycleIndex)"]
+
+    CURCYCLE --> CYCLEEXISTS{"currentCycle<br/>exists?"}
+    CYCLEEXISTS -->|"No"| NOCYCLE["Skip — group hasn't started;<br/>cycle 0 is seeded elsewhere via<br/>resolveGroupStepInstance"]
+    NOCYCLE --> NEXT
+
+    CYCLEEXISTS -->|"Yes"| LOADCHILDREN["Load currentCycle's child steps<br/>(findByGroupStepInstanceId)"]
+    LOADCHILDREN --> ALLTERMINAL{"Every mustDescendant present<br/>AND in a terminal state<br/>(COMPLETED/MISSED/SKIPPED)?"}
+    ALLTERMINAL -->|"No"| INPROGRESS["Skip — cycle still in progress,<br/>or a must child was never<br/>materialized this cycle"]
+    INPROGRESS --> NEXT
+
+    ALLTERMINAL -->|"Yes"| MARKDONE["Mark currentCycle<br/>status = COMPLETED (if not already)"]
+    MARKDONE --> BOUNDCOUNT{"timing.count set AND<br/>nextCycleIndex &gt;= count?"}
+    BOUNDCOUNT -->|"Yes"| STOPCOUNT["Stop advancing — reached<br/>bounded repeat count"]
+    STOPCOUNT --> NEXT
+
+    BOUNDCOUNT -->|"No"| ANCHOR["cycleAnchor = max(completedAt ?? missedDate)<br/>across current cycle's must descendants<br/>(fallback: now())"]
+    ANCHOR --> NEXTDUE["nextDueDate = cycleAnchor +<br/>timing.period (periodUnit)"]
+    NEXTDUE --> BOUNDEND{"timing.boundsEnd set AND<br/>nextDueDate after boundsEnd?"}
+    BOUNDEND -->|"Yes"| STOPEND["Stop advancing — reached<br/>bounds end"]
+    STOPEND --> NEXT
+
+    BOUNDEND -->|"No"| RESOLVE["resolveGroupStepInstance(R, nextCycleIndex,<br/>nextDueDate) — find-or-create the<br/>next cycle's GroupStepInstance"]
+    RESOLVE --> SPAWN["For each mustDescendantId not already<br/>present in the next cycle:<br/>createStep(repeatIndex=0,<br/>attached to next GroupStepInstance)"]
+    SPAWN --> NEXT
+
+    NEXT["Continue to next root"] --> LOOP
     LOOP -->|"Done"| END["Return"]
 ```
