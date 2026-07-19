@@ -586,16 +586,19 @@ The `InboundEventConsumer` calls `FacilityService.upsertFacility()` for every in
 | Existing facility, incoming has a name, name differs from stored | UPDATE `facility_name` to incoming value (covers null → name and name → new name) |
 | Existing facility, incoming has no name | No-op — stored name is preserved |
 
-Resource-type-specific paths for `facility_id` and `facility_name`:
+Resource-type-specific paths for `facility_id` and `facility_name`, tried in order until one resolves:
 
-| Resource Type | `facility_id` source | `facility_name` source |
+| Resource Type | `facility_id` source (priority order) | `facility_name` source |
 |---------------|---------------------|----------------------|
 | `ServiceRequest` | `locationReference[0].reference` (strip prefix) or `identifier.value` | `locationReference[0].display` |
-| `Encounter` | `location[0].location.reference` (strip prefix) or `identifier.value` | `location[0].location.display` |
+| `Encounter` | 1. `hospitalization.origin.reference`/`identifier.value` 2. `source-facility` extension `valueString` 3. `location[0].location.reference`/`identifier.value` | Display of whichever reference node resolved the id above; when resolved from the extension, `location[]` is scanned for an entry whose *id* matches (never trusts a non-matching entry) |
 | `Procedure` | `location.reference` (strip prefix) or `identifier.value` | `location.display` |
 | `Immunization` | `location.reference` (strip prefix) or `identifier.value` | `location.display` |
+| Any other type (`Observation`, `Condition`, `MedicationRequest`, ...) | `source-facility` extension `valueString` — the only signal these resource types carry | `null` (extension has no display) |
 
-If the CloudEvent envelope already carries a `facilityid` extension attribute (set by the emitter), that value is used directly as the ID without re-parsing the payload. Failures are non-fatal — a warning is logged and compliance processing continues unaffected.
+For `Encounter`, `location[0].location` is deliberately *not* the first choice: for a `TRANSFER_ENCOUNTER` it holds the transfer **destination**, not the reporting/source facility, so trusting it directly would attribute the event to the wrong facility. `hospitalization.origin` and the `source-facility` extension both carry the true source facility and are checked first; mirrors the `openhim-cce-emitter-adaptor`'s `FacilityIdExtractor` fix (PR #30).
+
+If the CloudEvent envelope already carries a `facilityid` extension attribute (set by the emitter), that value is used directly as the ID without re-parsing the payload — but the display name is still resolved from the FHIR body's matching reference node, not assumed to match whatever node the extraction happens to iterate first. Failures are non-fatal — a warning is logged and compliance processing continues unaffected.
 
 ### Design Notes
 

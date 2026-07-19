@@ -54,9 +54,20 @@ public class FacilityService {
      *
      * Resource paths (mirrors FacilityIdExtractor in openhim-cce-emitter-adaptor):
      *   ServiceRequest : locationReference[0]
-     *   Encounter      : location[0].location
+     *   Encounter      : hospitalization.origin → source-facility extension → location[0].location
      *   Procedure /
-     *   Immunization   : location  (direct Reference, not array)
+     *   Immunization   : location (direct Reference) → source-facility extension
+     *   any other type : source-facility extension (e.g. Observation, Condition, MedicationRequest,
+     *                     which carry no FHIR location at all)
+     *
+     * For a transfer Encounter, location[0].location reflects where the patient ended up
+     * (the destination), not where the encounter/referral originated. hospitalization.origin is
+     * the correct source facility; the source-facility extension is the source system's own
+     * unambiguous facility declaration and is checked before location[0] for the same reason —
+     * it is present on both plain and transfer encounters and matches hospitalization.origin's id
+     * for transfers, so it catches the case above missing (origin absent/malformed) without ever
+     * resolving to the destination the way location[0] can. Mirrors the
+     * openhim-cce-emitter-adaptor fix (PR #30) and its FacilityIdExtractor.
      */
     private FacilityDetails extractFacilityDetails(CloudEventMessage event) {
         String facilityId = event.getFacilityid();
@@ -72,7 +83,26 @@ public class FacilityService {
             }
         }
 
+        // Encounter (transfer): hospitalization.origin takes priority over location[0].location
+        JsonNode hospitalization = data != null ? data.get("hospitalization") : null;
+        JsonNode originRef = hospitalization != null ? hospitalization.get("origin") : null;
+        if (originRef != null) {
+            FacilityDetails facilityDetails = fromRefNode(originRef, facilityId);
+            if (facilityDetails != null) return facilityDetails;
+        }
+
         JsonNode locationNode = data != null ? data.get("location") : null;
+        String extensionFacilityId = extractSourceFacilityExtension(data);
+
+        // Encounter: source-facility extension, checked ahead of location[0] so a transfer
+        // Encounter without hospitalization.origin still resolves to the true source facility
+        // rather than falling through to the destination in location[0].
+        if (locationNode != null && locationNode.isArray() && extensionFacilityId != null) {
+            String name = findDisplayForFacilityId(locationNode, extensionFacilityId);
+            String resolvedId = facilityId != null && !facilityId.isBlank() ? facilityId : extensionFacilityId;
+            return new FacilityDetails(resolvedId, name);
+        }
+
         if (locationNode != null) {
             if (locationNode.isArray()) {
                 // Encounter: location[0].location
@@ -85,13 +115,50 @@ public class FacilityService {
                 }
             } else {
                 // Procedure / Immunization: location (direct Reference)
-                return fromRefNode(locationNode, facilityId);
+                FacilityDetails facilityDetails = fromRefNode(locationNode, facilityId);
+                if (facilityDetails != null) return facilityDetails;
             }
         }
 
-        // Fallback: envelope has facilityId but no FHIR location node was found — insert with null name
-        if (facilityId != null && !facilityId.isBlank()) {
-            return new FacilityDetails(facilityId, null);
+        // Fallback: envelope facilityId, or else the source-facility extension — covers resource
+        // types with no FHIR location at all (Observation, Condition, MedicationRequest, ...),
+        // and any resource whose location node didn't resolve to a usable id above. No display
+        // name is available at this point.
+        String resolvedId = facilityId != null && !facilityId.isBlank() ? facilityId : extensionFacilityId;
+        return resolvedId != null ? new FacilityDetails(resolvedId, null) : null;
+    }
+
+    /**
+     * Extracts the facility ID from the source system's {@code source-facility} extension
+     * (matched by URL suffix so it survives base-URL changes), e.g.:
+     * {@code {"url": ".../source-facility", "valueString": "1651"}} → {@code "1651"}.
+     */
+    private String extractSourceFacilityExtension(JsonNode data) {
+        JsonNode extensions = data != null ? data.get("extension") : null;
+        if (extensions == null || !extensions.isArray()) return null;
+        for (JsonNode extension : extensions) {
+            String url = textOrNull(extension.get("url"));
+            if (url != null && url.endsWith("source-facility")) {
+                String value = textOrNull(extension.get("valueString"));
+                if (value != null) return value;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Scans an Encounter's location[] array for an entry whose resolved id matches
+     * targetFacilityId, returning its display name. Used to recover a display name for a
+     * source-facility-extension-resolved id without ever trusting a non-matching (destination) entry.
+     */
+    private String findDisplayForFacilityId(JsonNode locationArray, String targetFacilityId) {
+        for (JsonNode locationEntry : locationArray) {
+            JsonNode nestedLocationRef = locationEntry.get("location");
+            if (nestedLocationRef == null) continue;
+            FacilityDetails details = fromRefNode(nestedLocationRef, null);
+            if (details != null && targetFacilityId.equals(details.id())) {
+                return details.name();
+            }
         }
         return null;
     }
