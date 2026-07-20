@@ -264,18 +264,20 @@ When an inbound event **completes** a step, the completion is attributed to the 
 
 | Resource type | Clinical-time fields (first match wins) |
 |---|---|
-| `Observation` | `effectiveDateTime` → `effectiveInstant` → `effectivePeriod.end` → `effectivePeriod.start` → `issued` |
-| `Encounter` | `period.end` → `period.start` |
-| `Procedure` | `performedDateTime` → `performedPeriod.end` → `performedPeriod.start` |
+| `Observation` | `effectiveDateTime` → `effectiveInstant` → `effectivePeriod.start` → `issued` → `effectivePeriod.end` |
+| `Encounter` | `period.start` → `period.end` |
+| `Procedure` | `performedDateTime` → `performedPeriod.start` → `performedPeriod.end` |
 | `Immunization` | `occurrenceDateTime` |
-| `MedicationAdministration` | `effectiveDateTime` → `effectivePeriod.end` → `effectivePeriod.start` |
+| `MedicationAdministration` | `effectiveDateTime` → `effectivePeriod.start` → `effectivePeriod.end` |
 | `MedicationDispense` | `whenHandedOver` → `whenPrepared` |
 | `MedicationRequest` | `authoredOn` |
 | `Condition` | `onsetDateTime` → `onsetPeriod.start` → `recordedDate` |
 | `AllergyIntolerance` | `onsetDateTime` → `recordedDate` → `lastOccurrence` |
-| `ServiceRequest` | `occurrenceDateTime` → `occurrencePeriod.end` → `authoredOn` |
+| `ServiceRequest` | `occurrenceDateTime` → `authoredOn` → `occurrencePeriod.end` |
 | `Consent` | `dateTime` |
-| `DiagnosticReport` | `effectiveDateTime` → `effectivePeriod.end` → `issued` |
+| `DiagnosticReport` | `effectiveDateTime` → `issued` → `effectivePeriod.end` |
+
+A `Period`'s `end` bound is always the last-resort candidate in each row above — it reflects "when it finished," not when the clinical act occurred, so every other field (including that same Period's `start`, where present) is tried first.
 
 Values are parsed leniently (partial precision `2026` / `2026-03` / full timestamps with offset). The extractor is **best-effort** — an unmapped resource type, missing field, or unparseable value returns nothing and the caller falls back.
 
