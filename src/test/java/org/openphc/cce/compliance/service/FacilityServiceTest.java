@@ -214,9 +214,10 @@ class FacilityServiceTest {
     }
 
     @Test
-    void encounter_transfer_noOrigin_sourceFacilityExtensionResolvesIdNotDestination() throws Exception {
-        // hospitalization.origin absent — only the source-facility extension identifies the
-        // true source facility (1651); location[0] still holds the destination (0302).
+    void encounter_transfer_noOrigin_fallsBackToDestinationLocation() throws Exception {
+        // hospitalization.origin absent — falls back to location[0], even though for a transfer
+        // encounter that is the destination, not the source. The source-facility extension is
+        // never consulted for Encounter, so it must NOT rescue this case.
         String payload = """
                 {
                   "resourceType": "Encounter",
@@ -229,21 +230,21 @@ class FacilityServiceTest {
                 }
                 """;
         CloudEventMessage event = eventWith(null, payload);
-        when(facilityRepository.findByFacilityId("1651")).thenReturn(Optional.empty());
+        when(facilityRepository.findByFacilityId("0302")).thenReturn(Optional.empty());
         when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         service.upsertFacility(event);
 
         ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
         verify(facilityRepository).save(captor.capture());
-        assertEquals("1651", captor.getValue().getFacilityId());
-        assertNull(captor.getValue().getFacilityName());
+        assertEquals("0302", captor.getValue().getFacilityId());
+        assertEquals("Ruli DH", captor.getValue().getFacilityName());
     }
 
     @Test
-    void encounter_plain_sourceFacilityExtensionMatchesLocation_recoversDisplayName() throws Exception {
-        // Plain (non-transfer) encounter: source-facility matches location[0]'s id, so the
-        // display name is still recovered even though the extension itself has no display.
+    void encounter_plain_ignoresSourceFacilityExtensionEvenWhenPresentAndDisagreeing() throws Exception {
+        // Plain (non-transfer) encounter carrying a source-facility extension that disagrees with
+        // location[0]: location must win — the extension is never consulted for Encounter.
         String payload = """
                 {
                   "resourceType": "Encounter",
@@ -251,7 +252,7 @@ class FacilityServiceTest {
                     "location": { "reference": "Location/0030", "display": "Kacyiru Health Center" }
                   }],
                   "extension": [
-                    { "url": "http://example.org/fhir/StructureDefinition/source-facility", "valueString": "0030" }
+                    { "url": "http://example.org/fhir/StructureDefinition/source-facility", "valueString": "9999" }
                   ]
                 }
                 """;

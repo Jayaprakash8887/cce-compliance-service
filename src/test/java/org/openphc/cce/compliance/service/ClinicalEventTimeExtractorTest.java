@@ -47,12 +47,12 @@ class ClinicalEventTimeExtractorTest {
         }
 
         @Test
-        void observation_effectivePeriod_prefersEnd() {
+        void observation_effectivePeriod_prefersStart() {
             JsonNode data = json("""
                     { "resourceType": "Observation",
                       "effectivePeriod": { "start": "2026-03-15T08:00:00Z", "end": "2026-03-15T10:00:00Z" } }
                     """);
-            assertEquals(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC),
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 8, 0, 0, 0, ZoneOffset.UTC),
                     extractor.extract(ResourceType.Observation, data));
         }
 
@@ -77,21 +77,43 @@ class ClinicalEventTimeExtractorTest {
         }
 
         @Test
-        void encounter_usesPeriodEnd() {
+        void observation_issuedPreferredOverEffectivePeriodEnd() {
+            // effectivePeriod.end is the last-resort candidate — issued must win over it.
+            JsonNode data = json("""
+                    { "resourceType": "Observation",
+                      "effectivePeriod": { "end": "2026-03-15T10:00:00Z" },
+                      "issued": "2026-03-20T00:00:00Z" }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 20, 0, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.Observation, data));
+        }
+
+        @Test
+        void observation_fallsBackToEffectivePeriodEndAsLastResort() {
+            JsonNode data = json("""
+                    { "resourceType": "Observation",
+                      "effectivePeriod": { "end": "2026-03-15T10:00:00Z" } }
+                    """);
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 10, 0, 0, 0, ZoneOffset.UTC),
+                    extractor.extract(ResourceType.Observation, data));
+        }
+
+        @Test
+        void encounter_usesPeriodStart() {
             JsonNode data = json("""
                     { "resourceType": "Encounter",
                       "period": { "start": "2026-03-15T08:00:00Z", "end": "2026-03-15T09:30:00Z" } }
                     """);
-            assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 30, 0, 0, ZoneOffset.UTC),
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 8, 0, 0, 0, ZoneOffset.UTC),
                     extractor.extract(ResourceType.Encounter, data));
         }
 
         @Test
-        void encounter_fallsBackToPeriodStartWhenNoEnd() {
+        void encounter_fallsBackToPeriodEndWhenNoStart() {
             JsonNode data = json("""
-                    { "resourceType": "Encounter", "period": { "start": "2026-03-15T08:00:00Z" } }
+                    { "resourceType": "Encounter", "period": { "end": "2026-03-15T09:30:00Z" } }
                     """);
-            assertEquals(OffsetDateTime.of(2026, 3, 15, 8, 0, 0, 0, ZoneOffset.UTC),
+            assertEquals(OffsetDateTime.of(2026, 3, 15, 9, 30, 0, 0, ZoneOffset.UTC),
                     extractor.extract(ResourceType.Encounter, data));
         }
 

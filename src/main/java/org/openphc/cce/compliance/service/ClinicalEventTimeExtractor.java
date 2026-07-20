@@ -41,21 +41,23 @@ public class ClinicalEventTimeExtractor {
 
     /**
      * Ordered clinical-time candidates per FHIR resource type. The first candidate that resolves to
-     * a parseable value wins. For {@code Period} fields the bound (end/start) reflects "when it
-     * finished" semantics; {@code end} is preferred, with {@code start} as a secondary candidate.
+     * a parseable value wins. A {@code Period}'s {@code end} bound reflects "when it finished"
+     * semantics rather than when the clinical act actually occurred, so it is always the last-resort
+     * candidate in each type's list — tried only after every other field (including that same
+     * Period's {@code start} bound, where present) has failed to resolve.
      */
     private static final Map<ResourceType, List<TimeCandidate>> CANDIDATES = Map.ofEntries(
             Map.entry(ResourceType.Observation, List.of(
                     field("effectiveDateTime"), field("effectiveInstant"),
-                    periodEnd("effectivePeriod"), periodStart("effectivePeriod"), field("issued"))),
+                    periodStart("effectivePeriod"), field("issued"), periodEnd("effectivePeriod"))),
             Map.entry(ResourceType.Encounter, List.of(
-                    periodEnd("period"), periodStart("period"))),
+                    periodStart("period"), periodEnd("period"))),
             Map.entry(ResourceType.Procedure, List.of(
-                    field("performedDateTime"), periodEnd("performedPeriod"), periodStart("performedPeriod"))),
+                    field("performedDateTime"), periodStart("performedPeriod"), periodEnd("performedPeriod"))),
             Map.entry(ResourceType.Immunization, List.of(
                     field("occurrenceDateTime"))),
             Map.entry(ResourceType.MedicationAdministration, List.of(
-                    field("effectiveDateTime"), periodEnd("effectivePeriod"), periodStart("effectivePeriod"))),
+                    field("effectiveDateTime"), periodStart("effectivePeriod"), periodEnd("effectivePeriod"))),
             Map.entry(ResourceType.MedicationDispense, List.of(
                     field("whenHandedOver"), field("whenPrepared"))),
             Map.entry(ResourceType.MedicationRequest, List.of(
@@ -65,11 +67,11 @@ public class ClinicalEventTimeExtractor {
             Map.entry(ResourceType.AllergyIntolerance, List.of(
                     field("onsetDateTime"), field("recordedDate"), field("lastOccurrence"))),
             Map.entry(ResourceType.ServiceRequest, List.of(
-                    field("occurrenceDateTime"), periodEnd("occurrencePeriod"), field("authoredOn"))),
+                    field("occurrenceDateTime"), field("authoredOn"), periodEnd("occurrencePeriod"))),
             Map.entry(ResourceType.Consent, List.of(
                     field("dateTime"))),
             Map.entry(ResourceType.DiagnosticReport, List.of(
-                    field("effectiveDateTime"), periodEnd("effectivePeriod"), field("issued")))
+                    field("effectiveDateTime"), field("issued"), periodEnd("effectivePeriod")))
     );
 
     private final MeterRegistry meterRegistry;
