@@ -57,8 +57,8 @@ DB_HOST=localhost DB_PORT=5433 java -jar build/libs/cce-compliance-service-1.0.0
 ### 2.4 Verify Health
 
 ```bash
-# Health check
-curl http://localhost:8080/actuator/health
+# Health check (default local port is 8091 unless SERVER_PORT is overridden)
+curl http://localhost:8091/actuator/health
 
 # Expected response
 # {"status":"UP","components":{"db":{"status":"UP"},"kafka":{"status":"UP"},"diskSpace":{"status":"UP"}}}
@@ -75,11 +75,15 @@ All configuration can be overridden via environment variables:
 | Variable | Default | Description |
 |---|---|---|
 | `DB_HOST` | `localhost` | PostgreSQL hostname |
-| `DB_PORT` | `5433` | PostgreSQL port (shared with collector service) |
+| `DB_PORT` | `5432` | PostgreSQL port. The collector service exposes Postgres on `5433`, so set `DB_PORT=5433` for local dev against shared infrastructure |
 | `DB_NAME` | `ccedb` | Shared database name (all CCE services) |
 | `DB_USERNAME` | `cce_user` | Database username (shared with collector service) |
 | `DB_PASSWORD` | `cce_pass` | Database password (shared with collector service) |
 | `DB_POOL_SIZE` | `20` | HikariCP max pool size |
+| `DB_POOL_MIN_IDLE` | `5` | HikariCP minimum idle connections |
+| `DB_CONNECTION_TIMEOUT` | `30000` | HikariCP connection timeout (ms) |
+| `DB_IDLE_TIMEOUT` | `600000` | HikariCP idle timeout (ms) |
+| `DB_MAX_LIFETIME` | `1800000` | HikariCP max connection lifetime (ms) |
 
 #### Kafka
 
@@ -91,7 +95,7 @@ All configuration can be overridden via environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `SERVER_PORT` | `8080` | Application port |
+| `SERVER_PORT` | `8091` | Application port |
 
 ### 3.2 Kafka Topic Configuration
 
@@ -107,9 +111,9 @@ Configured via `cce.kafka.topics.*` in `application.yml`:
 
 | Property | Value | Description |
 |---|---|---|
-| `spring.jpa.hibernate.ddl-auto` | `validate` | Schema managed by Flyway; Hibernate only validates |
+| `spring.jpa.hibernate.ddl-auto` | `none` | Schema managed entirely by Flyway; Hibernate performs no DDL or validation |
 | `spring.jpa.open-in-view` | `false` | Prevents lazy loading in controllers (best practice) |
-| `hibernate.dialect` | `PostgreSQLDialect` | PostgreSQL-specific SQL generation |
+| `hibernate.dialect` | `PostgreSQLDialect` | Not set explicitly in `application.yml` — auto-detected by Spring Boot from the PostgreSQL driver |
 | `hibernate.jdbc.time_zone` | `UTC` | All timestamps in UTC |
 
 ### 3.4 Flyway
@@ -119,6 +123,7 @@ Configured via `cce.kafka.topics.*` in `application.yml`:
 | `spring.flyway.enabled` | `true` | Auto-apply migrations on startup |
 | `spring.flyway.locations` | `classpath:db/migration` | Migration file location |
 | `spring.flyway.baseline-on-migrate` | `true` | Baseline existing DBs on first run |
+| `spring.flyway.table` | `flyway_schema_history_compliance` | Namespaced history table so each CCE service tracks its own migrations in the shared database |
 
 ### 3.5 Observability
 
@@ -140,6 +145,8 @@ cce-compliance-service/
 │   ├── api-reference.md
 │   ├── data-dictionary.md
 │   ├── kafka-events.md
+│   ├── deployment-guide.md
+│   ├── sample-plan-definition.md
 │   └── developer-setup.md
 ├── src/
 │   └── main/
@@ -159,7 +166,12 @@ cce-compliance-service/
 │           ├── application.yml
 │           └── db/migration/
 │               ├── V1__initial_schema.sql
-│               └── V2__intelligence_tables.sql
+│               ├── V2__intelligence_tables.sql
+│               ├── V3__facility.sql
+│               ├── V4__state_history.sql
+│               ├── V5__deviation_unique_constraint.sql
+│               ├── V6__drop_uuid_defaults_for_v7.sql
+│               └── V7__facility_district.sql
 ├── Dockerfile                          # Multi-stage Docker build
 ├── .gitignore
 ├── build.gradle                        # Gradle build configuration
@@ -176,16 +188,12 @@ The database is created by the collector service's Docker Compose. The complianc
 
 ### 5.2 Flyway Migrations
 
-Migrations are applied automatically on application startup. To run manually:
+Migrations are applied automatically on application startup via Spring Boot's Flyway autoconfiguration. There is no Flyway Gradle plugin in `build.gradle` (only the `flyway-core` and `flyway-database-postgresql` libraries used at runtime), so `flywayMigrate` / `flywayInfo` Gradle tasks are **not** available. To inspect or run migrations manually, use the Flyway CLI or psql directly against the `flyway_schema_history_compliance` table:
 
 ```bash
-# Using Gradle Flyway plugin (if configured)
-./gradlew flywayMigrate -Dflyway.url=jdbc:postgresql://localhost:5433/ccedb \
-                        -Dflyway.user=cce_user \
-                        -Dflyway.password=cce_pass
-
-# Check migration status
-./gradlew flywayInfo
+# Inspect applied migrations directly
+psql -h localhost -p 5433 -U cce_user -d ccedb \
+     -c "SELECT * FROM flyway_schema_history_compliance ORDER BY installed_rank"
 ```
 
 ### 5.3 Current Migrations
@@ -194,6 +202,11 @@ Migrations are applied automatically on application startup. To run manually:
 |---|---|---|
 | V1 | Initial schema (7 tables, indexes, constraints) | `V1__initial_schema.sql` |
 | V2 | Intelligence tables (action_definition, intelligence_event_log) | `V2__intelligence_tables.sql` |
+| V3 | Facility table | `V3__facility.sql` |
+| V4 | Append-only state-transition history for protocol_instance and step_instance | `V4__state_history.sql` |
+| V5 | Deduplicate deviations and enforce one deviation per (step, type) | `V5__deviation_unique_constraint.sql` |
+| V6 | Drop DB-side UUID (v4) defaults now that ids are generated application-side as UUID v7 | `V6__drop_uuid_defaults_for_v7.sql` |
+| V7 | Add `district_name` column to facility | `V7__facility_district.sql` |
 
 ## 6. Docker Build
 
@@ -204,9 +217,12 @@ Migrations are applied automatically on application startup. To run manually:
 docker build -t cce-compliance-service:latest .
 
 # Run the container
+# SERVER_PORT must be set to 8080 to match the image's EXPOSE/healthcheck port
+# (the application's own default, when unset, is 8091)
 docker run -d \
   --name compliance-service \
   -p 8080:8080 \
+  -e SERVER_PORT=8080 \
   -e DB_HOST=host.docker.internal \
   -e DB_PORT=5433 \
   -e DB_NAME=ccedb \
@@ -221,12 +237,12 @@ docker run -d \
 ```
 Stage 1: Build (eclipse-temurin:21-jdk-alpine)
   → Copy build.gradle, settings.gradle, download dependencies
-  → Copy source, run ./gradlew build
+  → Copy source, run ./gradlew build -x test
 
 Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
   → Create non-root user 'cce' (UID 1001)
   → Copy JAR from build stage
-  → JVM flags: -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -XX:+UseG1GC
+  → JVM flags: none baked in — entrypoint runs `java $JAVA_OPTS -jar app.jar`, so flags are supplied via the JAVA_OPTS env var at runtime
   → Healthcheck: wget to /actuator/health every 30s
   → Expose port 8080
 ```
@@ -251,6 +267,7 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 |---|---|
 | `spring-boot-starter-test` | JUnit 5, Mockito, AssertJ |
 | `spring-kafka-test` | Kafka test utilities |
+| `awaitility` | Async assertions (integration tests only) |
 
 ### 8.2 Test Categories
 
@@ -263,10 +280,10 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 ### 8.3 Running Tests
 
 ```bash
-# Unit tests (351 tests)
+# Unit tests (416 tests)
 ./gradlew test
 
-# Integration tests (39 tests — EmbeddedKafka + H2)
+# Integration tests (33 tests — EmbeddedKafka + H2)
 ./gradlew integrationTest
 
 # Specific test class
@@ -285,7 +302,7 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 
 1. Import as Gradle project
 2. Set JDK to 21
-3. Enable annotation processing (for Lombok if added later)
+3. Enable annotation processing (required for Lombok, used throughout the domain/DTO/service layers)
 4. Configure Spring Boot run configuration:
    - Main class: `org.openphc.cce.compliance.ComplianceServiceApplication`
    - Active profiles: `local` (if needed)
@@ -320,7 +337,7 @@ Format: `timestamp [thread] [correlationId] level logger - message`
 
 ```bash
 # Via environment variable
-LOGGING_LEVEL_ORG_OPENPHC_CCE_COMPLIANCE=DEBUG java -jar target/*.jar
+LOGGING_LEVEL_ORG_OPENPHC_CCE_COMPLIANCE=DEBUG java -jar build/libs/cce-compliance-service-1.0.0.jar
 
 # Via application.yml override
 # logging.level.org.openphc.cce.compliance: DEBUG
@@ -335,24 +352,24 @@ LOGGING_LEVEL_ORG_OPENPHC_CCE_COMPLIANCE=DEBUG java -jar target/*.jar
 | `Connection refused: localhost:5433` | PostgreSQL not running | Start collector service infrastructure: `cd cce-collector-service && docker compose up -d` |
 | `Connection refused: localhost:9092` | Kafka not running | Start Kafka or Docker container |
 | `401 Unauthorized` on API calls | Authentication handled by gateway | Ensure requests come through the API gateway |
-| `Flyway migration failed` | Schema conflicts | Check migration scripts, reset with `flyway:clean` (dev only) |
+| `Flyway migration failed` | Schema conflicts | Check migration scripts; there is no Flyway Gradle plugin in this project, so reset manually (dev only) by dropping the affected tables and `flyway_schema_history_compliance` rows via psql |
 | `Deserialization error` | Message format mismatch | Check producer serialization, trusted packages |
 | Build fails with `javac not found` | JDK not installed (JRE only) | Install JDK 21 or use Docker build |
 
 ### 11.2 Useful Diagnostic Commands
 
 ```bash
-# Check application health
-curl -s http://localhost:8080/actuator/health | jq .
+# Check application health (default local port is 8091 unless SERVER_PORT is overridden)
+curl -s http://localhost:8091/actuator/health | jq .
 
 # View application metrics
-curl -s http://localhost:8080/actuator/metrics | jq .
+curl -s http://localhost:8091/actuator/metrics | jq .
 
 # Check specific metric
-curl -s http://localhost:8080/actuator/metrics/cce.events.processed | jq .
+curl -s http://localhost:8091/actuator/metrics/cce.events.processed | jq .
 
 # View Prometheus metrics
-curl http://localhost:8080/actuator/prometheus
+curl http://localhost:8091/actuator/prometheus
 
 # Check database connectivity
 psql -h localhost -p 5433 -U cce_user -d ccedb -c "SELECT 1"

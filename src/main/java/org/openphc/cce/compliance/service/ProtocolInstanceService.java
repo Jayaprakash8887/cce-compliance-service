@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -107,12 +106,19 @@ public class ProtocolInstanceService {
      * <ol>
      *   <li>no materialized step is still actionable (PENDING/DUE/OVERDUE), and</li>
      *   <li>every mandatory ("must") action on the path leading to any observed step has a
-     *       terminal step instance — where "on the path" means the action itself or a
-     *       transitive predecessor (ancestor) of an observed action. A mandatory step is
-     *       therefore only required once progress that depends on it has actually been seen,
-     *       which keeps genuinely short journeys completable while blocking premature
-     *       completion when a mandatory prerequisite was skipped.</li>
+     *       terminal step instance — where "on the path" means the action itself, a transitive
+     *       predecessor (ancestor) of an observed action, or a mandatory action nested under the
+     *       same top-level PlanDefinition action as an observed action (a "group sibling") —
+     *       even one whose own trigger never fired and was therefore never materialized. A
+     *       mandatory step is therefore only required once progress that depends on it, or that
+     *       shares its nesting group, has actually been seen, which keeps genuinely short
+     *       journeys completable while blocking premature completion when a mandatory
+     *       prerequisite or sibling sub-step was skipped.</li>
      * </ol>
+     *
+     * <p><b>Disabled:</b> the criteria above is not yet finalized, so the COMPLETED transition
+     * itself is switched off for now — this method only logs when an instance would otherwise
+     * qualify. Remove the early return below once the criteria is agreed.
      */
     public void checkAndCompleteProtocol(UUID instanceId) {
         ProtocolInstance instance = findByIdOrThrow(instanceId);
@@ -153,20 +159,16 @@ public class ProtocolInstanceService {
             return;
         }
 
-        instance.setStatus(ProtocolInstanceStatus.COMPLETED);
-        protocolInstanceRepository.save(instance);
-
-        // Capture the COMPLETED transition in append-only history.
-        stateTransitionHistoryService.recordProtocolInstanceTransition(instance, OffsetDateTime.now(ZoneOffset.UTC));
-
-        log.info("Protocol instance {} completed — all mandatory steps satisfied ({} steps materialized)",
+        log.info("Protocol instance {} satisfies all known completion criteria ({} steps materialized), " +
+                "but auto-completion is currently disabled pending finalized criteria",
                 instanceId, materializedSteps.size());
     }
 
     /**
      * The mandatory ("must") action ids the instance is expected to satisfy given the progress
-     * observed so far: for every materialized step, itself plus all its transitive predecessors,
-     * restricted to actions whose requiredBehavior is "must".
+     * observed so far: for every materialized step, itself, all its transitive predecessors, and
+     * all mandatory actions nested under the same top-level PlanDefinition action (group
+     * siblings) — restricted to actions whose requiredBehavior is "must".
      */
     private Set<String> computeExpectedMustActions(List<StepInstance> materializedSteps,
                                                    List<PlanDefinitionParser.StepMetadata> steps) {
@@ -192,6 +194,7 @@ public class ProtocolInstanceService {
                     expected.add(ancestorId);
                 }
             }
+            expected.addAll(PlanDefinitionParser.computeMustGroupActions(actionId, steps));
         }
         return expected;
     }

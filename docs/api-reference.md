@@ -18,7 +18,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.1 Load Protocol Definition
 
-**`POST /v1/protocol-definitions`** — Load a new clinical protocol definition.
+**`POST /v1/compliance/protocol-definitions`** — Load a new clinical protocol definition.
 
 
 **Request Body:**
@@ -37,7 +37,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
   "url": "http://example.org/PlanDefinition/hiv-treatment",
   "version": "1.0",
   "canonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-  "status": "active",
+  "status": "ACTIVE",
   "loadedAt": "2026-03-15T10:30:00Z",
   "definition": { ... }
 }
@@ -47,14 +47,14 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | JSON is empty, malformed, or url+version already exists |
-| `422 Unprocessable Entity` | FHIR validation errors |
+| `400 Bad Request` | `planDefinitionJson` is blank, url+version already exists, or a business-rule validation fails (duplicate/unresolvable action IDs, unsupported action type, unsupported trigger) |
+| `422 Unprocessable Entity` | `planDefinitionJson` does not parse into a valid FHIR PlanDefinition resource |
 
 ---
 
-### 1.2 List Active Protocol Definitions
+### 1.2 List Protocol Definitions
 
-**`GET /v1/protocol-definitions`** — List all active protocol definitions (paginated).
+**`GET /v1/compliance/protocol-definitions`** — List all protocol definitions, active and retired (paginated). There is no status filter on this endpoint.
 
 **Query Parameters:**
 
@@ -62,7 +62,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 |---|---|---|---|---|
 | `page` | Integer | No | `0` | Page number (zero-based) |
 | `size` | Integer | No | `20` | Page size |
-| `sort` | String | No | `loadedAt,desc` | Sort field and direction |
+| `sort` | String | No | none (unsorted) | Sort field and direction, e.g. `loadedAt,desc` |
 
 **Response:** `200 OK` — `Page<ProtocolDefinitionDto>`
 
@@ -74,7 +74,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
       "url": "http://example.org/PlanDefinition/hiv-treatment",
       "version": "1.0",
       "canonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
-      "status": "active",
+      "status": "ACTIVE",
       "loadedAt": "2026-03-15T10:30:00Z",
       "definition": { ... }
     }
@@ -91,7 +91,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.3 Get Protocol Definition by ID
 
-**`GET /v1/protocol-definitions/{id}`**
+**`GET /v1/compliance/protocol-definitions/{id}`**
 
 
 **Path Parameters:**
@@ -112,7 +112,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.4 Get Protocol Definitions by URL
 
-**`GET /v1/protocol-definitions/by-url?url={url}`**
+**`GET /v1/compliance/protocol-definitions/by-url?url={url}`**
 
 
 **Query Parameters:**
@@ -127,7 +127,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.5 Get Protocol Definition by URL and Version
 
-**`GET /v1/protocol-definitions/by-url-version?url={url}&version={version}`**
+**`GET /v1/compliance/protocol-definitions/by-url-version?url={url}&version={version}`**
 
 
 **Query Parameters:**
@@ -149,7 +149,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.6 Retire Protocol Definition
 
-**`POST /v1/protocol-definitions/{id}/retire`** — Retire a protocol definition and remove its trigger index.
+**`POST /v1/compliance/protocol-definitions/{id}/retire`** — Retire a protocol definition and remove its trigger index.
 
 
 **Path Parameters:**
@@ -158,7 +158,14 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 |---|---|---|
 | `id` | UUID | Protocol definition ID |
 
-**Response:** `200 OK` — Updated `ProtocolDefinitionDto` with `status: "retired"`
+**Response:** `200 OK` — Updated `ProtocolDefinitionDto` with `status: "RETIRED"`
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+| `409 Conflict` | Protocol definition is already retired |
 
 **Side Effects:**
 - Sets protocol definition status to `RETIRED`
@@ -169,7 +176,7 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 ### 1.7 Rebuild Trigger Index
 
-**`POST /v1/protocol-definitions/{id}/rebuild-index`** — Rebuild the trigger index from the stored definition.
+**`POST /v1/compliance/protocol-definitions/{id}/rebuild-index`** — Rebuild the trigger index from the stored definition.
 
 
 **Path Parameters:**
@@ -180,13 +187,19 @@ Manage FHIR R4 PlanDefinition resources as protocol definitions.
 
 **Response:** `200 OK`
 
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+
 **Use Case:** When the index parsing logic is updated, this endpoint allows re-indexing without reloading the protocol definition.
 
 ---
 
 ### 1.8 Delete Protocol Definition
 
-**`DELETE /v1/protocol-definitions/{id}`** — Permanently delete a protocol definition.
+**`DELETE /v1/compliance/protocol-definitions/{id}`** — Permanently delete a protocol definition.
 
 
 **Path Parameters:**
@@ -230,34 +243,28 @@ Health and monitoring endpoints (no authentication required).
 
 ## 3. Error Response Format
 
-All errors follow a consistent structure:
+All errors follow a consistent structure (`ErrorResponse`). `correlationId` is populated from the request's MDC correlation ID when present and omitted otherwise:
 
 ```json
 {
   "status": 400,
   "error": "Bad Request",
-  "message": "Protocol definition with this url and version already exists",
-  "path": "/v1/protocol-definitions",
+  "message": "Protocol definition already exists for url=..., version=...",
   "timestamp": "2026-03-15T10:30:00Z",
-  "fieldErrors": null
+  "correlationId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 }
 ```
 
-### Validation Error (400 with field details)
+### Validation Error (400 from bean validation)
+
+Bean validation failures (e.g. a blank required field) do not return a structured field-error list. Instead, all failing fields are concatenated into a single `message` string as `field: defaultMessage`, semicolon-separated:
 
 ```json
 {
   "status": 400,
   "error": "Bad Request",
-  "message": "Validation failed",
-  "path": "/v1/protocol-definitions",
-  "timestamp": "2026-03-15T10:30:00Z",
-  "fieldErrors": [
-    {
-      "field": "planDefinitionJson",
-      "message": "must not be blank"
-    }
-  ]
+  "message": "planDefinitionJson: planDefinitionJson must not be blank",
+  "timestamp": "2026-03-15T10:30:00Z"
 }
 ```
 
@@ -266,11 +273,11 @@ All errors follow a consistent structure:
 | HTTP Status | Exception Type | Meaning |
 |---|---|---|
 | `400` | `IllegalArgumentException` | Invalid input or business rule violation |
-| `400` | `MethodArgumentNotValidException` | Bean validation failure |
-| `404` | `NoSuchElementException` | Resource not found |
-| `409` | `IllegalStateException` | State conflict (e.g., completing a non-active protocol) |
-| `422` | `FhirValidationException` | FHIR resource validation failure |
-| `422` | `ExpressionEvaluationException` | JSONLogic expression evaluation failure |
+| `400` | `MethodArgumentNotValidException` | Bean validation failure (e.g. `@NotBlank`) |
+| `404` | `jakarta.persistence.EntityNotFoundException` | Resource not found |
+| `409` | `IllegalStateException` | State conflict (e.g., retiring an already-retired protocol, deleting a definition with existing instances) |
+| `422` | `ca.uhn.fhir.parser.DataFormatException` | Submitted JSON does not parse into a valid FHIR resource |
+| `422` | `UnsupportedExpressionLanguageException` | Condition/trigger expression uses an unsupported expression language (only `text/jsonlogic` is supported) |
 | `500` | `Exception` | Unexpected server error |
 
 ---
@@ -287,7 +294,7 @@ All errors follow a consistent structure:
 | `url` | String | No | FHIR canonical URL |
 | `version` | String | No | Semantic version |
 | `canonical` | String | No | `url\|version` |
-| `status` | String | No | `active` or `retired` |
+| `status` | String | No | `ACTIVE` or `RETIRED` |
 | `loadedAt` | OffsetDateTime | No | When the definition was loaded |
 | `definition` | Map | No | Full FHIR PlanDefinition as JSONB |
 
@@ -331,8 +338,9 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 
 | Status | Condition |
 |---|---|
-| `400 Bad Request` | JSON is empty, malformed, or url+version already exists |
-| `422 Unprocessable Entity` | FHIR validation errors |
+| `400 Bad Request` | `definitionJson` is blank or not valid JSON, a required field (`url`, `version`, `kind`) is missing/empty, `kind` is not a supported action type, or url+version already exists |
+
+**Note:** Unlike protocol definitions, `definitionJson` is parsed with a plain JSON parser (not the FHIR resource parser), so there is no `422` response for this endpoint — malformed or invalid input results in `400`.
 
 ---
 
@@ -347,9 +355,15 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 | `status` | String | No | — | Filter by status (`ACTIVE`, `RETIRED`) |
 | `page` | Integer | No | `0` | Page number (zero-based) |
 | `size` | Integer | No | `20` | Page size |
-| `sort` | String | No | `createdAt,desc` | Sort field and direction |
+| `sort` | String | No | none (unsorted) | Sort field and direction, e.g. `createdAt,desc` |
 
 **Response:** `200 OK` — `Page<ActionDefinitionDto>`
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `400 Bad Request` | `status` is not one of `ACTIVE`, `RETIRED` |
 
 ---
 
@@ -392,8 +406,7 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 | Status | Condition |
 |---|---|
 | `404 Not Found` | ID does not exist |
-| `400 Bad Request` | JSON is empty or malformed |
-| `422 Unprocessable Entity` | FHIR validation errors |
+| `400 Bad Request` | `definitionJson` is blank or not valid JSON, a required field (`url`, `version`, `kind`) is missing/empty, `kind` is not a supported action type, or the changed url+version already exists on another action definition |
 
 ---
 
@@ -402,6 +415,13 @@ Manage FHIR R4 `ActivityDefinition` resources as intelligence action definitions
 **`POST /v1/compliance/action-definitions/{id}/retire`** — Retire an action definition.
 
 **Response:** `200 OK` — Updated `ActionDefinitionDto` with `status: "RETIRED"`
+
+**Error Responses:**
+
+| Status | Condition |
+|---|---|
+| `404 Not Found` | ID does not exist |
+| `409 Conflict` | Action definition is already retired |
 
 ---
 
@@ -428,16 +448,18 @@ View intelligence action execution records.
 
 **`GET /v1/compliance/intelligence-events`** — List intelligence event logs with optional filters (paginated).
 
+**Note:** Filters are mutually exclusive, not combined. Only one is applied, in this priority order: `protocolInstanceId`, then `actionDefinitionId`, then `published`. If none is supplied, all events are returned.
+
 **Query Parameters:**
 
 | Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `protocolInstanceId` | UUID | No | — | Filter by protocol instance |
-| `actionDefinitionId` | UUID | No | — | Filter by action definition |
-| `published` | Boolean | No | — | Filter by publish status (`true` or `false`) |
+| `protocolInstanceId` | UUID | No | — | Filter by protocol instance (takes priority over the other filters) |
+| `actionDefinitionId` | UUID | No | — | Filter by action definition (used only if `protocolInstanceId` is absent) |
+| `published` | Boolean | No | — | Filter by publish status (`true` or `false`); used only if `protocolInstanceId` and `actionDefinitionId` are both absent |
 | `page` | Integer | No | `0` | Page number (zero-based) |
 | `size` | Integer | No | `20` | Page size |
-| `sort` | String | No | `createdAt,desc` | Sort field and direction |
+| `sort` | String | No | none (unsorted) | Sort field and direction, e.g. `createdAt,desc` |
 
 **Response:** `200 OK` — `Page<IntelligenceEventLogDto>`
 

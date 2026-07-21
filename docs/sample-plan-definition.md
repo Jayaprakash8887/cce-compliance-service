@@ -24,6 +24,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "id": "enrollment",
       "title": "Enroll Patient on Diabetes Diagnosis",
       "description": "Enroll when a confirmed active diabetes Condition is created.",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -76,6 +81,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "id": "hba1c-check",
       "title": "HbA1c Monitoring",
       "description": "Quarterly HbA1c test to evaluate glycaemic control.",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -118,6 +128,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "hba1c-elevated-alert",
           "title": "Elevated HbA1c — Worker Alert",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -134,7 +149,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "MEDIUM"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "ASSIGNED_WORKER"
             }
           ]
@@ -142,6 +157,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "hba1c-critical-escalation",
           "title": "Critical HbA1c — Supervisor Escalation",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -158,7 +178,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "CRITICAL"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "SUPERVISOR"
             }
           ]
@@ -166,6 +186,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "hba1c-overdue-deviation",
           "title": "HbA1c Overdue — Worker Alert",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -182,7 +207,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "HIGH"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "ASSIGNED_WORKER"
             }
           ]
@@ -190,6 +215,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "hba1c-missed-deviation",
           "title": "HbA1c Missed — Supervisor Escalation",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -206,7 +236,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "CRITICAL"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "SUPERVISOR"
             }
           ]
@@ -218,6 +248,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "id": "blood-glucose-check",
       "title": "Fasting Blood Glucose Check",
       "description": "Weekly fasting blood glucose observation.",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -250,6 +285,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "glucose-low-patient-info",
           "title": "Low Glucose — Patient Information",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -266,7 +306,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "LOW"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "PATIENT"
             }
           ]
@@ -274,6 +314,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "glucose-high-worker-task",
           "title": "High Glucose — Worker Follow-up Task",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -290,7 +335,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "HIGH"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "ASSIGNED_WORKER"
             }
           ]
@@ -298,6 +343,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "glucose-critical-facility-referral",
           "title": "Critical Glucose — Facility Emergency Referral",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -314,7 +364,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "CRITICAL"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "FACILITY"
             }
           ]
@@ -327,6 +377,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "title": "Annual Diabetic Foot Examination",
       "description": "Mandatory annual foot exam — must not be skipped.",
       "requiredBehavior": "must",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -359,6 +414,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "foot-exam-missed-supervisor",
           "title": "Missed Foot Exam — Supervisor Escalation",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -375,7 +435,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "CRITICAL"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "SUPERVISOR"
             }
           ]
@@ -387,6 +447,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "id": "any-encounter-log",
       "title": "Log Any Patient Encounter",
       "description": "Broadest match — data[] type only, no codeFilter. Produces one TriggerIndex row with empty path/system/code.",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -402,6 +467,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "id": "finished-encounter-compliance",
       "title": "Compliance Check on Finished Encounter",
       "description": "Resource type match combined with an inline trigger condition (Scenario 3: F1 + F3).",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -421,6 +491,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       "id": "global-risk-assessment",
       "title": "Global Risk Score Assessment",
       "description": "Condition-only trigger — no data[]. Evaluated on every inbound event (Scenario 5: F3 only). No TriggerIndex row created.",
+      "type": {
+        "coding": [
+          { "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }
+        ]
+      },
       "trigger": [
         {
           "type": "named-event",
@@ -435,6 +510,11 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "id": "global-risk-worker-notification",
           "title": "High Risk Score — Worker Notification",
+          "type": {
+            "coding": [
+              { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
+            ]
+          },
           "condition": [
             {
               "kind": "applicability",
@@ -451,7 +531,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "valueCode": "HIGH"
             },
             {
-              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+              "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
               "valueCode": "ASSIGNED_WORKER"
             }
           ]
@@ -488,7 +568,7 @@ Each `definitionCanonical` referenced in the PlanDefinition must have a register
       "valueCode": "CRITICAL"
     },
     {
-      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
       "valueCode": "SUPERVISOR"
     }
   ]
@@ -514,7 +594,7 @@ Each `definitionCanonical` referenced in the PlanDefinition must have a register
       "valueCode": "HIGH"
     },
     {
-      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
       "valueCode": "ASSIGNED_WORKER"
     }
   ]
@@ -540,7 +620,7 @@ Each `definitionCanonical` referenced in the PlanDefinition must have a register
       "valueCode": "CRITICAL"
     },
     {
-      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-target",
+      "url": "http://openphc.org/fhir/StructureDefinition/intelligence-destination",
       "valueCode": "FACILITY"
     }
   ]
@@ -553,19 +633,22 @@ Each `definitionCanonical` referenced in the PlanDefinition must have a register
 
 | Feature | Field / Extension | Allowed Values |
 |---|---|---|
+| Action type coding (required on every action, all nesting levels) | `action[].type.coding` | `step` (`http://openphc.org/fhir/CodeSystem/action-type`) or `fire-event` (`http://terminology.hl7.org/CodeSystem/action-type`) |
 | Trigger — resource + code filter | `trigger[].data[].codeFilter[]` | One row per code in `TriggerIndex` |
 | Trigger — inline condition | `trigger[].condition` | `text/fhirpath`, `text/jsonlogic` |
 | Trigger — condition only (no data) | `trigger[]` with no `data[]` | Placed in `extractConditionOnlyTriggers()` |
 | Intelligence sub-action condition | `action[].condition[kind=applicability]` | `text/fhirpath`, `text/jsonlogic` |
 | Intelligence severity | `intelligence-severity` extension | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
-| Intelligence target | `intelligence-target` extension | `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` |
+| Intelligence destination | `intelligence-destination` extension | Free-form string (routing destination for the Intelligence Service); this example uses `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` |
 | Deviation type (jsonlogic var) | `event.deviationType` | `"overdue"`, `"missed"` |
 | Step tolerance window | `tolerance-days` extension | Integer (days) |
-| Required step | `requiredBehavior` | `"must"` |
+| Required step | `requiredBehavior` | `must`, `could`, `must-unless-documented` — only `must` and `could` have distinct handling today (see note below) |
 | Step scheduling | `timingTiming.repeat` | `count`, `frequency`, `period`, `periodUnit` |
 | Action ordering | `relatedAction[].offsetDuration` | Days after predecessor action ends |
 | ActivityDefinition type | `kind` | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | Canonical reference format | `definitionCanonical` | `<url>|<version>` |
+
+`requiredBehavior` note: `must` drives `PlanDefinitionParser.computeMustGroupActions` (mandatory sibling gating within a nesting group) and the "must"-only predecessor gating in `StepInstanceService`/`ProtocolInstanceService`; `could` lets `StepInstanceService` auto-skip an optional step instead of marking it missed. `must-unless-documented` is a valid FHIR `requiredBehavior` code and is accepted (see the `data-dictionary.md` `required_behavior` check constraint), but the parser and services do not currently branch on it — it behaves like a step with no special required-behavior handling.
 
 ---
 

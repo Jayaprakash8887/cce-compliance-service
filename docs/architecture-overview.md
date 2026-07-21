@@ -207,16 +207,16 @@ org.openphc.cce.compliance
 ├── ComplianceServiceApplication.java          # @SpringBootApplication entry point
 ├── config/                                    # AppConfig, ObservabilityConfig
 ├── domain/
-│   ├── entity/                                # 10 JPA entities (incl. ActionDefinition, IntelligenceEventLog, Facility)
+│   ├── entity/                                # 12 JPA entities (incl. ActionDefinition, IntelligenceEventLog, Facility)
 │   ├── enums/                                 # 11 value-based enums
-│   └── repository/                            # 10 Spring Data JPA repositories
+│   └── repository/                            # 12 Spring Data JPA repositories
 ├── fhir/                                      # FHIR parsing, JSONLogic & FHIRPath evaluation
 ├── kafka/
 │   ├── config/                                # Consumer/Producer factories, topic bindings
 │   ├── consumer/                              # InboundEventConsumer, SchedulerTriggerConsumer
 │   ├── model/                                 # CloudEventMessage, IntelligenceTriggerEvent
 │   └── producer/                              # IntelligenceTriggerProducer
-├── service/                                   # 12 business logic services + supporting records
+├── service/                                   # 13 business logic services + supporting records/components
 └── web/                                       # Controllers, DTOs, DtoMapper, ExceptionHandler
 ```
 
@@ -527,7 +527,17 @@ stateDiagram-v2
 
 `ACTIVE → COMPLETED | WITHDRAWN | EXPIRED`. Terminal states: `COMPLETED`, `WITHDRAWN`, `EXPIRED`.
 
-Protocol completion is **automatic** — when all steps reach terminal states (`COMPLETED`, `MISSED`, `SKIPPED`), the protocol transitions to `COMPLETED`. There is no manual complete endpoint; `WITHDRAWN` covers manual termination.
+Protocol completion is **automatic** — evaluated by `ProtocolInstanceService.checkAndCompleteProtocol` after every step completion and every scheduler-driven `OVERDUE_TO_MISSED` transition. There is no manual complete endpoint; `WITHDRAWN` covers manual termination.
+
+Completion is **not** simply "all materialized steps reached a terminal state." Under progressive instantiation, a step can be created directly from its own trigger (`ComplianceEngine.createInitialStep`) without its mandatory predecessors — or mandatory siblings nested under the same parent action — ever being materialized as `step_instance` rows. Judging completion purely from the rows that happen to exist would then mark an instance `COMPLETED` after a single terminal step, even though other mandatory work was structurally skipped over. So completion requires **both**:
+
+1. **No materialized step is still actionable** (`PENDING`/`DUE`/`OVERDUE`), and
+2. **Every mandatory (`must`) action expected by the progress observed so far is terminal** — computed by `computeExpectedMustActions`, which expands each materialized step's `actionId` to:
+   - the action itself, if its `requiredBehavior` is `must`;
+   - all of its transitive `relatedAction` predecessors (ancestors), via `PlanDefinitionParser.computeAncestors`; and
+   - all `must` actions nested under the same top-level PlanDefinition action — its "group siblings" — via `PlanDefinitionParser.computeMustGroupActions`, which walks up to the action's top-level root ancestor (following `StepMetadata.parentActionId`) and collects every mandatory descendant of that root.
+
+The group-sibling check exists to close a specific gap: a mandatory nested sub-step whose own trigger never fires is never materialized as a `step_instance` row, so without this check it would be invisible to completion — the protocol could complete while that mandatory sub-step was silently never satisfied. A mandatory action is therefore only required once progress that depends on it, or that shares its nesting group, has actually been observed. This keeps genuinely short journeys completable while still blocking premature completion when a mandatory prerequisite or sibling sub-step was skipped over.
 
 ### 6.3 Intelligence Action Evaluation
 
@@ -582,7 +592,7 @@ The table below maps CCE domain concepts to their FHIR PlanDefinition counterpar
 |---|---|---|
 | **Protocol Definition** | `PlanDefinition` | The clinical protocol (e.g., ANC High-Risk Monitoring) |
 | **Protocol Step** | `PlanDefinition.action` (type=step) | A step in the protocol with its own trigger (e.g., "ANC Visit 2"). Nested actions of type "step" are flattened to peer-level steps. |
-| **Flattened Sub-Step** | `PlanDefinition.action.action` (type=step) | A nested step flattened into a peer-level step linked to its parent via `relatedSteps`. |
+| **Flattened Sub-Step** | `PlanDefinition.action.action` (type=step) | A nested step flattened into a peer-level step. Nesting groups it with its parent for trigger indexing and for the protocol-completion "group sibling" check (§6.2) only — any dependency on the parent or on sibling sub-steps must be declared explicitly via `relatedAction`. |
 | **Intelligence Action** | `PlanDefinition.action.action` (type=fire-event) | A nested action that defines a conditional intelligence evaluation |
 
 ```mermaid
@@ -612,8 +622,8 @@ flowchart LR
         S2["Step: anc-visit-2"]
         R1["Intelligence Action:<br/>overdue-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
-        SUB1["Step: referral<br/>(flattened, relatedStep→anc-visit-2)"]
-        SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral)"]
+        SUB1["Step: referral<br/>(flattened, own trigger — no implicit link to anc-visit-2)"]
+        SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral — explicit relatedAction)"]
         R3["Intelligence Action:<br/>referral-escalation"]
 
         PROTO --> S1
@@ -704,8 +714,9 @@ All execution and evaluation context is stored in a single row — no FK constra
 Nested `PlanDefinition.action.action[]` entries with type `"step"` are **flattened** into peer-level steps at parse time by `extractSteps()`. There is no parent-child hierarchy in the domain model — all steps (top-level and nested) are stored uniformly in `step_instance` without any `parent_step_id`. Relationships between steps are expressed exclusively via `relatedSteps` (derived from FHIR `relatedAction`).
 
 **Key design decisions:**
-- `StepMetadata` is a flat record with 8 fields (no `subSteps` list): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`
-- Entry-point sub-steps (those with no `relatedAction` dependency on siblings) automatically get a `relatedStep` reference to their parent action (relationship: `after-end`, no offset) added by the parser — this ensures they are created when the parent completes
+- `StepMetadata` is a flat record with 9 fields (no `subSteps` list): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`, `parentActionId`
+- Nesting is **organizational only** — it groups a sub-step under its enclosing action but does **not** create an implicit `relatedStep`/dependency link. Ordering between a parent and its sub-steps (and among sub-steps) must be expressed explicitly via `relatedAction`. A sub-step with no explicit predecessor is created independently whenever its own trigger fires (`ComplianceEngine.createInitialStep`), exactly like a top-level step — it does not wait for its parent to complete. (An earlier version of the parser auto-added a backward `relatedStep` from child to parent; see the comment in `PlanDefinitionParser.flattenAction` — it was removed because under the forward progressive-instantiation model it meant "completing the child re-creates the parent," spawning duplicate parent steps.)
+- `parentActionId` is retained solely to reconstruct nesting-group membership for the protocol-completion check (§6.2's "group siblings", via `PlanDefinitionParser.computeMustGroupActions`) — it is not used to create step dependencies or `relatedAction` links
 - Sub-steps with `relatedAction` pointing to siblings are flattened as-is and created progressively via standard `createDependentSteps()` logic
 - All trigger indexing uses the step's **plain action ID** (e.g., `"anc-visit-1-referral"`)
 - Intelligence actions are found via flat lookup by `actionId` (no tree traversal needed)
@@ -761,9 +772,9 @@ Given this PlanDefinition structure:
 ```
 
 `extractSteps()` produces 3 flat `StepMetadata` entries:
-1. `anc-visit-1` — top-level step with its trigger
-2. `anc-visit-1-referral` — flattened with `relatedSteps: [{actionId: "anc-visit-1", relationship: "after-end"}]` (auto-added parent ref, since it has no sibling dependency) + `relatedSteps: [{actionId: "anc-visit-1-referral-ack", relationship: "after-end"}]`
-3. `anc-visit-1-referral-ack` — flattened with `relatedSteps: [{actionId: "anc-visit-1", relationship: "after-end"}]` (auto-added parent ref; its sibling dependency via `relatedAction` to the `-ack` step is on the referral step, not this one)
+1. `anc-visit-1` — top-level step with its trigger; `parentActionId: null`
+2. `anc-visit-1-referral` — flattened with `relatedSteps: [{actionId: "anc-visit-1-referral-ack", relationship: "after-end"}]` (its own explicit `relatedAction`) and `parentActionId: "anc-visit-1"` (nesting-group membership only — no implicit link to the parent). It has its own trigger (`ServiceRequest`), so it is created independently whenever that trigger fires rather than waiting for `anc-visit-1` to complete.
+3. `anc-visit-1-referral-ack` — flattened with no `relatedSteps` of its own and `parentActionId: "anc-visit-1"`; created progressively when `anc-visit-1-referral` completes (via its predecessor's `relatedAction`)
 
 The intelligence action (`anc-visit-1-escalation`) is extracted into `anc-visit-1`'s `intelligenceActions` list.
 
@@ -775,15 +786,18 @@ sequenceDiagram
     participant SIS as StepInstanceService
     participant DB as step_instance
 
-    Note over Engine: Event matches "anc-visit-1" → step created & completed
+    Note over Engine: Event matches "anc-visit-1" → step created & completed (own trigger)
     Engine->>SIS: completeStep(anc-visit-1)
-    SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral"<br/>(has relatedStep to anc-visit-1, relationship after-end)
-    SIS->>DB: Create anc-visit-1-referral (PENDING)
+    Note over SIS: createDependentSteps() — anc-visit-1 has no relatedSteps of its own, nothing created
 
-    Note over Engine: Later — event matches "anc-visit-1-referral" → completed
+    Note over Engine: Later, independently — a ServiceRequest event matches<br/>"anc-visit-1-referral"'s own trigger
+    Engine->>Engine: createInitialStep(anc-visit-1-referral)<br/>(no dependency on anc-visit-1 — nesting is organizational only)
     Engine->>SIS: completeStep(anc-visit-1-referral)
     SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral-ack"<br/>(has relatedStep to anc-visit-1-referral, relationship after-end)
     SIS->>DB: Create anc-visit-1-referral-ack (PENDING)
+
+    Note over Engine: Later — event matches "anc-visit-1-referral-ack" → completed
+    Engine->>SIS: completeStep(anc-visit-1-referral-ack)
 ```
 
 #### Trigger Indexing
@@ -810,15 +824,15 @@ See [API Reference](api-reference.md) for endpoint details.
 | Metric | Type | Description |
 |---|---|---|
 | `cce.events.processed` | Counter | Total inbound events processed |
-| `cce.events.matched` | Counter (tagged) | By status: `matched`, `zero_match` |
+| `cce.events.matched` | Counter (tagged) | By `status` tag: `matched`, `zero_match` — no separate `cce.events.zero_match` metric exists |
 | `cce.events.duplicate` | Counter | Duplicate events detected |
-| `cce.events.zero_match` | Counter | Events with zero trigger matches |
 | `cce.events.intelligence.published` | Counter | Intelligence trigger events published to Kafka |
 | `cce.intelligence.actions.evaluated` | Counter | Total intelligence action conditions evaluated |
 | `cce.intelligence.actions.fired` | Counter | Intelligence actions that matched and triggered |
 | `cce.intelligence.publish.duration` | Timer | Time to publish intelligence event to Kafka |
 | `cce.action.definitions.active` | Gauge | Active action definitions |
 | `cce.step.matching.duration` | Timer | Tier 1 + Tier 2 matching time |
+| `cce.events.processing.duration` | Timer | Total time to process an inbound event end-to-end (idempotency check through progressive instantiation) |
 | `cce.consumer.inbound.errors` | Counter | Inbound event consumer processing errors |
 | `cce.consumer.scheduler.errors` | Counter | Scheduler trigger consumer processing errors |
 | `cce.protocol.instances.active` | Gauge | Active protocol instances |

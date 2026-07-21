@@ -100,8 +100,8 @@ ConsumerFactory<String, CloudEventMessage>
   Key:   StringDeserializer
   Value: ErrorHandlingDeserializer → JsonDeserializer<CloudEventMessage>
 
-// Trusted packages
-spring.json.trusted.packages: "org.openphc.cce.compliance.*"
+// Trusted packages (set programmatically on the ConsumerFactory bean, not via application.yml)
+JsonDeserializer.TRUSTED_PACKAGES: "org.openphc.cce.compliance.kafka.model"
 ```
 
 **Error handling:** If deserialization fails, `ErrorHandlingDeserializer` wraps the error gracefully instead of crashing the consumer.
@@ -126,6 +126,8 @@ Spring Kafka's `DefaultErrorHandler` is configured on the container factory with
 | `max-attempts` | `3` | Number of retry attempts before DLQ |
 | `backoff-interval-ms` | `1000` | Fixed delay between retries (milliseconds) |
 | DLQ topic naming | `<topic>.dlq` | Convention: `cce.events.inbound.dlq`, `cce.scheduler.triggers.dlq` |
+
+> **`prod` profile overrides** (`application-prod.yml`): `max-attempts: 5` and `backoff-interval-ms: 2000` (both env-overridable via `KAFKA_RETRY_MAX_ATTEMPTS` / `KAFKA_RETRY_BACKOFF_MS`). Listener `concurrency` is also raised to `5` (`KAFKA_CONCURRENCY`) in `prod`.
 
 ### 3.4 Topic Provisioning
 
@@ -231,8 +233,8 @@ All Kafka messages use **CloudEvents spec field names (lowercase)** — no camel
 | **CCE Extensions:** | | | |
 | `correlationid` | Yes | String | Distributed trace correlation ID. Always present (Collector generates `corr-<uuid>` if absent). |
 | `sourceeventid` | No | String | Source system's internal event ID |
-| `protocolinstanceid` | No | UUID | Pre-populated if source knows the target protocol instance (usually null — Compliance Service resolves) |
-| `protocoldefinitionid` | No | UUID | Pre-populated if source knows the target protocol (usually null — Compliance Service resolves) |
+| `protocolinstanceid` | No | String (UUID) | Pre-populated if source knows the target protocol instance (usually null — Compliance Service resolves) |
+| `protocoldefinitionid` | No | String (UUID) | Pre-populated if source knows the target protocol (usually null — Compliance Service resolves) |
 | `actionid` | No | String | Pre-populated if source knows the target action/step (usually null — Compliance Service resolves) |
 | `facilityid` | No | String | Healthcare facility FOSA ID (e.g., `0002`) |
 | **Payload:** | | | |
@@ -356,6 +358,12 @@ public void consume(CloudEventMessage event) {
     MDC.put("eventType", event.getType());
     MDC.put("subject", event.getSubject());
     try {
+        try {
+            facilityService.upsertFacility(event);
+        } catch (Exception e) {
+            log.warn("Facility registration failed for facilityId={} — compliance processing will continue",
+                    event.getFacilityid(), e);
+        }
         complianceEngine.processInboundEvent(event);
     } catch (Exception e) {
         errorCounter.increment();  // cce.consumer.inbound.errors
@@ -366,7 +374,12 @@ public void consume(CloudEventMessage event) {
 }
 ```
 
-**Behavior on failure:** Exception propagates to `DefaultErrorHandler` → retries with backoff → routes to `cce.events.inbound.dlq` after exhausting retries. Offset is committed automatically on success (`AckMode.RECORD`).
+Each inbound event triggers two independent operations before the offset is committed:
+
+1. **Facility registration** (`FacilityService.upsertFacility`) — best-effort reference-data upsert of the event's `facilityid`. Runs in its own transaction, outside `ComplianceEngine`'s. Failures are non-fatal: logged as a warning, and compliance processing continues — a transient error on the facility reference table must not cause the event to be retried or routed to the DLQ.
+2. **Compliance processing** (`ComplianceEngine.processInboundEvent`) — protocol matching, enrolment, and step progression. Failures here are fatal and propagate to the error handler.
+
+**Behavior on failure:** Exception from compliance processing propagates to `DefaultErrorHandler` → retries with backoff → routes to `cce.events.inbound.dlq` after exhausting retries. Offset is committed automatically on success (`AckMode.RECORD`).
 
 ### 6.2 SchedulerTriggerConsumer
 
@@ -413,11 +426,11 @@ public class IntelligenceTriggerProducer {
             .whenComplete((result, ex) -> {
                 if (ex == null) {
                     publishedCounter.increment();
-                    log.info("Published intelligence trigger: id={}, type={}",
-                        event.getId(), event.getType());
+                    log.info("Published intelligence trigger event: id={}, intelligenceEventId={}, topic={}",
+                        event.getId(), key, topic);
                 } else {
-                    log.error("Failed to publish intelligence trigger: id={}",
-                        event.getId(), ex);
+                    log.error("Failed to publish intelligence trigger event: id={}, intelligenceEventId={}, topic={}",
+                        event.getId(), key, topic, ex);
                 }
             });
     }
@@ -426,9 +439,9 @@ public class IntelligenceTriggerProducer {
 
 **Behavior:**
 - **Fire-and-forget:** Publish failures are logged but do not fail the main compliance transaction
-- **Kafka key:** `protocolInstanceId` ensures all intelligence events for a patient journey go to the same partition
+- **Kafka key:** `intelligenceEventId` (same key documented in §5.3) — ensures unique partitioning per action execution
 - **Idempotency:** Producer-level idempotency (`enable.idempotence=true`) prevents duplicate publishes within a partition
-- **Metrics:** `cce.events.intelligence.published` counter incremented on successful publish
+- **Metrics:** `cce.events.intelligence.published` counter incremented on successful publish; `cce.intelligence.publish.duration` timer records publish latency
 
 ## 8. Ordering & Delivery Guarantees
 
