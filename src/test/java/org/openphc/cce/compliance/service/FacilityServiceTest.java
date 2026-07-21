@@ -161,6 +161,137 @@ class FacilityServiceTest {
         assertEquals("Kacyiru Health Center", captor.getValue().getFacilityName());
     }
 
+    @Test
+    void encounter_transfer_prefersHospitalizationOriginOverDestinationLocation() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "Encounter",
+                  "hospitalization": {
+                    "origin": { "reference": "Location/1651", "display": "Minazi Health Center" },
+                    "destination": { "reference": "Location/0302", "display": "Ruli DH" }
+                  },
+                  "location": [{
+                    "location": { "reference": "Location/0302", "display": "Ruli DH" }
+                  }]
+                }
+                """;
+        CloudEventMessage event = eventWith(null, payload);
+        when(facilityRepository.findByFacilityId("1651")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("1651", captor.getValue().getFacilityId());
+        assertEquals("Minazi Health Center", captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void encounter_transfer_envelopeIdPairsWithOriginDisplayNotDestination() throws Exception {
+        String payload = """
+                {
+                  "resourceType": "Encounter",
+                  "hospitalization": {
+                    "origin": { "reference": "Location/1651", "display": "Minazi Health Center" },
+                    "destination": { "reference": "Location/0302", "display": "Ruli DH" }
+                  },
+                  "location": [{
+                    "location": { "reference": "Location/0302", "display": "Ruli DH" }
+                  }]
+                }
+                """;
+        CloudEventMessage event = eventWith("1651", payload);
+        when(facilityRepository.findByFacilityId("1651")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("1651", captor.getValue().getFacilityId());
+        assertEquals("Minazi Health Center", captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void encounter_transfer_noOrigin_fallsBackToDestinationLocation() throws Exception {
+        // hospitalization.origin absent — falls back to location[0], even though for a transfer
+        // encounter that is the destination, not the source. The source-facility extension is
+        // never consulted for Encounter, so it must NOT rescue this case.
+        String payload = """
+                {
+                  "resourceType": "Encounter",
+                  "location": [{
+                    "location": { "reference": "Location/0302", "display": "Ruli DH" }
+                  }],
+                  "extension": [
+                    { "url": "http://example.org/fhir/StructureDefinition/source-facility", "valueString": "1651" }
+                  ]
+                }
+                """;
+        CloudEventMessage event = eventWith(null, payload);
+        when(facilityRepository.findByFacilityId("0302")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("0302", captor.getValue().getFacilityId());
+        assertEquals("Ruli DH", captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void encounter_plain_ignoresSourceFacilityExtensionEvenWhenPresentAndDisagreeing() throws Exception {
+        // Plain (non-transfer) encounter carrying a source-facility extension that disagrees with
+        // location[0]: location must win — the extension is never consulted for Encounter.
+        String payload = """
+                {
+                  "resourceType": "Encounter",
+                  "location": [{
+                    "location": { "reference": "Location/0030", "display": "Kacyiru Health Center" }
+                  }],
+                  "extension": [
+                    { "url": "http://example.org/fhir/StructureDefinition/source-facility", "valueString": "9999" }
+                  ]
+                }
+                """;
+        CloudEventMessage event = eventWith(null, payload);
+        when(facilityRepository.findByFacilityId("0030")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("0030", captor.getValue().getFacilityId());
+        assertEquals("Kacyiru Health Center", captor.getValue().getFacilityName());
+    }
+
+    @Test
+    void observation_noLocation_sourceFacilityExtensionCapturesFacility() throws Exception {
+        // Observation has no FHIR location at all — source-facility extension is the only signal.
+        String payload = """
+                {
+                  "resourceType": "Observation",
+                  "status": "final",
+                  "extension": [
+                    { "url": "http://example.org/fhir/StructureDefinition/source-facility", "valueString": "0007" }
+                  ]
+                }
+                """;
+        CloudEventMessage event = eventWith(null, payload);
+        when(facilityRepository.findByFacilityId("0007")).thenReturn(Optional.empty());
+        when(facilityRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        service.upsertFacility(event);
+
+        ArgumentCaptor<Facility> captor = ArgumentCaptor.forClass(Facility.class);
+        verify(facilityRepository).save(captor.capture());
+        assertEquals("0007", captor.getValue().getFacilityId());
+        assertNull(captor.getValue().getFacilityName());
+    }
+
     // ── Procedure / Immunization (direct Reference) ────────────────────────────
 
     @Test
