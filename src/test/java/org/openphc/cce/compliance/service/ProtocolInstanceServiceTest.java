@@ -134,7 +134,9 @@ class ProtocolInstanceServiceTest {
         }
 
         @Test
-        void allMandatoryStepsTerminal_completesProtocol() {
+        void allMandatoryStepsTerminal_completionCurrentlyDisabled_doesNotComplete() {
+            // Completion criteria is not yet finalized, so the COMPLETED transition is disabled
+            // even when every known criterion is satisfied.
             UUID instanceId = UUID.randomUUID();
             ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
 
@@ -144,14 +146,12 @@ class ProtocolInstanceServiceTest {
                     buildStep("vitals-recording", StepState.COMPLETED),
                     buildStep("consultation", StepState.COMPLETED)));
             stubGraph(emrGraph());
-            when(protocolInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             service.checkAndCompleteProtocol(instanceId);
 
-            assertEquals(ProtocolInstanceStatus.COMPLETED, instance.getStatus());
-            verify(protocolInstanceRepository).save(instance);
-            // The COMPLETED transition is recorded in append-only history.
-            verify(stateTransitionHistoryService).recordProtocolInstanceTransition(eq(instance), any(OffsetDateTime.class));
+            assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
+            verify(protocolInstanceRepository, never()).save(any());
+            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
         }
 
         @Test
@@ -226,7 +226,7 @@ class ProtocolInstanceServiceTest {
         }
 
         @Test
-        void noMandatorySteps_allTerminal_completes() {
+        void noMandatorySteps_allTerminal_completionCurrentlyDisabled_doesNotComplete() {
             UUID instanceId = UUID.randomUUID();
             ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
 
@@ -234,12 +234,11 @@ class ProtocolInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of(
                     buildStep("chief-complaints", StepState.COMPLETED)));
             stubGraph(List.of(step("chief-complaints", "could")));
-            when(protocolInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
 
             service.checkAndCompleteProtocol(instanceId);
 
-            assertEquals(ProtocolInstanceStatus.COMPLETED, instance.getStatus());
-            verify(protocolInstanceRepository).save(instance);
+            assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
+            verify(protocolInstanceRepository, never()).save(any());
         }
 
         @Test

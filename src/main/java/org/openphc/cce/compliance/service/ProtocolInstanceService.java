@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -116,6 +115,10 @@ public class ProtocolInstanceService {
      *       journeys completable while blocking premature completion when a mandatory
      *       prerequisite or sibling sub-step was skipped.</li>
      * </ol>
+     *
+     * <p><b>Disabled:</b> the criteria above is not yet finalized, so the COMPLETED transition
+     * itself is switched off for now — this method only logs when an instance would otherwise
+     * qualify. Remove the early return below once the criteria is agreed.
      */
     public void checkAndCompleteProtocol(UUID instanceId) {
         ProtocolInstance instance = findByIdOrThrow(instanceId);
@@ -156,13 +159,8 @@ public class ProtocolInstanceService {
             return;
         }
 
-        instance.setStatus(ProtocolInstanceStatus.COMPLETED);
-        protocolInstanceRepository.save(instance);
-
-        // Capture the COMPLETED transition in append-only history.
-        stateTransitionHistoryService.recordProtocolInstanceTransition(instance, OffsetDateTime.now(ZoneOffset.UTC));
-
-        log.info("Protocol instance {} completed — all mandatory steps satisfied ({} steps materialized)",
+        log.info("Protocol instance {} satisfies all known completion criteria ({} steps materialized), " +
+                "but auto-completion is currently disabled pending finalized criteria",
                 instanceId, materializedSteps.size());
     }
 
