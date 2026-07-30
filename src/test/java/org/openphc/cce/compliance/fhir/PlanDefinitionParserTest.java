@@ -984,4 +984,85 @@ class PlanDefinitionParserTest {
         }
         assertEquals(10, seen.size(), "all 10 steps reachable from visit-encounter");
     }
+
+    // ── Expected mandatory actions ──
+
+    @Test
+    void computeExpectedMustActions_loneLateTreatment_expectsEveryMandatoryPredecessor() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // Only `treatment` was recorded: every mandatory action on the path to it is expected,
+        // which is what the backfill materializes as PENDING and what gates protocol completion.
+        java.util.Set<String> expected =
+                PlanDefinitionParser.computeExpectedMustActions(List.of("treatment"), steps);
+
+        assertEquals(java.util.Set.of("visit-encounter", "vitals-recording", "consultation",
+                        "chief-complaints", "lab-order", "lab-results", "diagnosis", "treatment"),
+                expected);
+        // `history-assessment` and `referral` are optional (could) — never expected.
+        assertFalse(expected.contains("history-assessment"));
+        assertFalse(expected.contains("referral"));
+    }
+
+    @Test
+    void computeExpectedMustActions_firstStepOnly_expectsOnlyItself() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // A journey that has only just started expects nothing downstream — mandatory actions
+        // become expected as progress that depends on (or shares a nesting group with) them appears.
+        assertEquals(java.util.Set.of("visit-encounter"),
+                PlanDefinitionParser.computeExpectedMustActions(List.of("visit-encounter"), steps));
+    }
+
+    @Test
+    void computeMustPredecessors_loneLateTreatment_returnsEveryMandatoryPredecessor() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // Only `treatment` was recorded: every mandatory action on the path to it is already late,
+        // which is what the backfill materializes as PENDING.
+        java.util.Set<String> predecessors =
+                PlanDefinitionParser.computeMustPredecessors(List.of("treatment"), steps);
+
+        assertEquals(java.util.Set.of("visit-encounter", "vitals-recording", "consultation",
+                        "chief-complaints", "lab-order", "lab-results", "diagnosis"),
+                predecessors);
+        // `history-assessment` is optional (could); `referral` only follows the completed step.
+        assertFalse(predecessors.contains("history-assessment"));
+        assertFalse(predecessors.contains("referral"));
+    }
+
+    @Test
+    void computeMustPredecessors_excludesMandatoryStepsStillAheadInTheChain() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // Progress has reached `chief-complaints`. `lab-order`, `lab-results` and `diagnosis` are
+        // mandatory sub-steps of the same nesting group but still ahead in the forward chain, so
+        // they are left to progressive instantiation and its relatedAction offsets — unlike
+        // computeExpectedMustActions, which includes them to gate protocol completion.
+        java.util.Set<String> predecessors =
+                PlanDefinitionParser.computeMustPredecessors(List.of("chief-complaints"), steps);
+
+        assertEquals(java.util.Set.of("visit-encounter", "vitals-recording", "consultation"),
+                predecessors);
+        assertTrue(PlanDefinitionParser.computeExpectedMustActions(List.of("chief-complaints"), steps)
+                .containsAll(List.of("lab-order", "lab-results", "diagnosis")));
+    }
+
+    @Test
+    void computeExpectedMustActions_separateVisitGroups_doesNotExpectFutureVisits() throws IOException {
+        String json = loadFixture("/fhir/plan-definition-rmnch-protocol.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // Progress inside anc-visit-1 must not pull in the mandatory referral steps of the
+        // later visits — they belong to a different top-level action and are not predecessors.
+        java.util.Set<String> expected = PlanDefinitionParser.computeExpectedMustActions(
+                List.of("anc-visit-1-referral"), steps);
+
+        assertEquals(java.util.Set.of("anc-visit-1-referral", "anc-visit-1-referral-consultation",
+                "anc-visit-1-referral-ack"), expected);
+    }
 }

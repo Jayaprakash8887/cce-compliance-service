@@ -15,7 +15,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.OffsetDateTime;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -149,7 +148,12 @@ public class ProtocolInstanceService {
                 planDefinitionParser.parse(
                         instance.getProtocolDefinition().getDefinition().toString()));
 
-        List<String> unsatisfiedMustActions = computeExpectedMustActions(materializedSteps, steps).stream()
+        Set<String> observedActionIds = materializedSteps.stream()
+                .map(StepInstance::getActionId)
+                .collect(Collectors.toSet());
+
+        List<String> unsatisfiedMustActions = PlanDefinitionParser
+                .computeExpectedMustActions(observedActionIds, steps).stream()
                 .filter(actionId -> !terminalActionIds.contains(actionId))
                 .toList();
 
@@ -162,41 +166,6 @@ public class ProtocolInstanceService {
         log.info("Protocol instance {} satisfies all known completion criteria ({} steps materialized), " +
                 "but auto-completion is currently disabled pending finalized criteria",
                 instanceId, materializedSteps.size());
-    }
-
-    /**
-     * The mandatory ("must") action ids the instance is expected to satisfy given the progress
-     * observed so far: for every materialized step, itself, all its transitive predecessors, and
-     * all mandatory actions nested under the same top-level PlanDefinition action (group
-     * siblings) — restricted to actions whose requiredBehavior is "must".
-     */
-    private Set<String> computeExpectedMustActions(List<StepInstance> materializedSteps,
-                                                   List<PlanDefinitionParser.StepMetadata> steps) {
-        Set<String> mustActionIds = steps.stream()
-                .filter(a -> "must".equals(a.requiredBehavior()))
-                .map(PlanDefinitionParser.StepMetadata::id)
-                .collect(Collectors.toSet());
-        if (mustActionIds.isEmpty()) {
-            return Set.of();
-        }
-
-        Set<String> observedActionIds = materializedSteps.stream()
-                .map(StepInstance::getActionId)
-                .collect(Collectors.toSet());
-
-        Set<String> expected = new HashSet<>();
-        for (String actionId : observedActionIds) {
-            if (mustActionIds.contains(actionId)) {
-                expected.add(actionId);
-            }
-            for (String ancestorId : PlanDefinitionParser.computeAncestors(actionId, steps)) {
-                if (mustActionIds.contains(ancestorId)) {
-                    expected.add(ancestorId);
-                }
-            }
-            expected.addAll(PlanDefinitionParser.computeMustGroupActions(actionId, steps));
-        }
-        return expected;
     }
 
     @Transactional(readOnly = true)
