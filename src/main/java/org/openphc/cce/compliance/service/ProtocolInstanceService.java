@@ -104,10 +104,10 @@ public class ProtocolInstanceService {
      * {@code consultation} in emr-service-protocol). So completion requires BOTH:
      * <ol>
      *   <li>no materialized step is still actionable (PENDING/DUE/OVERDUE), and</li>
-     *   <li>every mandatory ("must") action on the path leading to any observed step has a
-     *       terminal step instance — where "on the path" means the action itself, a transitive
-     *       predecessor (ancestor) of an observed action, or a mandatory action nested under the
-     *       same top-level PlanDefinition action as an observed action (a "group sibling") —
+     *   <li>every mandatory ("must") step on the path leading to any observed step has a
+     *       terminal step instance — where "on the path" means the step itself, a transitive
+     *       predecessor (ancestor) of an observed step, or a mandatory step nested under the
+     *       same top-level PlanDefinition action as an observed step (a "group sibling") —
      *       even one whose own trigger never fired and was therefore never materialized. A
      *       mandatory step is therefore only required once progress that depends on it, or that
      *       shares its nesting group, has actually been seen, which keeps genuinely short
@@ -138,8 +138,8 @@ public class ProtocolInstanceService {
             return;
         }
 
-        // (2) every mandatory action expected by the progress observed so far must be terminal
-        Set<String> terminalActionIds = materializedSteps.stream()
+        // (2) every mandatory step expected by the progress observed so far must be terminal
+        Set<String> terminalStepIds = materializedSteps.stream()
                 .filter(s -> TERMINAL_STATES.contains(s.getState()))
                 .map(StepInstance::getActionId)
                 .collect(Collectors.toSet());
@@ -148,18 +148,18 @@ public class ProtocolInstanceService {
                 planDefinitionParser.parse(
                         instance.getProtocolDefinition().getDefinition().toString()));
 
-        Set<String> observedActionIds = materializedSteps.stream()
+        Set<String> observedStepIds = materializedSteps.stream()
                 .map(StepInstance::getActionId)
                 .collect(Collectors.toSet());
 
-        List<String> unsatisfiedMustActions = PlanDefinitionParser
-                .computeExpectedMustActions(observedActionIds, steps).stream()
-                .filter(actionId -> !terminalActionIds.contains(actionId))
+        List<String> unsatisfiedMustSteps = PlanDefinitionParser
+                .computeExpectedMustSteps(observedStepIds, steps).stream()
+                .filter(stepId -> !terminalStepIds.contains(stepId))
                 .toList();
 
-        if (!unsatisfiedMustActions.isEmpty()) {
+        if (!unsatisfiedMustSteps.isEmpty()) {
             log.info("Protocol instance {} not completed — mandatory steps outstanding: {}",
-                    instanceId, unsatisfiedMustActions);
+                    instanceId, unsatisfiedMustSteps);
             return;
         }
 

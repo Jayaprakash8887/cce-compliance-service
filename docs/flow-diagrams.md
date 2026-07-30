@@ -117,7 +117,7 @@ sequenceDiagram
                     end
 
                     Engine->>StepInst: completeStep(step, eventLogId, source, occurredAt)
-                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, then calls<br/>checkAndCompleteProtocol (see §9 "Protocol Completion Check")
+                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, backfills unrecorded<br/>mandatory predecessors as PENDING (see §9), then calls<br/>checkAndCompleteProtocol (see §9 "Protocol Completion Check")
                     StepInst->>DB: UPDATE step_instance SET state=COMPLETED
 
                     Engine->>Intel: evaluateOnCompletion(step, eventPayload)
@@ -526,22 +526,23 @@ All steps (including those originally nested in `action.action[]`) are treated a
 flowchart TD
     MATCH["Tier 1/2 match returns actionId"] --> NORMAL["Standard step processing<br/>(Section 1, Step 6)"]
     NORMAL --> COMPLETE["completeStep(step)"]
-    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this actionId)"]
+    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this step id)"]
     DEPS --> CREATED["Create dependent steps (PENDING)"]
-    CREATED --> CHECK["Check protocol completion<br/>(see 'Protocol Completion Check' below)"]
+    CREATED --> BACKFILL["backfillMissingMandatorySteps()<br/>(see 'Unrecorded Mandatory Predecessor Backfill' below)"]
+    BACKFILL --> CHECK["Check protocol completion<br/>(see 'Protocol Completion Check' below)"]
 ```
 
 ### Dependent Step Creation on Completion
 
-When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's `actionId` and creates them with appropriate due dates.
+When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's id and creates them with appropriate due dates.
 
 ```mermaid
 flowchart TD
-    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → completedStep.actionId"]
+    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → the completed step's id"]
     FIND --> LOOP{"For each dependent step"}
-    LOOP --> DEDUP{"Step for this action already<br/>exists in the instance?"}
+    LOOP --> DEDUP{"An instance for this step<br/>already exists?"}
     DEDUP -->|"Yes"| SKIP["Skip — avoid duplicate<br/>(already created reactively via its own<br/>trigger, or by a redelivered predecessor)"]
-    DEDUP -->|"No"| MUST{"target action's<br/>requiredBehavior == must?"}
+    DEDUP -->|"No"| MUST{"target step's<br/>requiredBehavior == must?"}
     MUST -->|"No (could / unspecified)"| SKIP2["Skip pre-creation — a dangling PENDING row could<br/>later go OVERDUE/MISSED even though its event never<br/>arrives; created on the fly if its own trigger fires"]
     MUST -->|"Yes"| CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
     CALC --> RECURRING{"TimingInfo.count > 1?"}
@@ -557,6 +558,25 @@ flowchart TD
     LOOP -->|"Done"| END["Return"]
 ```
 
+### Unrecorded Mandatory Predecessor Backfill (backfillMissingMandatorySteps)
+
+Progressive instantiation only works *forward*, so a step created reactively from its own trigger leaves the mandatory steps that should have preceded it with no `step_instance` row — invisible both in the journey view ("not started") and to the Scheduler. After every completion, mandatory predecessors of the observed progress that have no row are materialized as `PENDING`. See `architecture-overview.md` §6.1 for the full rationale.
+
+```mermaid
+flowchart TD
+    START["backfillMissingMandatorySteps(completedStep, allSteps)"] --> OBSERVED["Collect observed step ids<br/>(all step_instance rows of this protocol instance)"]
+    OBSERVED --> PRED["computeMustPredecessorSteps():<br/>transitive relatedAction ancestors of every observed step,<br/>restricted to requiredBehavior == must"]
+    PRED --> MISSING{"Any with no<br/>step_instance row?"}
+    MISSING -->|"No"| DONE["Return — nothing to backfill"]
+    MISSING -->|"Yes"| LOOP{"For each missing<br/>mandatory step"}
+    LOOP --> DATES["due_date = completedStep.completed_at (clinical time)<br/>overdue/missed = due + tolerance-days (null if unset)"]
+    DATES --> CREATE["createStep(stepId, repeatIndex 0) — state=PENDING"]
+    CREATE --> LOOP
+    LOOP -->|"Done"| DONE2["Scheduler now sees the rows:<br/>PENDING → DUE → OVERDUE → MISSED (deviations),<br/>or a late event completes them (LATE)"]
+```
+
+> Steps still **ahead** in the chain are deliberately excluded — backfilling them would stamp them with this completion's time and flatten the schedule their own `relatedAction` offsets define. They are left to progressive instantiation; the wider `computeExpectedMustSteps` set still gates protocol completion.
+
 ### Protocol Completion Check (checkAndCompleteProtocol)
 
 Called at the end of `completeStep()` and, unconditionally, from the `OVERDUE_TO_MISSED` scheduler transition (§3). A protocol instance only moves to `COMPLETED` once no materialized step is still actionable **and** every mandatory ("must") action that the observed progress implies is satisfied — where "implied" covers three cases: the observed action itself, its transitive `relatedAction` predecessors (ancestors), and any mandatory action nested under the same top-level PlanDefinition action (a "group sibling"), even one whose own trigger never fired and so was never materialized as a step_instance row.
@@ -570,7 +590,7 @@ flowchart TD
     EMPTY -->|"No"| RETURN2["Return"]
     EMPTY -->|"Yes"| ACTIONABLE{"Any step still<br/>PENDING/DUE/OVERDUE?"}
     ACTIONABLE -->|"Yes"| RETURN3["Return — outstanding work"]
-    ACTIONABLE -->|"No"| EXPECT["computeExpectedMustActions:<br/>for every observed actionId, union of<br/>{itself, ancestors, must-group siblings}<br/>restricted to requiredBehavior == must"]
+    ACTIONABLE -->|"No"| EXPECT["computeExpectedMustSteps:<br/>for every observed stepId, union of<br/>{itself, ancestors, must-group siblings}<br/>restricted to requiredBehavior == must"]
     EXPECT --> CHECK{"Every expected must-action<br/>has a terminal step<br/>(COMPLETED/MISSED/SKIPPED)?"}
     CHECK -->|"No"| RETURN4["Return — log outstanding<br/>mandatory actionIds"]
     CHECK -->|"Yes"| COMPLETE["Set status = COMPLETED<br/>Record state-transition history"]
