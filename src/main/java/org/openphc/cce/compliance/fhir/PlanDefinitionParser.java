@@ -143,15 +143,10 @@ public class PlanDefinitionParser {
             return Set.of();
         }
 
-        Set<String> expected = new HashSet<>();
+        Set<String> expected = new HashSet<>(computeMustPredecessorSteps(observedStepIds, steps));
         for (String stepId : observedStepIds) {
             if (mustStepIds.contains(stepId)) {
                 expected.add(stepId);
-            }
-            for (String ancestorId : computeAncestors(stepId, steps)) {
-                if (mustStepIds.contains(ancestorId)) {
-                    expected.add(ancestorId);
-                }
             }
             expected.addAll(computeMustGroupSteps(stepId, steps));
         }
