@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @Transactional
@@ -90,7 +91,8 @@ public class StepInstanceService {
 
     /**
      * Complete a step instance. Determines completion status based on timing,
-     * triggers progressive step instantiation for dependent steps, and checks
+     * triggers progressive step instantiation for dependent steps, materializes mandatory
+     * steps the journey never recorded (see {@link #backfillMissingMandatorySteps}), and checks
      * if the protocol is now complete.
      */
     public void completeStep(StepInstance step, UUID matchedEventId, String completedBySource,
@@ -141,6 +143,9 @@ public class StepInstanceService {
 
         // Auto-skip preceding optional (could) steps that are still actionable
         autoSkipPrecedingOptionalSteps(step, steps);
+
+        // Materialize mandatory predecessors this journey never recorded
+        backfillMissingMandatorySteps(step, steps);
 
         // Check if protocol is now complete
         protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
@@ -241,19 +246,19 @@ public class StepInstanceService {
      * Detect order violations: when a step completes, check if any immediate
      * predecessor steps (with requiredBehavior="must") are still in
      * non-terminal incomplete states (PENDING, DUE, OVERDUE).
-     * A predecessor of action X is any action whose relatedSteps list contains X.
+     * A predecessor of step X is any step whose relatedSteps list contains X.
      */
     private void detectOrderViolations(StepInstance completedStep,
                                        List<PlanDefinitionParser.StepMetadata> steps) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
-        String completedActionId = completedStep.getActionId();
+        String completedStepId = completedStep.getActionId();
 
-        // Find immediate predecessors: actions whose relatedSteps contain this action's id
+        // Find immediate predecessors: steps whose relatedSteps contain this step's id
         // and that have requiredBehavior="must"
         List<String> mustPredecessorIds = steps.stream()
-                .filter(a -> "must".equals(a.requiredBehavior()))
-                .filter(a -> a.relatedSteps().stream()
-                        .anyMatch(ra -> completedActionId.equals(ra.actionId())))
+                .filter(s -> "must".equals(s.requiredBehavior()))
+                .filter(s -> s.relatedSteps().stream()
+                        .anyMatch(ra -> completedStepId.equals(ra.actionId())))
                 .map(PlanDefinitionParser.StepMetadata::id)
                 .toList();
 
@@ -278,7 +283,8 @@ public class StepInstanceService {
         if (!incompletePrerequisites.isEmpty()) {
             Map<String, Object> metadata = new LinkedHashMap<>();
             metadata.put("incompletePrerequisites", incompletePrerequisites);
-            metadata.put("completedActionId", completedActionId);
+            // Key kept as-is: it is persisted in deviation.metadata and read downstream.
+            metadata.put("completedActionId", completedStepId);
 
             DeviationService.DeviationResult result = deviationService.createDeviation(completedStep,
                     DeviationType.ORDER_VIOLATION, metadata);
@@ -288,7 +294,7 @@ public class StepInstanceService {
             if (result.created()) {
                 log.warn("Order violation detected: step {} (actionId={}) completed while "
                                 + "prerequisite steps {} are still incomplete",
-                        completedStep.getId(), completedActionId, incompletePrerequisites);
+                        completedStep.getId(), completedStepId, incompletePrerequisites);
 
                 intelligenceActionEvaluator.evaluateOnDeviation(completedStep, result.deviation());
             }
@@ -305,7 +311,7 @@ public class StepInstanceService {
 
         // Find the completed step's metadata to get its relatedSteps
         PlanDefinitionParser.StepMetadata completedStepMetadata = steps.stream()
-                .filter(a -> completedStep.getActionId().equals(a.id()))
+                .filter(s -> completedStep.getActionId().equals(s.id()))
                 .findFirst()
                 .orElse(null);
 
@@ -314,7 +320,7 @@ public class StepInstanceService {
         }
 
         for (PlanDefinitionParser.RelatedStepInfo relatedStep : completedStepMetadata.relatedSteps()) {
-            // Dedup guard: skip if a step for this action already exists in the instance.
+            // Dedup guard: skip if an instance for this step already exists.
             // A target may already exist because it was created reactively by its own
             // trigger (createInitialStep) before its predecessor completed, or because a
             // redelivered event re-completed the predecessor. Without this guard, progressive
@@ -322,7 +328,7 @@ public class StepInstanceService {
             // raises a spurious deviation.
             if (stepInstanceRepository.existsByProtocolInstanceIdAndActionId(
                     protocolInstance.getId(), relatedStep.actionId())) {
-                log.debug("Skipping progressive instantiation of {} — a step for this action already exists (instanceId={})",
+                log.debug("Skipping progressive instantiation of {} — an instance for this step already exists (instanceId={})",
                         relatedStep.actionId(), protocolInstance.getId());
                 continue;
             }
@@ -337,13 +343,13 @@ public class StepInstanceService {
             }
             OffsetDateTime dueDate = calculateDueDate(baseTime, relatedStep);
 
-            // Find the target action's timing for overdue/missed dates
-            PlanDefinitionParser.StepMetadata targetAction = steps.stream()
-                    .filter(a -> relatedStep.actionId().equals(a.id()))
+            // Find the target step's timing for overdue/missed dates
+            PlanDefinitionParser.StepMetadata targetStep = steps.stream()
+                    .filter(s -> relatedStep.actionId().equals(s.id()))
                     .findFirst()
                     .orElse(null);
 
-            String requiredBehavior = targetAction != null ? targetAction.requiredBehavior() : null;
+            String requiredBehavior = targetStep != null ? targetStep.requiredBehavior() : null;
 
             // Only pre-create PENDING instances for mandatory (must) steps. Optional steps
             // (could / unspecified) are not instantiated on predecessor completion:
@@ -362,8 +368,8 @@ public class StepInstanceService {
             int repeatCount = 1;
             java.math.BigDecimal repeatPeriod = null;
             String repeatPeriodUnit = null;
-            if (targetAction != null && targetAction.timing() != null) {
-                PlanDefinitionParser.TimingInfo timing = targetAction.timing();
+            if (targetStep != null && targetStep.timing() != null) {
+                PlanDefinitionParser.TimingInfo timing = targetStep.timing();
                 if (timing.count() != null && timing.count() > 1) {
                     repeatCount = timing.count();
                     repeatPeriod = timing.period();
@@ -379,9 +385,9 @@ public class StepInstanceService {
 
                 OffsetDateTime instanceOverdueDate = null;
                 OffsetDateTime instanceMissedDate = null;
-                if (targetAction != null && targetAction.toleranceDays() != null) {
-                    instanceOverdueDate = instanceDueDate.plusDays(targetAction.toleranceDays());
-                    instanceMissedDate = instanceOverdueDate.plusDays(targetAction.toleranceDays());
+                if (targetStep != null && targetStep.toleranceDays() != null) {
+                    instanceOverdueDate = instanceDueDate.plusDays(targetStep.toleranceDays());
+                    instanceMissedDate = instanceOverdueDate.plusDays(targetStep.toleranceDays());
                 }
 
                 createStep(protocolInstance, relatedStep.actionId(),
@@ -400,19 +406,19 @@ public class StepInstanceService {
      * Only skips steps that are direct ancestors (predecessors in the dependency graph)
      * of the completed step AND have requiredBehavior=could AND are still actionable.
      *
-     * A predecessor of action X is any action whose relatedSteps list contains X
-     * (i.e., completing that action would create X). This is computed transitively
+     * A predecessor of step X is any step whose relatedSteps list contains X
+     * (i.e., completing that step would create X). This is computed transitively
      * to cover the full ancestor chain.
      */
     private void autoSkipPrecedingOptionalSteps(StepInstance completedStep,
                                                 List<PlanDefinitionParser.StepMetadata> steps) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
-        // Compute all ancestor actionIds of the completed step (transitive predecessors)
-        Set<String> ancestorActionIds = PlanDefinitionParser.computeAncestors(
+        // Compute all ancestor step ids of the completed step (transitive predecessors)
+        Set<String> ancestorStepIds = PlanDefinitionParser.computeAncestors(
                 completedStep.getActionId(), steps);
 
-        if (ancestorActionIds.isEmpty()) {
+        if (ancestorStepIds.isEmpty()) {
             return;
         }
 
@@ -423,7 +429,7 @@ public class StepInstanceService {
             if (sibling.getId().equals(completedStep.getId())) continue;
             if (!"could".equals(sibling.getRequiredBehavior())) continue;
             if (!ACTIONABLE_STATES.contains(sibling.getState())) continue;
-            if (!ancestorActionIds.contains(sibling.getActionId())) continue;
+            if (!ancestorStepIds.contains(sibling.getActionId())) continue;
 
             sibling.setState(StepState.SKIPPED);
             stepInstanceRepository.save(sibling);
@@ -435,6 +441,85 @@ public class StepInstanceService {
                             "due to completion of step {} (actionId={})",
                     sibling.getId(), sibling.getActionId(),
                     completedStep.getId(), completedStep.getActionId());
+        }
+    }
+
+    /**
+     * Materialize the mandatory steps the journey should already have recorded. Progressive
+     * instantiation only works forward from a completed step, so a step created reactively from its
+     * own trigger (see {@code ComplianceEngine.createInitialStep}) leaves the mandatory steps that
+     * should have preceded it with no row at all — they read as "not started" in the journey view
+     * and are invisible to the scheduler, so they never surface as a deviation. On every completion,
+     * any mandatory predecessor of the progress observed so far (see
+     * {@link PlanDefinitionParser#computeMustPredecessorSteps}) that has no step instance is created
+     * in PENDING state.
+     *
+     * <p>Scoped to predecessors — work that is already late — and never to mandatory steps still
+     * ahead in the chain. Materializing those would stamp them with this completion's time and so
+     * flatten the due dates their own {@code relatedAction} offsets define (e.g. lab-results' +3d
+     * after lab-order); they are left to progressive instantiation, which creates them on their
+     * predecessor's completion with the intended schedule. A mandatory step ahead that is never
+     * recorded still cannot slip through: it is picked up here once progress past it appears, and
+     * {@code ProtocolInstanceService.checkAndCompleteProtocol} gates completion on the wider
+     * expected set ({@link PlanDefinitionParser#computeExpectedMustSteps}) regardless.
+     *
+     * <p>Runs after {@link #detectOrderViolations} deliberately: backfilled rows must not count as
+     * incomplete prerequisites for the completion that revealed them, so this does not invent an
+     * ORDER_VIOLATION at completion time. A mandatory step that is never recorded is instead caught
+     * by the scheduler driving the backfilled row OVERDUE and then MISSED. If its event does arrive
+     * later, {@link #findActionableStep} picks the row up and completes it (LATE).
+     *
+     * <p>Idempotent: a mandatory step that already has any step instance — in any state, whether
+     * pre-existing or created earlier in this same transaction by progressive instantiation — is
+     * left alone.
+     */
+    private void backfillMissingMandatorySteps(StepInstance completedStep,
+                                               List<PlanDefinitionParser.StepMetadata> steps) {
+        ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
+
+        Set<String> observedStepIds = stepInstanceRepository
+                .findByProtocolInstanceId(protocolInstance.getId()).stream()
+                .map(StepInstance::getActionId)
+                .collect(Collectors.toSet());
+
+        List<String> missingMustSteps = PlanDefinitionParser
+                .computeMustPredecessorSteps(observedStepIds, steps).stream()
+                .filter(stepId -> !observedStepIds.contains(stepId))
+                .sorted()
+                .toList();
+
+        if (missingMustSteps.isEmpty()) {
+            return;
+        }
+
+        // Anchor to the clinical time of the completion that revealed the gap. Every backfilled step
+        // is a prerequisite that should already have happened, so they are all equally past due —
+        // there is no future schedule left to preserve among them — and this keeps them on clinical
+        // time rather than the ingestion clock.
+        OffsetDateTime dueDate = completedStep.getCompletedAt() != null
+                ? completedStep.getCompletedAt()
+                : OffsetDateTime.now(ZoneOffset.UTC);
+
+        Map<String, PlanDefinitionParser.StepMetadata> stepsById = steps.stream()
+                .collect(Collectors.toMap(PlanDefinitionParser.StepMetadata::id, s -> s, (a, b) -> a));
+
+        for (String stepId : missingMustSteps) {
+            PlanDefinitionParser.StepMetadata stepMetadata = stepsById.get(stepId);
+
+            OffsetDateTime overdueDate = null;
+            OffsetDateTime missedDate = null;
+            if (stepMetadata != null && stepMetadata.toleranceDays() != null) {
+                overdueDate = dueDate.plusDays(stepMetadata.toleranceDays());
+                missedDate = overdueDate.plusDays(stepMetadata.toleranceDays());
+            }
+
+            // One instance (repeatIndex 0) regardless of the step's timing.repeat count: this is a
+            // placeholder for work that was never recorded, not a scheduled recurrence.
+            createStep(protocolInstance, stepId, 0, dueDate, overdueDate, missedDate, "must");
+
+            log.info("Backfilled unrecorded mandatory step {} as PENDING due at {} "
+                            + "(revealed by completion of {}, instanceId={})",
+                    stepId, dueDate, completedStep.getActionId(), protocolInstance.getId());
         }
     }
 

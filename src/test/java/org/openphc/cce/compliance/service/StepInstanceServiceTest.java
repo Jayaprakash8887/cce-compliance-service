@@ -25,8 +25,11 @@ import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -1034,6 +1037,220 @@ class StepInstanceServiceTest {
 
             verify(deviationService, never()).createDeviation(
                     any(), eq(DeviationType.ORDER_VIOLATION), any());
+        }
+    }
+
+    @Nested
+    class BackfillMissingMandatorySteps {
+
+        /**
+         * The emr-service-protocol journey: an explicit forward chain, with the consultation
+         * sub-steps nested under {@code consultation} and {@code lab-results} under
+         * {@code lab-order}. Mandatory ("must"): vitals-recording, consultation, diagnosis.
+         */
+        private List<PlanDefinitionParser.StepMetadata> emrJourney() {
+            return List.of(
+                    action("visit-encounter", "vitals-recording", null, null),
+                    action("vitals-recording", "consultation", "must", null),
+                    action("consultation", "chief-complaints", "must", null),
+                    action("chief-complaints", "history-assessment", null, "consultation"),
+                    action("history-assessment", "lab-order", "could", "consultation"),
+                    action("lab-order", "lab-results", null, "consultation"),
+                    action("lab-results", "diagnosis", null, "lab-order"),
+                    action("diagnosis", "treatment", "must", "consultation"),
+                    action("treatment", "referral", null, "consultation"),
+                    action("referral", null, "could", "consultation"));
+        }
+
+        private PlanDefinitionParser.StepMetadata action(String id, String nextActionId,
+                                                         String requiredBehavior, String parentActionId) {
+            return action(id, nextActionId, requiredBehavior, parentActionId, 1);
+        }
+
+        private PlanDefinitionParser.StepMetadata action(String id, String nextActionId,
+                                                         String requiredBehavior, String parentActionId,
+                                                         Integer toleranceDays) {
+            List<PlanDefinitionParser.RelatedStepInfo> related = nextActionId == null
+                    ? List.of()
+                    : List.of(new PlanDefinitionParser.RelatedStepInfo(
+                            nextActionId, "after-end", BigDecimal.ZERO, "d"));
+            return new PlanDefinitionParser.StepMetadata(id, id, List.of(), related,
+                    null, toleranceDays, requiredBehavior, List.of(), parentActionId);
+        }
+
+        private void stubGraph(List<PlanDefinitionParser.StepMetadata> steps) {
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(steps);
+        }
+
+        private Map<String, StepInstance> capturedStepsExcept(String... actionIds) {
+            ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
+            verify(stepInstanceRepository, atLeastOnce()).save(captor.capture());
+            Set<String> excluded = Set.of(actionIds);
+            return captor.getAllValues().stream()
+                    .filter(s -> !excluded.contains(s.getActionId()))
+                    .collect(Collectors.toMap(StepInstance::getActionId, s -> s, (a, b) -> a));
+        }
+
+        @Test
+        void stepCompletedWithNoPrecedingRows_backfillsMandatoryStepsAsPending() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC).minusDays(1);
+
+            // Only `treatment` was ever recorded — its predecessors have no step_instance row,
+            // so the journey view shows them as "not started" and the scheduler cannot see them.
+            StepInstance treatment = buildStepWithProtocol(protocolInstance, "treatment",
+                    StepState.PENDING, occurredAt.minusHours(2), occurredAt.plusDays(1));
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(treatment));
+            stubGraph(emrJourney());
+
+            service.completeStep(treatment, UUID.randomUUID(), "ebuzima", occurredAt);
+
+            Map<String, StepInstance> backfilled = capturedStepsExcept("treatment");
+
+            // Mandatory only: history-assessment/referral are `could`, and visit-encounter,
+            // chief-complaints, lab-order, lab-results declare no requiredBehavior.
+            assertEquals(Set.of("vitals-recording", "consultation", "diagnosis"), backfilled.keySet());
+            backfilled.values().forEach(step -> {
+                assertEquals(StepState.PENDING, step.getState());
+                assertEquals("must", step.getRequiredBehavior());
+                assertEquals(0, step.getRepeatIndex());
+                // Anchored to the clinical completion time, with tolerance-derived thresholds so
+                // the scheduler drives them OVERDUE then MISSED if they are never recorded.
+                assertEquals(treatment.getCompletedAt(), step.getDueDate());
+                assertEquals(treatment.getCompletedAt().plusDays(1), step.getOverdueDate());
+                assertEquals(treatment.getCompletedAt().plusDays(2), step.getMissedDate());
+            });
+        }
+
+        @Test
+        void mandatoryStepWithExistingTerminalRow_notBackfilledAgain() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+            StepInstance missedDiagnosis = buildStepWithProtocol(protocolInstance, "diagnosis",
+                    StepState.MISSED, occurredAt.minusDays(5), occurredAt.minusDays(4));
+            StepInstance treatment = buildStepWithProtocol(protocolInstance, "treatment",
+                    StepState.PENDING, occurredAt.minusHours(2), occurredAt.plusDays(1));
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(missedDiagnosis, treatment));
+            stubGraph(emrJourney());
+
+            service.completeStep(treatment, UUID.randomUUID(), "ebuzima", occurredAt);
+
+            // A mandatory action with any row — here a terminal MISSED one — is left alone.
+            assertEquals(Set.of("vitals-recording", "consultation"),
+                    capturedStepsExcept("treatment", "diagnosis").keySet());
+        }
+
+        @Test
+        void inOrderCompletion_noMandatoryGap_backfillsNothing() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+            StepInstance visit = buildStepWithProtocol(protocolInstance, "visit-encounter",
+                    StepState.COMPLETED, occurredAt.minusHours(3), occurredAt.minusHours(2));
+            StepInstance vitals = buildStepWithProtocol(protocolInstance, "vitals-recording",
+                    StepState.PENDING, occurredAt.minusHours(1), occurredAt.plusDays(1));
+            vitals.setRequiredBehavior("must");
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(visit, vitals));
+            stubGraph(emrJourney());
+
+            service.completeStep(vitals, UUID.randomUUID(), "ebuzima", occurredAt);
+
+            // `consultation` is created by progressive instantiation (vitals-recording's dependent),
+            // and nothing else — no mandatory action is missing at this point in the journey.
+            assertEquals(Set.of("consultation"), capturedStepsExcept("vitals-recording").keySet());
+        }
+
+        @Test
+        void completingNestedSubStep_doesNotBackfillMandatoryStepStillAheadInChain() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+            StepInstance vitals = buildStepWithProtocol(protocolInstance, "vitals-recording",
+                    StepState.COMPLETED, occurredAt.minusHours(3), occurredAt.minusHours(2));
+            StepInstance consultation = buildStepWithProtocol(protocolInstance, "consultation",
+                    StepState.COMPLETED, occurredAt.minusHours(2), occurredAt.minusHours(1));
+            StepInstance chiefComplaints = buildStepWithProtocol(protocolInstance, "chief-complaints",
+                    StepState.PENDING, occurredAt.minusHours(1), occurredAt.plusDays(1));
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(vitals, consultation, chiefComplaints));
+            stubGraph(emrJourney());
+
+            service.completeStep(chiefComplaints, UUID.randomUUID(), "ebuzima", occurredAt);
+
+            // `diagnosis` is mandatory and shares the completed step's nesting group, but the
+            // forward chain has not reached it — backfilling it here would stamp it with this
+            // completion's time and flatten the schedule its own relatedAction offsets define.
+            // It stays out until progress past it appears (or its own trigger fires), and protocol
+            // completion is gated on it regardless. `history-assessment` is `could`, so progressive
+            // instantiation skips it too — nothing at all is created.
+            assertTrue(capturedStepsExcept("chief-complaints").isEmpty());
+        }
+
+        @Test
+        void mandatoryStepAheadIsBackfilledOnceProgressPastItAppears() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+            StepInstance vitals = buildStepWithProtocol(protocolInstance, "vitals-recording",
+                    StepState.COMPLETED, occurredAt.minusHours(3), occurredAt.minusHours(2));
+            StepInstance consultation = buildStepWithProtocol(protocolInstance, "consultation",
+                    StepState.COMPLETED, occurredAt.minusHours(2), occurredAt.minusHours(1));
+            StepInstance chiefComplaints = buildStepWithProtocol(protocolInstance, "chief-complaints",
+                    StepState.COMPLETED, occurredAt.minusHours(1), occurredAt);
+            // `treatment` arrives on its own trigger, skipping over `diagnosis`
+            StepInstance treatment = buildStepWithProtocol(protocolInstance, "treatment",
+                    StepState.PENDING, occurredAt.minusMinutes(30), occurredAt.plusDays(1));
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(vitals, consultation, chiefComplaints, treatment));
+            stubGraph(emrJourney());
+
+            service.completeStep(treatment, UUID.randomUUID(), "ebuzima", occurredAt);
+
+            // `diagnosis` is now a predecessor of observed progress, so it is genuinely late and
+            // gets materialized.
+            assertEquals(Set.of("diagnosis"), capturedStepsExcept("treatment").keySet());
+        }
+
+        @Test
+        void actionWithoutToleranceDays_backfilledWithoutOverdueAndMissedDates() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime occurredAt = OffsetDateTime.now(ZoneOffset.UTC);
+
+            StepInstance consultation = buildStepWithProtocol(protocolInstance, "consultation",
+                    StepState.PENDING, occurredAt.minusHours(1), occurredAt.plusDays(1));
+
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
+                    .thenReturn(List.of(consultation));
+            stubGraph(List.of(
+                    action("vitals-recording", "consultation", "must", null, null),
+                    action("consultation", null, "must", null, null)));
+
+            service.completeStep(consultation, UUID.randomUUID(), "ebuzima", occurredAt);
+
+            StepInstance backfilled = capturedStepsExcept("consultation").get("vitals-recording");
+            assertNotNull(backfilled);
+            assertEquals(StepState.PENDING, backfilled.getState());
+            assertEquals(consultation.getCompletedAt(), backfilled.getDueDate());
+            // No tolerance-days extension: the scheduler has no threshold to advance it past DUE.
+            assertNull(backfilled.getOverdueDate());
+            assertNull(backfilled.getMissedDate());
         }
     }
 

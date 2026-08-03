@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
@@ -52,22 +53,22 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Compute all transitive ancestors of an action in the dependency graph.
-     * An ancestor of X is any action A such that A's relatedSteps (directly or transitively)
+     * Compute all transitive ancestors of a step in the dependency graph.
+     * An ancestor of X is any step A such that A's relatedSteps (directly or transitively)
      * lead to X being created.
      */
-    public static Set<String> computeAncestors(String actionId, List<StepMetadata> steps) {
+    public static Set<String> computeAncestors(String stepId, List<StepMetadata> steps) {
         Set<String> ancestors = new HashSet<>();
         Deque<String> queue = new ArrayDeque<>();
-        queue.add(actionId);
+        queue.add(stepId);
 
         while (!queue.isEmpty()) {
             String current = queue.poll();
-            for (StepMetadata action : steps) {
-                boolean createsTarget = action.relatedSteps().stream()
+            for (StepMetadata step : steps) {
+                boolean createsTarget = step.relatedSteps().stream()
                         .anyMatch(ra -> current.equals(ra.actionId()));
-                if (createsTarget && ancestors.add(action.id())) {
-                    queue.add(action.id());
+                if (createsTarget && ancestors.add(step.id())) {
+                    queue.add(step.id());
                 }
             }
         }
@@ -85,7 +86,7 @@ public class PlanDefinitionParser {
      * ones whose own trigger never fired and were therefore never materialized — must also be
      * satisfied before the protocol instance can be considered complete.
      */
-    public static Set<String> computeMustGroupActions(String stepId, List<StepMetadata> allSteps) {
+    public static Set<String> computeMustGroupSteps(String stepId, List<StepMetadata> allSteps) {
         Map<String, StepMetadata> stepsById = allSteps.stream()
                 .collect(Collectors.toMap(StepMetadata::id, s -> s, (a, b) -> a));
 
@@ -109,14 +110,88 @@ public class PlanDefinitionParser {
             }
         }
 
-        Set<String> mustGroupActions = new HashSet<>();
+        Set<String> mustGroupSteps = new HashSet<>();
         for (String memberId : group) {
             StepMetadata member = stepsById.get(memberId);
             if (member != null && "must".equals(member.requiredBehavior())) {
-                mustGroupActions.add(memberId);
+                mustGroupSteps.add(memberId);
             }
         }
-        return mustGroupActions;
+        return mustGroupSteps;
+    }
+
+    /**
+     * The mandatory ("must") step ids a protocol instance is expected to satisfy given the
+     * progress observed so far: for every observed step, the step itself, all its transitive
+     * predecessors (ancestors), and all mandatory steps nested under the same top-level
+     * PlanDefinition action (group siblings) — restricted to steps whose requiredBehavior is
+     * "must".
+     *
+     * <p>A mandatory step is therefore only expected once progress that depends on it, or that
+     * shares its nesting group, has actually been observed. That keeps genuinely short journeys
+     * completable and keeps mandatory work belonging to a future part of the protocol (e.g. a later
+     * ANC visit's referral) out of scope.
+     *
+     * <p>Used by {@code ProtocolInstanceService.checkAndCompleteProtocol} to gate completion on all
+     * of them being terminal. For the narrower "already late" set that the backfill materializes,
+     * see {@link #computeMustPredecessorSteps}.
+     */
+    public static Set<String> computeExpectedMustSteps(Collection<String> observedStepIds,
+                                                      List<StepMetadata> steps) {
+        Set<String> mustStepIds = mustStepIds(steps);
+        if (mustStepIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<String> expected = new HashSet<>(computeMustPredecessorSteps(observedStepIds, steps));
+        for (String stepId : observedStepIds) {
+            if (mustStepIds.contains(stepId)) {
+                expected.add(stepId);
+            }
+            expected.addAll(computeMustGroupSteps(stepId, steps));
+        }
+        return expected;
+    }
+
+    /**
+     * The mandatory ("must") steps that should already have been carried out for the observed
+     * progress to be legitimate: for every observed step, its transitive {@code relatedAction}
+     * predecessors (ancestors) whose requiredBehavior is "must". Observed steps may appear in the
+     * result when one is a predecessor of another — callers that only care about unrecorded work
+     * filter by "has no step instance".
+     *
+     * <p>Deliberately narrower than {@link #computeExpectedMustSteps}: it contains only work that
+     * is already late, never work still ahead in the chain. {@code StepInstanceService} materializes
+     * these when they have no step instance at all, so a step that arrived without its prerequisites
+     * stops leaving them invisible. Mandatory work still ahead is left to progressive instantiation,
+     * which creates it with the due dates its own {@code relatedAction} offsets define; the wider
+     * expected set still gates protocol completion, so a mandatory step that is never recorded
+     * cannot slip through unnoticed.
+     */
+    public static Set<String> computeMustPredecessorSteps(Collection<String> observedStepIds,
+                                                         List<StepMetadata> steps) {
+        Set<String> mustStepIds = mustStepIds(steps);
+        if (mustStepIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<String> predecessors = new HashSet<>();
+        for (String stepId : observedStepIds) {
+            for (String ancestorId : computeAncestors(stepId, steps)) {
+                if (mustStepIds.contains(ancestorId)) {
+                    predecessors.add(ancestorId);
+                }
+            }
+        }
+        return predecessors;
+    }
+
+    /** The ids of every step whose requiredBehavior is "must". */
+    private static Set<String> mustStepIds(List<StepMetadata> steps) {
+        return steps.stream()
+                .filter(s -> "must".equals(s.requiredBehavior()))
+                .map(StepMetadata::id)
+                .collect(Collectors.toSet());
     }
 
     /**
