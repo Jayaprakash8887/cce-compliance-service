@@ -984,4 +984,39 @@ class PlanDefinitionParserTest {
         }
         assertEquals(10, seen.size(), "all 10 steps reachable from visit-encounter");
     }
+
+    // ── Expected mandatory actions ──
+
+    @Test
+    void computeMustPredecessorSteps_loneLateTreatment_returnsEveryMandatoryPredecessor() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // Only `treatment` was recorded: every mandatory action on the path to it is already late,
+        // which is what the backfill materializes as PENDING.
+        java.util.Set<String> predecessors =
+                PlanDefinitionParser.computeMustPredecessorSteps(List.of("treatment"), steps);
+
+        assertEquals(java.util.Set.of("visit-encounter", "vitals-recording", "consultation",
+                        "chief-complaints", "lab-order", "lab-results", "diagnosis"),
+                predecessors);
+        // `history-assessment` is optional (could); `referral` only follows the completed step.
+        assertFalse(predecessors.contains("history-assessment"));
+        assertFalse(predecessors.contains("referral"));
+    }
+
+    @Test
+    void computeMustPredecessorSteps_excludesMandatoryStepsStillAheadInTheChain() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // Progress has reached `chief-complaints`. `lab-order`, `lab-results` and `diagnosis` are
+        // mandatory sub-steps of the same nesting group but still ahead in the forward chain, so
+        // they are left to progressive instantiation and its relatedAction offsets.
+        java.util.Set<String> predecessors =
+                PlanDefinitionParser.computeMustPredecessorSteps(List.of("chief-complaints"), steps);
+
+        assertEquals(java.util.Set.of("visit-encounter", "vitals-recording", "consultation"),
+                predecessors);
+    }
 }

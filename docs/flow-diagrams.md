@@ -117,7 +117,7 @@ sequenceDiagram
                     end
 
                     Engine->>StepInst: completeStep(step, eventLogId, source, occurredAt)
-                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, then — only if the parsed<br/>steps contain a repeating group — locks the protocol instance<br/>row and advances group cycles (see §9 "Repeating Group Cycle<br/>Advancement"), then calls checkAndCompleteProtocol<br/>(see §9 "Protocol Completion Check")
+                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, backfills unrecorded<br/>mandatory predecessors as PENDING (see §9).<br/>Design (pending implementation): when the parsed steps contain<br/>a repeating group, also locks the protocol instance row and<br/>advances group cycles (see §9 "Repeating Group Cycle<br/>Advancement") before any future completion check.
                     StepInst->>DB: UPDATE step_instance SET state=COMPLETED
 
                     Engine->>Intel: evaluateOnCompletion(step, eventPayload)
@@ -537,22 +537,23 @@ All steps (including those originally nested in `action.action[]`) are treated a
 flowchart TD
     MATCH["Tier 1/2 match returns actionId"] --> NORMAL["Standard step processing<br/>(Section 1, Step 6)"]
     NORMAL --> COMPLETE["completeStep(step)"]
-    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this actionId)"]
+    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this step id)"]
     DEPS --> CREATED["Create dependent steps (PENDING)"]
-    CREATED --> HASGROUP{"hasRepeatingGroup(steps)?"}
+    CREATED --> BACKFILL["backfillMissingMandatorySteps()<br/>(see 'Unrecorded Mandatory Predecessor Backfill' below)"]
+    BACKFILL --> HASGROUP{"hasRepeatingGroup(steps)?<br/>(design, pending implementation)"}
     HASGROUP -->|"Yes"| LOCK["Lock protocol instance row<br/>(findByIdForUpdate — pessimistic write)"]
     LOCK --> ADVANCE["checkAndAdvanceGroupCycles()<br/>(see 'Repeating Group Cycle<br/>Advancement' below)"]
-    ADVANCE --> CHECK
-    HASGROUP -->|"No"| CHECK["Check protocol completion<br/>(see 'Protocol Completion Check' below)"]
+    ADVANCE --> DONE["Return"]
+    HASGROUP -->|"No"| DONE
 ```
 
 ### Dependent Step Creation on Completion
 
-When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's `actionId` and creates them with appropriate due dates.
+When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's id and creates them with appropriate due dates.
 
 ```mermaid
 flowchart TD
-    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → completedStep.actionId"]
+    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → the completed step's id"]
     FIND --> LOOP{"For each dependent step"}
     LOOP --> DEDUP{"Step for this action already exists?<br/>(scoped to completedStep's own cycle if the target<br/>is in the SAME repeating group as completedStep,<br/>else anywhere in the instance)"}
     DEDUP -->|"Yes"| SKIP["Skip — avoid duplicate<br/>(already created reactively via its own<br/>trigger, or by a redelivered predecessor)"]
@@ -573,28 +574,30 @@ flowchart TD
     LOOP -->|"Done"| END["Return"]
 ```
 
-### Protocol Completion Check (checkAndCompleteProtocol)
+### Unrecorded Mandatory Predecessor Backfill (backfillMissingMandatorySteps)
 
-Called at the end of `completeStep()` and, unconditionally, from the `OVERDUE_TO_MISSED` scheduler transition (§3). A protocol instance only moves to `COMPLETED` once no materialized step is still actionable **and** every mandatory ("must") action that the observed progress implies is satisfied — where "implied" covers three cases: the observed action itself, its transitive `relatedAction` predecessors (ancestors), and any mandatory action nested under the same top-level PlanDefinition action (a "group sibling"), even one whose own trigger never fired and so was never materialized as a step_instance row.
+Progressive instantiation only works *forward*, so a step created reactively from its own trigger leaves the mandatory steps that should have preceded it with no `step_instance` row — invisible both in the journey view ("not started") and to the Scheduler. After every completion, mandatory predecessors of the observed progress that have no row are materialized as `PENDING`. See `architecture-overview.md` §6.1 for the full rationale.
 
 ```mermaid
 flowchart TD
-    START["checkAndCompleteProtocol(instanceId)"] --> ACTIVE{"instance.status == ACTIVE?"}
-    ACTIVE -->|"No"| RETURN1["Return — nothing to do"]
-    ACTIVE -->|"Yes"| LOAD["Load materialized step_instance rows"]
-    LOAD --> EMPTY{"Any steps materialized?"}
-    EMPTY -->|"No"| RETURN2["Return"]
-    EMPTY -->|"Yes"| ACTIONABLE{"Any step still<br/>PENDING/DUE/OVERDUE?"}
-    ACTIONABLE -->|"Yes"| RETURN3["Return — outstanding work"]
-    ACTIONABLE -->|"No"| EXPECT["computeExpectedMustActions:<br/>for every observed actionId, union of<br/>{itself, ancestors, must-group siblings}<br/>restricted to requiredBehavior == must"]
-    EXPECT --> CHECK{"Every expected must-action<br/>has a terminal step<br/>(COMPLETED/MISSED/SKIPPED)?"}
-    CHECK -->|"No"| RETURN4["Return — log outstanding<br/>mandatory actionIds"]
-    CHECK -->|"Yes"| COMPLETE["Set status = COMPLETED<br/>Record state-transition history"]
+    START["backfillMissingMandatorySteps(completedStep, allSteps)"] --> OBSERVED["Collect observed step ids<br/>(all step_instance rows of this protocol instance)"]
+    OBSERVED --> PRED["computeMustPredecessorSteps():<br/>transitive relatedAction ancestors of every observed step,<br/>restricted to requiredBehavior == must"]
+    PRED --> MISSING{"Any with no<br/>step_instance row?"}
+    MISSING -->|"No"| DONE["Return — nothing to backfill"]
+    MISSING -->|"Yes"| LOOP{"For each missing<br/>mandatory step"}
+    LOOP --> DATES["due_date = completedStep.completed_at (clinical time)<br/>overdue/missed = due + tolerance-days (null if unset)"]
+    DATES --> CREATE["createStep(stepId, repeatIndex 0) — state=PENDING"]
+    CREATE --> LOOP
+    LOOP -->|"Done"| DONE2["Scheduler now sees the rows:<br/>PENDING → DUE → OVERDUE → MISSED (deviations),<br/>or a late event completes them (LATE)"]
 ```
 
-### Repeating Group Cycle Advancement (checkAndAdvanceGroupCycles)
+> Steps still **ahead** in the chain are deliberately excluded — backfilling them would stamp them with this completion's time and flatten the schedule their own `relatedAction` offsets define. They are left to progressive instantiation.
 
-Called from both `completeStep()` and the `OVERDUE_TO_MISSED` scheduler transition (§3), but only when `hasRepeatingGroup(steps)` is true — a cheap structural check (no query) performed first so protocols without a repeating group pay nothing extra. When true, the caller acquires a pessimistic write lock on the protocol instance row (`findByIdForUpdate` — the first DB lock in this codebase) before calling this method, serializing the cycle-advance/completion decision against concurrent triggers landing on sibling steps of the same instance. Cycle 0 of a repeating group is seeded elsewhere — by `ComplianceEngine.createInitialStep` (reactive path) and `StepInstanceService.createDependentSteps` (progressive path), both via `resolveGroupStepInstance` (see §4 and "Dependent Step Creation on Completion" above) — this method only ever advances an existing cycle N to N+1.
+> **Protocol completion:** there is currently no code path that transitions a `ProtocolInstance` out of `ACTIVE`. `ProtocolInstanceService.checkAndCompleteProtocol` and its supporting `PlanDefinitionParser.computeExpectedMustSteps`/`computeMustGroupSteps` logic were removed pending finalized completion criteria — see [Architecture Overview §6.2](architecture-overview.md#62-protocol-instance).
+
+### Repeating Group Cycle Advancement (checkAndAdvanceGroupCycles) — design, pending implementation
+
+Called from both `completeStep()` and the `OVERDUE_TO_MISSED` scheduler transition (§3), but only when `hasRepeatingGroup(steps)` is true — a cheap structural check (no query) performed first so protocols without a repeating group pay nothing extra. When true, the caller acquires a pessimistic write lock on the protocol instance row (`findByIdForUpdate` — the first DB lock in this codebase) before calling this method, serializing the cycle-advance/completion decision against concurrent triggers landing on sibling steps of the same instance. Cycle 0 of a repeating group is seeded elsewhere — by `ComplianceEngine.createInitialStep` (reactive path) and `StepInstanceService.createDependentSteps` (progressive path), both via `resolveGroupStepInstance` (see §4 and "Dependent Step Creation on Completion" above) — this method only ever advances an existing cycle N to N+1. This is designed to run before any future completion check, once automatic completion (above) is reinstated.
 
 ```mermaid
 flowchart TD

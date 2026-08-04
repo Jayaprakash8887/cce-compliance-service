@@ -282,7 +282,7 @@ Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
 ### 8.3 Running Tests
 
 ```bash
-# Unit tests (440 tests)
+# Unit tests (424 tests)
 ./gradlew test
 
 # Integration tests (33 tests — EmbeddedKafka + H2)

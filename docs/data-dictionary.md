@@ -742,10 +742,10 @@ Indexes: **none beyond the PK** (same rationale as `protocol_instance_history`).
 
 | Value | Description |
 |-------|-------------|
-| `ACTIVE` | Patient enrolled and protocol being tracked. |
-| `COMPLETED` | All required steps completed. |
-| `WITHDRAWN` | Patient manually withdrawn. |
-| `EXPIRED` | Protocol exceeded maximum duration. |
+| `ACTIVE` | Patient enrolled and protocol being tracked. Currently the **only** status any code path sets — see note below. |
+| `COMPLETED` | All required steps completed. *(Not currently set by any code — the automatic completion check, `ProtocolInstanceService.checkAndCompleteProtocol`, was removed pending finalized criteria. See [Architecture Overview §6.2](architecture-overview.md#62-protocol-instance).)* |
+| `WITHDRAWN` | Patient manually withdrawn. *(Not currently set — no withdrawal endpoint exists.)* |
+| `EXPIRED` | Protocol exceeded maximum duration. *(Not currently set — no expiry job exists.)* |
 
 ### StepState
 

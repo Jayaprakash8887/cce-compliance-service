@@ -10,11 +10,13 @@ import org.springframework.stereotype.Component;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Component
 public class PlanDefinitionParser {
@@ -50,26 +52,64 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Compute all transitive ancestors of an action in the dependency graph.
-     * An ancestor of X is any action A such that A's relatedSteps (directly or transitively)
+     * Compute all transitive ancestors of a step in the dependency graph.
+     * An ancestor of X is any step A such that A's relatedSteps (directly or transitively)
      * lead to X being created.
      */
-    public static Set<String> computeAncestors(String actionId, List<StepMetadata> steps) {
+    public static Set<String> computeAncestors(String stepId, List<StepMetadata> steps) {
         Set<String> ancestors = new HashSet<>();
         Deque<String> queue = new ArrayDeque<>();
-        queue.add(actionId);
+        queue.add(stepId);
 
         while (!queue.isEmpty()) {
             String current = queue.poll();
-            for (StepMetadata action : steps) {
-                boolean createsTarget = action.relatedSteps().stream()
+            for (StepMetadata step : steps) {
+                boolean createsTarget = step.relatedSteps().stream()
                         .anyMatch(ra -> current.equals(ra.actionId()));
-                if (createsTarget && ancestors.add(action.id())) {
-                    queue.add(action.id());
+                if (createsTarget && ancestors.add(step.id())) {
+                    queue.add(step.id());
                 }
             }
         }
         return ancestors;
+    }
+
+    /**
+     * The mandatory ("must") steps that should already have been carried out for the observed
+     * progress to be legitimate: for every observed step, its transitive {@code relatedAction}
+     * predecessors (ancestors) whose requiredBehavior is "must". Observed steps may appear in the
+     * result when one is a predecessor of another — callers that only care about unrecorded work
+     * filter by "has no step instance".
+     *
+     * <p>{@code StepInstanceService} materializes these when they have no step instance at all, so
+     * a step that arrived without its prerequisites stops leaving them invisible. Mandatory work
+     * still ahead is left to progressive instantiation, which creates it with the due dates its own
+     * {@code relatedAction} offsets define.
+     */
+    public static Set<String> computeMustPredecessorSteps(Collection<String> observedStepIds,
+                                                         List<StepMetadata> steps) {
+        Set<String> mustStepIds = mustStepIds(steps);
+        if (mustStepIds.isEmpty()) {
+            return Set.of();
+        }
+
+        Set<String> predecessors = new HashSet<>();
+        for (String stepId : observedStepIds) {
+            for (String ancestorId : computeAncestors(stepId, steps)) {
+                if (mustStepIds.contains(ancestorId)) {
+                    predecessors.add(ancestorId);
+                }
+            }
+        }
+        return predecessors;
+    }
+
+    /** The ids of every step whose requiredBehavior is "must". */
+    private static Set<String> mustStepIds(List<StepMetadata> steps) {
+        return steps.stream()
+                .filter(s -> "must".equals(s.requiredBehavior()))
+                .map(StepMetadata::id)
+                .collect(Collectors.toSet());
     }
 
     /**
@@ -307,7 +347,8 @@ public class PlanDefinitionParser {
                 timingInfo,
                 toleranceDays,
                 requiredBehavior,
-                intelligenceActions
+                intelligenceActions,
+                parentActionId
         ));
 
         // Recursively flatten nested step-type actions
@@ -534,7 +575,8 @@ public class PlanDefinitionParser {
             TimingInfo timing,
             Integer toleranceDays,
             String requiredBehavior,
-            List<IntelligenceActionInfo> intelligenceActions
+            List<IntelligenceActionInfo> intelligenceActions,
+            String parentActionId
     ) {}
 
     public record TriggerInfo(

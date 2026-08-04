@@ -2,7 +2,6 @@ package org.openphc.cce.compliance.service;
 
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import jakarta.persistence.EntityNotFoundException;
-import org.hl7.fhir.r4.model.PlanDefinition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -11,19 +10,13 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.compliance.domain.entity.ProtocolDefinition;
 import org.openphc.cce.compliance.domain.entity.ProtocolInstance;
-import org.openphc.cce.compliance.domain.entity.StepInstance;
 import org.openphc.cce.compliance.domain.enums.ProtocolDefinitionStatus;
 import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
-import org.openphc.cce.compliance.domain.enums.StepState;
 import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
-import org.openphc.cce.compliance.domain.repository.StepInstanceRepository;
-import org.openphc.cce.compliance.fhir.PlanDefinitionParser;
 
-import java.math.BigDecimal;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -38,23 +31,17 @@ class ProtocolInstanceServiceTest {
     private ProtocolInstanceRepository protocolInstanceRepository;
 
     @Mock
-    private StepInstanceRepository stepInstanceRepository;
-
-    @Mock
     private AuditService auditService;
 
     @Mock
     private StateTransitionHistoryService stateTransitionHistoryService;
 
-    @Mock
-    private PlanDefinitionParser planDefinitionParser;
-
     private ProtocolInstanceService service;
 
     @BeforeEach
     void setUp() {
-        service = new ProtocolInstanceService(protocolInstanceRepository, stepInstanceRepository,
-                auditService, stateTransitionHistoryService, planDefinitionParser);
+        service = new ProtocolInstanceService(protocolInstanceRepository,
+                auditService, stateTransitionHistoryService);
     }
 
     @Nested
@@ -116,129 +103,6 @@ class ProtocolInstanceServiceTest {
     }
 
     @Nested
-    class CheckAndCompleteProtocol {
-
-        // Graph: visit-encounter(could) -> vitals-recording(must) -> consultation(must) -> chief-complaints(could)
-        private List<PlanDefinitionParser.StepMetadata> emrGraph() {
-            return List.of(
-                    step("visit-encounter", "could", "vitals-recording"),
-                    step("vitals-recording", "must", "consultation"),
-                    step("consultation", "must", "chief-complaints"),
-                    step("chief-complaints", "could"));
-        }
-
-        private void stubGraph(List<PlanDefinitionParser.StepMetadata> steps) {
-            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
-            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
-            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(steps);
-        }
-
-        @Test
-        void allMandatoryStepsTerminal_completesProtocol() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-            when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of(
-                    buildStep("visit-encounter", StepState.COMPLETED),
-                    buildStep("vitals-recording", StepState.COMPLETED),
-                    buildStep("consultation", StepState.COMPLETED)));
-            stubGraph(emrGraph());
-            when(protocolInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-            service.checkAndCompleteProtocol(instanceId);
-
-            assertEquals(ProtocolInstanceStatus.COMPLETED, instance.getStatus());
-            verify(protocolInstanceRepository).save(instance);
-            // The COMPLETED transition is recorded in append-only history.
-            verify(stateTransitionHistoryService).recordProtocolInstanceTransition(eq(instance), any(OffsetDateTime.class));
-        }
-
-        @Test
-        void loneConsultation_mandatoryPredecessorMissing_doesNotComplete() {
-            // Regression: the emr-service-protocol bug — a consultation step entered directly
-            // via its own trigger, with vitals-recording (a mandatory predecessor) never
-            // instantiated, must NOT mark the protocol COMPLETED.
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-            when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of(
-                    buildStep("consultation", StepState.COMPLETED)));
-            stubGraph(emrGraph());
-
-            service.checkAndCompleteProtocol(instanceId);
-
-            assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
-            verify(protocolInstanceRepository, never()).save(any());
-            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
-        }
-
-        @Test
-        void actionableStepPresent_doesNotComplete() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-            when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of(
-                    buildStep("vitals-recording", StepState.COMPLETED),
-                    buildStep("consultation", StepState.DUE)));
-
-            service.checkAndCompleteProtocol(instanceId);
-
-            assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
-            verify(protocolInstanceRepository, never()).save(any());
-            // early-out before parsing the definition
-            verify(planDefinitionParser, never()).parse(anyString());
-        }
-
-        @Test
-        void noMandatorySteps_allTerminal_completes() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-            when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of(
-                    buildStep("chief-complaints", StepState.COMPLETED)));
-            stubGraph(List.of(step("chief-complaints", "could")));
-            when(protocolInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-
-            service.checkAndCompleteProtocol(instanceId);
-
-            assertEquals(ProtocolInstanceStatus.COMPLETED, instance.getStatus());
-            verify(protocolInstanceRepository).save(instance);
-        }
-
-        @Test
-        void noSteps_doesNotComplete() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.ACTIVE);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-            when(stepInstanceRepository.findByProtocolInstanceId(instanceId)).thenReturn(List.of());
-
-            service.checkAndCompleteProtocol(instanceId);
-
-            assertEquals(ProtocolInstanceStatus.ACTIVE, instance.getStatus());
-            verify(protocolInstanceRepository, never()).save(any());
-            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
-        }
-
-        @Test
-        void alreadyCompleted_skips() {
-            UUID instanceId = UUID.randomUUID();
-            ProtocolInstance instance = buildProtocolInstance(instanceId, ProtocolInstanceStatus.COMPLETED);
-
-            when(protocolInstanceRepository.findById(instanceId)).thenReturn(Optional.of(instance));
-
-            service.checkAndCompleteProtocol(instanceId);
-
-            verify(protocolInstanceRepository, never()).save(any());
-            verify(stateTransitionHistoryService, never()).recordProtocolInstanceTransition(any(), any());
-        }
-    }
-
-    @Nested
     class ReadOperations {
 
         @Test
@@ -282,23 +146,5 @@ class ProtocolInstanceServiceTest {
                 .steps(new HashSet<>())
                 .deviations(new HashSet<>())
                 .build();
-    }
-
-    private StepInstance buildStep(String actionId, StepState state) {
-        return StepInstance.builder()
-                .id(UUID.randomUUID())
-                .actionId(actionId)
-                .state(state)
-                .build();
-    }
-
-    private PlanDefinitionParser.StepMetadata step(String id, String requiredBehavior,
-                                                   String... relatedActionIds) {
-        List<PlanDefinitionParser.RelatedStepInfo> related = new java.util.ArrayList<>();
-        for (String target : relatedActionIds) {
-            related.add(new PlanDefinitionParser.RelatedStepInfo(target, "after-end", BigDecimal.ZERO, "d"));
-        }
-        return new PlanDefinitionParser.StepMetadata(
-                id, id, List.of(), related, null, null, requiredBehavior, List.of());
     }
 }
