@@ -117,7 +117,7 @@ sequenceDiagram
                     end
 
                     Engine->>StepInst: completeStep(step, eventLogId, source, occurredAt)
-                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, backfills unrecorded<br/>mandatory predecessors as PENDING (see §9), then calls<br/>checkAndCompleteProtocol (see §9 "Protocol Completion Check")
+                    Note over StepInst: Single call — internally sets completed_at (clinical time,<br/>clamped to now), detects order violations, runs progressive<br/>instantiation of mandatory dependents (see §9), auto-skips<br/>preceding optional (could) steps, backfills unrecorded<br/>mandatory predecessors as PENDING (see §9)
                     StepInst->>DB: UPDATE step_instance SET state=COMPLETED
 
                     Engine->>Intel: evaluateOnCompletion(step, eventPayload)
@@ -217,7 +217,6 @@ sequenceDiagram
     participant Consumer as SchedulerTriggerConsumer
     participant StepSvc as StepInstanceService
     participant DevSvc as DeviationService
-    participant ProtoInst as ProtocolInstanceService
     participant DB as PostgreSQL
 
     Scheduler->>Kafka: Publish SchedulerTriggerMessage
@@ -253,8 +252,6 @@ sequenceDiagram
                 DevSvc->>DB: INSERT INTO deviation (idempotent)
             end
         end
-        Note over StepSvc,ProtoInst: MISSED and SKIPPED are both terminal, so completion is<br/>checked unconditionally here — even if the transition above<br/>was a no-op (redelivered trigger, step already terminal)
-        StepSvc->>ProtoInst: checkAndCompleteProtocol(protocolInstanceId)
     end
 
     Consumer->>Kafka: Acknowledge offset
@@ -529,7 +526,6 @@ flowchart TD
     COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this step id)"]
     DEPS --> CREATED["Create dependent steps (PENDING)"]
     CREATED --> BACKFILL["backfillMissingMandatorySteps()<br/>(see 'Unrecorded Mandatory Predecessor Backfill' below)"]
-    BACKFILL --> CHECK["Check protocol completion<br/>(see 'Protocol Completion Check' below)"]
 ```
 
 ### Dependent Step Creation on Completion
@@ -575,23 +571,6 @@ flowchart TD
     LOOP -->|"Done"| DONE2["Scheduler now sees the rows:<br/>PENDING → DUE → OVERDUE → MISSED (deviations),<br/>or a late event completes them (LATE)"]
 ```
 
-> Steps still **ahead** in the chain are deliberately excluded — backfilling them would stamp them with this completion's time and flatten the schedule their own `relatedAction` offsets define. They are left to progressive instantiation; the wider `computeExpectedMustSteps` set still gates protocol completion.
+> Steps still **ahead** in the chain are deliberately excluded — backfilling them would stamp them with this completion's time and flatten the schedule their own `relatedAction` offsets define. They are left to progressive instantiation.
 
-### Protocol Completion Check (checkAndCompleteProtocol)
-
-Called at the end of `completeStep()` and, unconditionally, from the `OVERDUE_TO_MISSED` scheduler transition (§3). A protocol instance only moves to `COMPLETED` once no materialized step is still actionable **and** every mandatory ("must") action that the observed progress implies is satisfied — where "implied" covers three cases: the observed action itself, its transitive `relatedAction` predecessors (ancestors), and any mandatory action nested under the same top-level PlanDefinition action (a "group sibling"), even one whose own trigger never fired and so was never materialized as a step_instance row.
-
-```mermaid
-flowchart TD
-    START["checkAndCompleteProtocol(instanceId)"] --> ACTIVE{"instance.status == ACTIVE?"}
-    ACTIVE -->|"No"| RETURN1["Return — nothing to do"]
-    ACTIVE -->|"Yes"| LOAD["Load materialized step_instance rows"]
-    LOAD --> EMPTY{"Any steps materialized?"}
-    EMPTY -->|"No"| RETURN2["Return"]
-    EMPTY -->|"Yes"| ACTIONABLE{"Any step still<br/>PENDING/DUE/OVERDUE?"}
-    ACTIONABLE -->|"Yes"| RETURN3["Return — outstanding work"]
-    ACTIONABLE -->|"No"| EXPECT["computeExpectedMustSteps:<br/>for every observed stepId, union of<br/>{itself, ancestors, must-group siblings}<br/>restricted to requiredBehavior == must"]
-    EXPECT --> CHECK{"Every expected must-action<br/>has a terminal step<br/>(COMPLETED/MISSED/SKIPPED)?"}
-    CHECK -->|"No"| RETURN4["Return — log outstanding<br/>mandatory actionIds"]
-    CHECK -->|"Yes"| COMPLETE["Set status = COMPLETED<br/>Record state-transition history"]
-```
+> **Protocol completion:** there is currently no code path that transitions a `ProtocolInstance` out of `ACTIVE`. `ProtocolInstanceService.checkAndCompleteProtocol` and its supporting `PlanDefinitionParser.computeExpectedMustSteps`/`computeMustGroupSteps` logic were removed pending finalized completion criteria — see [Architecture Overview §6.2](architecture-overview.md#62-protocol-instance).
