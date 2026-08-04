@@ -38,7 +38,6 @@ public class StepInstanceService {
 
     private final StepInstanceRepository stepInstanceRepository;
     private final PlanDefinitionParser planDefinitionParser;
-    private final ProtocolInstanceService protocolInstanceService;
     private final DeviationService deviationService;
     private final AuditService auditService;
     private final IntelligenceActionEvaluator intelligenceActionEvaluator;
@@ -46,14 +45,12 @@ public class StepInstanceService {
 
     public StepInstanceService(StepInstanceRepository stepInstanceRepository,
                                PlanDefinitionParser planDefinitionParser,
-                               ProtocolInstanceService protocolInstanceService,
                                DeviationService deviationService,
                                AuditService auditService,
                                IntelligenceActionEvaluator intelligenceActionEvaluator,
                                StateTransitionHistoryService stateTransitionHistoryService) {
         this.stepInstanceRepository = stepInstanceRepository;
         this.planDefinitionParser = planDefinitionParser;
-        this.protocolInstanceService = protocolInstanceService;
         this.deviationService = deviationService;
         this.auditService = auditService;
         this.intelligenceActionEvaluator = intelligenceActionEvaluator;
@@ -146,9 +143,6 @@ public class StepInstanceService {
 
         // Materialize mandatory predecessors this journey never recorded
         backfillMissingMandatorySteps(step, steps);
-
-        // Check if protocol is now complete
-        protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
     }
 
     /**
@@ -187,8 +181,6 @@ public class StepInstanceService {
                         intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
                     }
                 }
-                // Check if protocol is now complete (MISSED/SKIPPED are terminal)
-                protocolInstanceService.checkAndCompleteProtocol(step.getProtocolInstance().getId());
             }
             default -> throw new IllegalArgumentException(
                     "Unknown transition type: " + trigger.getTransitionType());
@@ -458,10 +450,7 @@ public class StepInstanceService {
      * ahead in the chain. Materializing those would stamp them with this completion's time and so
      * flatten the due dates their own {@code relatedAction} offsets define (e.g. lab-results' +3d
      * after lab-order); they are left to progressive instantiation, which creates them on their
-     * predecessor's completion with the intended schedule. A mandatory step ahead that is never
-     * recorded still cannot slip through: it is picked up here once progress past it appears, and
-     * {@code ProtocolInstanceService.checkAndCompleteProtocol} gates completion on the wider
-     * expected set ({@link PlanDefinitionParser#computeExpectedMustSteps}) regardless.
+     * predecessor's completion with the intended schedule.
      *
      * <p>Runs after {@link #detectOrderViolations} deliberately: backfilled rows must not count as
      * incomplete prerequisites for the completion that revealed them, so this does not invent an

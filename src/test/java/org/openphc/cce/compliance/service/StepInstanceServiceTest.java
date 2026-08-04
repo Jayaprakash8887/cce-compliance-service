@@ -45,9 +45,6 @@ class StepInstanceServiceTest {
     private PlanDefinitionParser planDefinitionParser;
 
     @Mock
-    private ProtocolInstanceService protocolInstanceService;
-
-    @Mock
     private DeviationService deviationService;
 
     @Mock
@@ -67,7 +64,7 @@ class StepInstanceServiceTest {
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
         service = new StepInstanceService(stepInstanceRepository,
-                planDefinitionParser, protocolInstanceService, deviationService, auditService,
+                planDefinitionParser, deviationService, auditService,
                 intelligenceActionEvaluator, stateTransitionHistoryService);
     }
 
@@ -124,7 +121,6 @@ class StepInstanceServiceTest {
 
             verify(auditService).audit(eq("COMPLIANCE"), eq("STEP_COMPLETED"),
                     eq("system"), eq("StepInstance"), anyString(), anyMap());
-            verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
             // The COMPLETED transition (state + completion status) is recorded in append-only history.
             verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
@@ -517,7 +513,6 @@ class StepInstanceServiceTest {
             verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
 
-            verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
             // The MISSED transition is recorded in append-only history.
             verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
@@ -777,7 +772,6 @@ class StepInstanceServiceTest {
             assertEquals(StepState.SKIPPED, step.getState());
             verify(deviationService, never()).createDeviation(any(), any());
             verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
-            verify(protocolInstanceService).checkAndCompleteProtocol(step.getProtocolInstance().getId());
         }
 
         @Test

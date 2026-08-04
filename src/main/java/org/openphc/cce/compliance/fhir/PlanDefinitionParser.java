@@ -14,7 +14,6 @@ import java.util.Collection;
 import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -76,97 +75,16 @@ public class PlanDefinitionParser {
     }
 
     /**
-     * Compute the "must" step ids nested under the same top-level PlanDefinition action as the
-     * given step — i.e. all mandatory descendants of its root ancestor (the top-level action it
-     * is nested under, per {@code action.action} in the PlanDefinition JSON).
-     *
-     * <p>Nesting groups sub-steps under a parent for indexing purposes only and does not create an
-     * implicit step dependency (see {@link #extractSteps}). But once any sub-step in a group has
-     * been observed, progress on that group has started, so its other mandatory sub-steps — even
-     * ones whose own trigger never fired and were therefore never materialized — must also be
-     * satisfied before the protocol instance can be considered complete.
-     */
-    public static Set<String> computeMustGroupSteps(String stepId, List<StepMetadata> allSteps) {
-        Map<String, StepMetadata> stepsById = allSteps.stream()
-                .collect(Collectors.toMap(StepMetadata::id, s -> s, (a, b) -> a));
-
-        String rootId = stepId;
-        StepMetadata current = stepsById.get(rootId);
-        while (current != null && current.parentActionId() != null) {
-            rootId = current.parentActionId();
-            current = stepsById.get(rootId);
-        }
-
-        Set<String> group = new HashSet<>();
-        Deque<String> queue = new ArrayDeque<>();
-        queue.add(rootId);
-        group.add(rootId);
-        while (!queue.isEmpty()) {
-            String parentId = queue.poll();
-            for (StepMetadata step : allSteps) {
-                if (parentId.equals(step.parentActionId()) && group.add(step.id())) {
-                    queue.add(step.id());
-                }
-            }
-        }
-
-        Set<String> mustGroupSteps = new HashSet<>();
-        for (String memberId : group) {
-            StepMetadata member = stepsById.get(memberId);
-            if (member != null && "must".equals(member.requiredBehavior())) {
-                mustGroupSteps.add(memberId);
-            }
-        }
-        return mustGroupSteps;
-    }
-
-    /**
-     * The mandatory ("must") step ids a protocol instance is expected to satisfy given the
-     * progress observed so far: for every observed step, the step itself, all its transitive
-     * predecessors (ancestors), and all mandatory steps nested under the same top-level
-     * PlanDefinition action (group siblings) — restricted to steps whose requiredBehavior is
-     * "must".
-     *
-     * <p>A mandatory step is therefore only expected once progress that depends on it, or that
-     * shares its nesting group, has actually been observed. That keeps genuinely short journeys
-     * completable and keeps mandatory work belonging to a future part of the protocol (e.g. a later
-     * ANC visit's referral) out of scope.
-     *
-     * <p>Used by {@code ProtocolInstanceService.checkAndCompleteProtocol} to gate completion on all
-     * of them being terminal. For the narrower "already late" set that the backfill materializes,
-     * see {@link #computeMustPredecessorSteps}.
-     */
-    public static Set<String> computeExpectedMustSteps(Collection<String> observedStepIds,
-                                                      List<StepMetadata> steps) {
-        Set<String> mustStepIds = mustStepIds(steps);
-        if (mustStepIds.isEmpty()) {
-            return Set.of();
-        }
-
-        Set<String> expected = new HashSet<>(computeMustPredecessorSteps(observedStepIds, steps));
-        for (String stepId : observedStepIds) {
-            if (mustStepIds.contains(stepId)) {
-                expected.add(stepId);
-            }
-            expected.addAll(computeMustGroupSteps(stepId, steps));
-        }
-        return expected;
-    }
-
-    /**
      * The mandatory ("must") steps that should already have been carried out for the observed
      * progress to be legitimate: for every observed step, its transitive {@code relatedAction}
      * predecessors (ancestors) whose requiredBehavior is "must". Observed steps may appear in the
      * result when one is a predecessor of another — callers that only care about unrecorded work
      * filter by "has no step instance".
      *
-     * <p>Deliberately narrower than {@link #computeExpectedMustSteps}: it contains only work that
-     * is already late, never work still ahead in the chain. {@code StepInstanceService} materializes
-     * these when they have no step instance at all, so a step that arrived without its prerequisites
-     * stops leaving them invisible. Mandatory work still ahead is left to progressive instantiation,
-     * which creates it with the due dates its own {@code relatedAction} offsets define; the wider
-     * expected set still gates protocol completion, so a mandatory step that is never recorded
-     * cannot slip through unnoticed.
+     * <p>{@code StepInstanceService} materializes these when they have no step instance at all, so
+     * a step that arrived without its prerequisites stops leaving them invisible. Mandatory work
+     * still ahead is left to progressive instantiation, which creates it with the due dates its own
+     * {@code relatedAction} offsets define.
      */
     public static Set<String> computeMustPredecessorSteps(Collection<String> observedStepIds,
                                                          List<StepMetadata> steps) {
