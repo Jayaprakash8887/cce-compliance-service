@@ -244,7 +244,7 @@ All Kafka messages use **CloudEvents spec field names (lowercase)** — no camel
 
 | Pattern | Example | Description |
 |---|---|---|
-| `cce.compliance.deviation.*` | `cce.compliance.deviation.overdue` | Compliance-generated deviation events |
+| `cce.compliance.deviation.*` | `cce.compliance.deviation.missed` | Compliance-generated deviation events |
 
 #### Payload Content Types
 
@@ -262,7 +262,7 @@ Timer-based triggers from the CCE Scheduler Service for step state transitions.
 ```json
 {
   "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",
-  "transitionType": "DUE_TO_OVERDUE",
+  "transitionType": "DUE_TO_MISSED",
   "triggeredAt": "2026-03-25T00:00:00Z",
   "correlationid": "sched-corr-123"
 }
@@ -271,7 +271,7 @@ Timer-based triggers from the CCE Scheduler Service for step state transitions.
 | Field | Type | Description |
 |---|---|---|
 | `stepInstanceId` | UUID | Target step instance |
-| `transitionType` | String | `PENDING_TO_DUE`, `DUE_TO_OVERDUE`, or `OVERDUE_TO_MISSED` |
+| `transitionType` | String | `PENDING_TO_DUE` or `DUE_TO_MISSED` |
 | `triggeredAt` | OffsetDateTime | When the timer fired |
 | `correlationid` | String | Trace correlation |
 
@@ -280,22 +280,24 @@ Timer-based triggers from the CCE Scheduler Service for step state transitions.
 ```mermaid
 graph LR
     P["PENDING"] -->|"PENDING_TO_DUE"| D["DUE"]
-    D -->|"DUE_TO_OVERDUE"| O["OVERDUE"]
-    O -->|"OVERDUE_TO_MISSED"| M["MISSED"]
+    D -->|"DUE_TO_MISSED (must)"| M["MISSED"]
+    D -->|"DUE_TO_MISSED (could)"| S["SKIPPED"]
 
     style P fill:#3498DB,color:white
     style D fill:#F39C12,color:white
-    style O fill:#E74C3C,color:white
     style M fill:#7F8C8D,color:white
+    style S fill:#95A5A6,color:white
 ```
 
-> **How does the Scheduler know when to fire?** The Scheduler Service polls `step_instance` (owned by the Compliance Service) for rows where the current time has crossed a date threshold (`dueDate`, `overdueDate`, or `missedDate`). It uses a `scheduler_lease` table to prevent duplicate publishes across instances. See [Architecture Overview §1.1 — Scheduler Service Contract](architecture-overview.md#11-scheduler-service-contract) for the full interaction model, polling query, and ownership boundaries.
+> **Removed — `DUE_TO_OVERDUE` / `OVERDUE_TO_MISSED`.** The Scheduler no longer emits either, and `OVERDUE` is out of the step lifecycle. The consumer still tolerates both across a rolling deploy: `OVERDUE_TO_MISSED` is treated as an alias of `DUE_TO_MISSED`, and a stale `DUE_TO_OVERDUE` is dropped (logged, not retried) so it never churns into the DLQ. Any unrecognised `transitionType` still throws, and so still routes to the DLQ.
+
+> **How does the Scheduler know when to fire?** The Scheduler Service polls `step_instance` (owned by the Compliance Service) for rows where the current time has crossed a date threshold (`dueDate` for `PENDING`, `missedDate` for `DUE`). It uses a `scheduler_lease` table to prevent duplicate publishes across instances. See [Architecture Overview §1.1 — Scheduler Service Contract](architecture-overview.md#11-scheduler-service-contract) for the full interaction model, polling query, and ownership boundaries.
 
 ---
 
 ### 5.3 IntelligenceTriggerEvent (Outbound — `cce.intelligence.triggers`)
 
-Published when an intelligence action fires — triggered by deviation detection (OVERDUE/MISSED) or step completion when the step's PlanDefinition action has nested intelligence actions with matching conditions.
+Published when an intelligence action fires — triggered by deviation detection (MISSED/ORDER_VIOLATION) or step completion when the step's PlanDefinition action has nested intelligence actions with matching conditions.
 
 ```json
 {
@@ -307,7 +309,7 @@ Published when an intelligence action fires — triggered by deviation detection
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
   "intelligenceDestination": "openMRS",
-  "stepState": "overdue",
+  "stepState": "missed",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
   "detectedAt": "2026-03-25T00:00:05Z",
@@ -329,7 +331,7 @@ Published when an intelligence action fires — triggered by deviation detection
 | `actionId` | String | Protocol definition action ID |
 | `protocolCanonical` | String | Protocol `url\|version` |
 | `detectedAt` | OffsetDateTime | Detection timestamp |
-| `eventPayload` | JsonNode | Original FHIR resource payload from the inbound CloudEvent. Present for event-driven completions; `null` for scheduler-driven deviations (OVERDUE/MISSED). |
+| `eventPayload` | JsonNode | Original FHIR resource payload from the inbound CloudEvent. Present for event-driven completions; `null` for scheduler-driven deviations (MISSED). |
 
 **Kafka Key:** `intelligenceEventId` (ensures unique partitioning per action execution)
 
@@ -337,8 +339,8 @@ Published when an intelligence action fires — triggered by deviation detection
 
 | Trigger |
 |---|
-| Step transitioned DUE → OVERDUE |
-| Step transitioned OVERDUE → MISSED |
+| Step transitioned DUE → MISSED |
+| Order violation detected on completion |
 | Step completed with `completionStatus=LATE` |
 
 

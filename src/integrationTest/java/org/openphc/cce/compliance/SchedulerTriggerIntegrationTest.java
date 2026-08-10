@@ -36,7 +36,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * Integration tests for scheduler-driven step state transitions via Kafka.
- * Verifies PENDING→DUE, DUE→OVERDUE (with deviation), OVERDUE→MISSED (with deviation).
+ * Verifies PENDING→DUE and DUE→MISSED (with deviation) / DUE→SKIPPED for optional steps,
+ * plus the legacy handling that keeps rows and triggers from before the removal of
+ * DUE→OVERDUE from being stranded.
  */
 class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
 
@@ -169,20 +171,20 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void dueToOverdue_createsDeviation() throws Exception {
-        String patientId = "patient-sched-overdue-" + UUID.randomUUID();
+    void dueToMissed_createsDeviation() throws Exception {
+        String patientId = "patient-sched-missed-" + UUID.randomUUID();
         enrollAndGetStep(patientId);
 
         List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
                 .filter(p -> patientId.equals(p.getPatientId())).toList();
         StepInstance dueStep = StepInstance.builder()
                 .protocolInstance(instances.get(0))
-                .actionId("test-overdue-action")
+                .actionId("test-missed-action")
                 .repeatIndex(0)
                 .state(StepState.DUE)
-                .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
-                .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
-                .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
+                .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
                 .requiredBehavior("must")
                 .build();
         dueStep = stepInstanceRepository.save(dueStep);
@@ -191,50 +193,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
 
         SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                 .stepInstanceId(stepId)
-                .transitionType("DUE_TO_OVERDUE")
-                .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
-                .correlationid(UUID.randomUUID().toString())
-                .build();
-
-        kafkaTemplate.send(schedulerTopic, trigger);
-
-        await().atMost(30, SECONDS).untilAsserted(() -> {
-            StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
-            assertThat(updated.getState()).isEqualTo(StepState.OVERDUE);
-        });
-
-        // Verify deviation was created
-        List<Deviation> deviations = deviationRepository.findAll().stream()
-                .filter(d -> d.getProtocolInstance().getId().equals(instances.get(0).getId())).toList();
-        assertThat(deviations).anyMatch(d ->
-                d.getStepInstance().getId().equals(stepId) &&
-                d.getDeviationType() == DeviationType.OVERDUE);
-    }
-
-    @Test
-    void overdueToMissed_createsDeviation() throws Exception {
-        String patientId = "patient-sched-missed-" + UUID.randomUUID();
-        enrollAndGetStep(patientId);
-
-        List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
-                .filter(p -> patientId.equals(p.getPatientId())).toList();
-        StepInstance overdueStep = StepInstance.builder()
-                .protocolInstance(instances.get(0))
-                .actionId("test-missed-action")
-                .repeatIndex(0)
-                .state(StepState.OVERDUE)
-                .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
-                .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
-                .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
-                .requiredBehavior("must")
-                .build();
-        overdueStep = stepInstanceRepository.save(overdueStep);
-
-        UUID stepId = overdueStep.getId();
-
-        SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
-                .stepInstanceId(stepId)
-                .transitionType("OVERDUE_TO_MISSED")
+                .transitionType("DUE_TO_MISSED")
                 .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationid(UUID.randomUUID().toString())
                 .build();
@@ -255,7 +214,95 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    void overdueToSkipped_forOptionalStep() throws Exception {
+    void dueToMissed_legacyOverdueStep_stillTerminalizes() throws Exception {
+        // An adopted environment can still hold rows in the retired OVERDUE state. The
+        // V8 reconciliation moves them back to DUE so the Scheduler scans them again, and
+        // OVERDUE is accepted as a source state here so one it did not catch — written by an
+        // old Compliance instance mid rolling-deploy — terminalizes rather than being stranded.
+        String patientId = "patient-sched-legacy-overdue-" + UUID.randomUUID();
+        enrollAndGetStep(patientId);
+
+        List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
+                .filter(p -> patientId.equals(p.getPatientId())).toList();
+        StepInstance overdueStep = StepInstance.builder()
+                .protocolInstance(instances.get(0))
+                .actionId("test-legacy-overdue-action")
+                .repeatIndex(0)
+                .state(StepState.OVERDUE)
+                .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
+                .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                .requiredBehavior("must")
+                .build();
+        overdueStep = stepInstanceRepository.save(overdueStep);
+
+        UUID stepId = overdueStep.getId();
+
+        SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                .stepInstanceId(stepId)
+                .transitionType("DUE_TO_MISSED")
+                .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .correlationid(UUID.randomUUID().toString())
+                .build();
+
+        kafkaTemplate.send(schedulerTopic, trigger);
+
+        await().atMost(30, SECONDS).untilAsserted(() -> {
+            StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
+            assertThat(updated.getState()).isEqualTo(StepState.MISSED);
+        });
+
+        List<Deviation> deviations = deviationRepository.findAll().stream()
+                .filter(d -> d.getProtocolInstance().getId().equals(instances.get(0).getId())).toList();
+        assertThat(deviations).anyMatch(d ->
+                d.getStepInstance().getId().equals(stepId) &&
+                d.getDeviationType() == DeviationType.MISSED);
+    }
+
+    @Test
+    void legacyDueToOverdue_isIgnored_leavingStepDue() throws Exception {
+        // The DUE -> OVERDUE transition is removed. A trigger a pre-upgrade Scheduler left in
+        // flight must be dropped: the step stays DUE, awaiting its own DUE_TO_MISSED.
+        String patientId = "patient-sched-legacy-trigger-" + UUID.randomUUID();
+        enrollAndGetStep(patientId);
+
+        List<ProtocolInstance> instances = protocolInstanceRepository.findAll().stream()
+                .filter(p -> patientId.equals(p.getPatientId())).toList();
+        StepInstance dueStep = StepInstance.builder()
+                .protocolInstance(instances.get(0))
+                .actionId("test-legacy-trigger-action")
+                .repeatIndex(0)
+                .state(StepState.DUE)
+                .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
+                .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                .requiredBehavior("must")
+                .build();
+        dueStep = stepInstanceRepository.save(dueStep);
+
+        UUID stepId = dueStep.getId();
+
+        SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                .stepInstanceId(stepId)
+                .transitionType("DUE_TO_OVERDUE")
+                .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                .correlationid(UUID.randomUUID().toString())
+                .build();
+
+        kafkaTemplate.send(schedulerTopic, trigger);
+
+        // Nothing to await on — assert the trigger stayed inert after the consumer has had
+        // time to process it.
+        Thread.sleep(5000);
+
+        StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
+        assertThat(updated.getState()).isEqualTo(StepState.DUE);
+        assertThat(deviationRepository.findAll())
+                .noneMatch(d -> d.getStepInstance().getId().equals(stepId));
+    }
+
+    @Test
+    void dueToMissed_optionalStep_becomesSkipped() throws Exception {
         String patientId = "patient-sched-skip-" + UUID.randomUUID();
         enrollAndGetStep(patientId);
 
@@ -265,7 +312,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
                 .protocolInstance(instances.get(0))
                 .actionId("test-optional-action")
                 .repeatIndex(0)
-                .state(StepState.OVERDUE)
+                .state(StepState.DUE)
                 .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
                 .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
                 .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
@@ -277,7 +324,7 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
 
         SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                 .stepInstanceId(stepId)
-                .transitionType("OVERDUE_TO_MISSED")
+                .transitionType("DUE_TO_MISSED")
                 .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .correlationid(UUID.randomUUID().toString())
                 .build();

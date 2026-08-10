@@ -151,40 +151,39 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
     class IntelligenceEvaluation {
 
         @Test
-        void dueToOverdue_evaluatesIntelligenceActions_createsEventLog() throws Exception {
-            String patientId = "patient-intel-overdue-" + UUID.randomUUID();
+        void dueToMissed_evaluatesMissedAction_createsEventLog() throws Exception {
+            String patientId = "patient-intel-missed-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
             UUID protocolInstanceId = protocolInstance.getId();
 
-            // Create a DUE step with past overdue date to trigger DUE_TO_OVERDUE transition
+            // A DUE step whose missedDate has passed — the only deviation-raising transition
+            // left now that DUE -> OVERDUE is removed.
             StepInstance dueStep = StepInstance.builder()
                     .protocolInstance(protocolInstance)
                     .actionId("encounter-step")
                     .repeatIndex(0)
                     .state(StepState.DUE)
-                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
-                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
-                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
                     .requiredBehavior("must")
                     .build();
             dueStep = stepInstanceRepository.save(dueStep);
 
             UUID stepId = dueStep.getId();
 
-            // Send scheduler trigger: DUE_TO_OVERDUE
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("DUE_TO_OVERDUE")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .correlationid(UUID.randomUUID().toString())
                     .build();
 
             kafkaTemplate.send(schedulerTopic, trigger);
 
-            // Wait for step to transition to OVERDUE
             await().atMost(30, SECONDS).untilAsserted(() -> {
                 StepInstance updated = stepInstanceRepository.findById(stepId).orElseThrow();
-                assertThat(updated.getState()).isEqualTo(StepState.OVERDUE);
+                assertThat(updated.getState()).isEqualTo(StepState.MISSED);
             });
 
             // Verify deviation was created
@@ -192,7 +191,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .filter(d -> d.getProtocolInstance().getId().equals(protocolInstanceId)).toList();
             assertThat(deviations).anyMatch(d ->
                     d.getStepInstance().getId().equals(stepId) &&
-                            d.getDeviationType() == DeviationType.OVERDUE);
+                            d.getDeviationType() == DeviationType.MISSED);
 
             // Verify IntelligenceEventLog was created by intelligence evaluation
             await().atMost(10, SECONDS).untilAsserted(() -> {
@@ -200,12 +199,16 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                 assertThat(eventLogs).isNotEmpty();
             });
 
+            // Exactly one: "missed-critical-alert" matches deviationType == "missed", while the
+            // sibling "overdue-escalation" action does not fire.
             List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
             assertThat(eventLogs).hasSize(1);
 
             IntelligenceEventLog eventLog = eventLogs.get(0);
             assertThat(eventLog.isPublished()).isTrue();
             assertThat(eventLog.getPublishedAt()).isNotNull();
+            assertThat(eventLog.getTriggerReason()).isEqualTo("missed");
+            assertThat(eventLog.getStepActionId()).isEqualTo("missed-critical-alert");
 
             // Verify full event log details via REST API
             mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", eventLog.getId()))
@@ -214,8 +217,8 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .andExpect(jsonPath("$.eventPayload").isNotEmpty())
                     .andExpect(jsonPath("$.protocolInstanceId").value(protocolInstanceId.toString()))
                     .andExpect(jsonPath("$.stepInstanceId").value(stepId.toString()))
-                    .andExpect(jsonPath("$.triggerReason").value("overdue"))
-                    .andExpect(jsonPath("$.stepActionId").value("overdue-escalation"))
+                    .andExpect(jsonPath("$.triggerReason").value("missed"))
+                    .andExpect(jsonPath("$.stepActionId").value("missed-critical-alert"))
                     .andExpect(jsonPath("$.evaluationContext").isNotEmpty());
 
             // Verify deviation.intelligenceEventId was set
@@ -228,12 +231,12 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
         }
 
         @Test
-        void overdueToMissed_evaluatesMissedAction_createsEventLog() throws Exception {
-            String patientId = "patient-intel-missed-" + UUID.randomUUID();
+        void dueToMissed_legacyOverdueStep_stillEvaluatesMissedAction() throws Exception {
+            // A row an adopted environment left in the retired OVERDUE state must still
+            // terminalize and run intelligence evaluation, not be stranded.
+            String patientId = "patient-intel-legacy-overdue-" + UUID.randomUUID();
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
-            UUID protocolInstanceId = protocolInstance.getId();
 
-            // Create an OVERDUE step with past missed date
             StepInstance overdueStep = StepInstance.builder()
                     .protocolInstance(protocolInstance)
                     .actionId("encounter-step")
@@ -250,7 +253,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("OVERDUE_TO_MISSED")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .correlationid(UUID.randomUUID().toString())
                     .build();
@@ -262,17 +265,12 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                 assertThat(updated.getState()).isEqualTo(StepState.MISSED);
             });
 
-            // The "missed-critical-alert" intelligence action matches deviationType == "missed"
             await().atMost(10, SECONDS).untilAsserted(() -> {
                 List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
                 assertThat(eventLogs).isNotEmpty();
             });
 
-            List<IntelligenceEventLog> eventLogs = intelligenceEventLogRepository.findByStepInstanceId(stepId);
-            assertThat(eventLogs).hasSize(1);
-
-            IntelligenceEventLog eventLog = eventLogs.get(0);
-            assertThat(eventLog.isPublished()).isTrue();
+            IntelligenceEventLog eventLog = intelligenceEventLogRepository.findByStepInstanceId(stepId).get(0);
             assertThat(eventLog.getTriggerReason()).isEqualTo("missed");
             assertThat(eventLog.getStepActionId()).isEqualTo("missed-critical-alert");
         }
@@ -328,15 +326,15 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
             ProtocolInstance protocolInstance = enrollAndWait(patientId);
             UUID protocolInstanceId = protocolInstance.getId();
 
-            // Trigger intelligence action via DUE_TO_OVERDUE
+            // Trigger intelligence action via DUE_TO_MISSED
             StepInstance dueStep = StepInstance.builder()
                     .protocolInstance(protocolInstance)
                     .actionId("encounter-step")
                     .repeatIndex(0)
                     .state(StepState.DUE)
-                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
-                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
-                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
                     .requiredBehavior("must")
                     .build();
             dueStep = stepInstanceRepository.save(dueStep);
@@ -344,7 +342,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("DUE_TO_OVERDUE")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .correlationid(UUID.randomUUID().toString())
                     .build();
@@ -366,8 +364,8 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .andExpect(jsonPath("$.eventPayload").isNotEmpty())
                     .andExpect(jsonPath("$.protocolInstanceId").value(protocolInstanceId.toString()))
                     .andExpect(jsonPath("$.stepInstanceId").value(stepId.toString()))
-                    .andExpect(jsonPath("$.triggerReason").value("overdue"))
-                    .andExpect(jsonPath("$.stepActionId").value("overdue-escalation"));
+                    .andExpect(jsonPath("$.triggerReason").value("missed"))
+                    .andExpect(jsonPath("$.stepActionId").value("missed-critical-alert"));
         }
 
         @Test
@@ -381,9 +379,9 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
                     .actionId("encounter-step")
                     .repeatIndex(0)
                     .state(StepState.DUE)
-                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
-                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
-                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).plusDays(3))
+                    .dueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(10))
+                    .overdueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(5))
+                    .missedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1))
                     .requiredBehavior("must")
                     .build();
             dueStep = stepInstanceRepository.save(dueStep);
@@ -391,7 +389,7 @@ class IntelligencePipelineIntegrationTest extends IntegrationTestBase {
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("DUE_TO_OVERDUE")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .correlationid(UUID.randomUUID().toString())
                     .build();

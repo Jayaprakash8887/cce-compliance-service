@@ -88,9 +88,8 @@ The Scheduler Service identifies steps that need transitions using:
 ```sql
 SELECT s FROM StepInstance s WHERE
   (s.state = 'PENDING' AND s.dueDate <= :now) OR
-  (s.state = 'DUE' AND s.overdueDate <= :now) OR
-  (s.state = 'OVERDUE' AND s.missedDate <= :now)
-ORDER BY COALESCE(s.dueDate, s.overdueDate, s.missedDate) ASC
+  (s.state = 'DUE' AND s.missedDate <= :now)
+ORDER BY COALESCE(s.dueDate, s.missedDate) ASC
 ```
 
 Each condition maps to a specific `transitionType`:
@@ -98,8 +97,11 @@ Each condition maps to a specific `transitionType`:
 | Condition | Transition Type | Effect on Compliance Service |
 |---|---|---|
 | `state = PENDING` AND `dueDate ≤ now` | `PENDING_TO_DUE` | Step becomes actionable |
-| `state = DUE` AND `overdueDate ≤ now` | `DUE_TO_OVERDUE` | Deviation recorded (`OVERDUE`) |
-| `state = OVERDUE` AND `missedDate ≤ now` | `OVERDUE_TO_MISSED` | `MISSED` (must) or `SKIPPED` (could) |
+| `state = DUE` AND `missedDate ≤ now` | `DUE_TO_MISSED` | `MISSED` + deviation (must) or `SKIPPED` (could) |
+
+> **Removed — `DUE → OVERDUE`.** The Scheduler no longer emits `DUE_TO_OVERDUE` or `OVERDUE_TO_MISSED`, and never scans the `OVERDUE` state (see [cce-scheduler-service#12](https://github.com/openphc/cce-scheduler-service/pull/12)). A `DUE` step now waits for `missedDate` and terminalizes directly. `overdue_date` is still written and still separates `ON_TIME` from `LATE` on completion (§6.1) — it is simply no longer a state threshold.
+>
+> Compliance-side legacy handling: migration `V8__reconcile_legacy_overdue_steps.sql` moves the rows adopted environments already hold in `OVERDUE` back to `DUE`, so the Scheduler scans them again against their own `missedDate`. `applySchedulerTransition` additionally accepts `OVERDUE` as a source state for `DUE_TO_MISSED`, treats an in-flight `OVERDUE_TO_MISSED` as its alias, and drops an in-flight `DUE_TO_OVERDUE` — so a rolling deploy in either order is safe.
 
 #### Watermark Cursor (Time-Ordered IDs)
 
@@ -111,7 +113,7 @@ This lets the Scheduler Service treat `step_instance.id` as a **monotonic waterm
 SELECT s FROM StepInstance s WHERE s.id > :watermark ORDER BY s.id ASC
 ```
 
-The date-threshold query above (overdue/missed detection) remains the mechanism for *time-based transitions*; the watermark is a complementary cursor for **incremental discovery of newly enrolled work** in creation order.
+The date-threshold query above (due/missed detection) remains the mechanism for *time-based transitions*; the watermark is a complementary cursor for **incremental discovery of newly enrolled work** in creation order.
 
 **Guarantees & limits:**
 - Ordering holds at **millisecond** granularity. Within a millisecond, `UuidV7Generator` uses a 12-bit monotonic counter so ids from a single Compliance Service process stay strictly increasing; across multiple instances or under clock skew, same-millisecond ordering is best-effort.
@@ -123,7 +125,7 @@ The date-threshold query above (overdue/missed detection) remains the mechanism 
 |---|---|---|
 | **`step_instance` table** | Compliance Service | Schema, writes, Flyway migrations |
 | **`scheduler_lease` table** | Scheduler Service | Prevents duplicate trigger publishing across Scheduler instances |
-| **Polling reads** | Scheduler Service | Read-only access to `step_instance` (state, dueDate, overdueDate, missedDate) |
+| **Polling reads** | Scheduler Service | Read-only access to `step_instance` (state, dueDate, missedDate) |
 | **State writes** | Compliance Service | Only the Compliance Service updates `step_instance.state` — the Scheduler never writes to it |
 | **Kafka topic** | Shared | `cce.scheduler.triggers` — Scheduler produces, Compliance consumes |
 
@@ -159,7 +161,7 @@ The Compliance Service publishes `IntelligenceTriggerEvent` messages to `cce.int
 | Field | Purpose | Source |
 |---|---|---|
 | `id` | Unique event identifier | Generated UUID |
-| `type` | Event category (e.g., `cce.compliance.deviation.overdue`) | Derived from deviation type or step completion status |
+| `type` | Event category (e.g., `cce.compliance.deviation.missed`) | Derived from deviation type or step completion status |
 | `subject` | Patient identifier | Protocol instance subject |
 | `actionId` | PlanDefinition step that triggered the intelligence action | Step instance's action ID |
 | `protocolCanonical` | Protocol `url\|version` | Protocol definition canonical |
@@ -258,7 +260,7 @@ Resource metadata is extracted from the CloudEvent **payload** (`data`), never f
 
 ### 4.2 Clinical Event Time Extraction
 
-When an inbound event **completes** a step, the completion is attributed to the **clinical occurrence time** — when the act actually happened — rather than the time the event reached the service. This keeps a completed step's `completed_at`, its `completionStatus`, and the calculated due/overdue/missed dates of any **dependent steps** accurate even when events arrive late (offline sync, batch upload, retries, DLQ replay).
+When an inbound event **completes** a step, the completion is attributed to the **clinical occurrence time** — when the act actually happened — rather than the time the event reached the service. This keeps a completed step's `completed_at`, its `completionStatus`, and the calculated due/tolerance/missed dates of any **dependent steps** accurate even when events arrive late (offline sync, batch upload, retries, DLQ replay).
 
 `ClinicalEventTimeExtractor` derives this time from the FHIR payload using a resource-type → clinical-time-field table, handling FHIR's polymorphic `[x]` choice types by probing concrete field names in priority order:
 
@@ -291,7 +293,7 @@ The resolved time is **clamped to `now()`** in `StepInstanceService.completeStep
 
 **Enrollment anchoring:** the same `resolveOccurredAt(event)` result is also used as a new `ProtocolInstance.enrolled_at` (previously `now()`). So a patient's enrollment — and any downstream analytics that date-filter cohorts on `enrolled_at` — reflects when they *clinically* entered care, not when the event was processed, consistent with step completion. Enrollment is idempotent, so `enrolled_at` is fixed by the first matching event to be processed. Unlike `completed_at`, enrollment does **not** apply the `completeStep` future-clamp (it does not anchor step schedules — those anchor on `completed_at`), so its only clock guard is `resolveOccurredAt`'s own `now()` last resort.
 
-> **Late-arriving completions:** when ingestion lag exceeds a dependent step's offset, that step can be created with `overdue_date`/`missed_date` already in the past and transition (possibly recording a deviation) at the next scheduler cycle. This is real-world-accurate — the step genuinely is overdue — and is a consequence of anchoring to clinical time.
+> **Late-arriving completions:** when ingestion lag exceeds a dependent step's offset, that step can be created with `missed_date` already in the past and transition (possibly recording a deviation) at the next scheduler cycle. This is real-world-accurate — the step genuinely is late — and is a consequence of anchoring to clinical time.
 
 ### 4.3 Metric time semantics
 
@@ -506,29 +508,27 @@ When an inbound `Encounter` event arrives:
 stateDiagram-v2
     [*] --> PENDING : createStep()
     PENDING --> DUE : scheduler(PENDING_TO_DUE)
-    DUE --> OVERDUE : scheduler(DUE_TO_OVERDUE)
-    OVERDUE --> MISSED : scheduler(OVERDUE_TO_MISSED)
+    DUE --> MISSED : scheduler(DUE_TO_MISSED)
     PENDING --> COMPLETED : completeStep()
     DUE --> COMPLETED : completeStep()
-    OVERDUE --> COMPLETED : completeStep()
-    OVERDUE --> SKIPPED : scheduler(OVERDUE_TO_MISSED) [could]
+    DUE --> SKIPPED : scheduler(DUE_TO_MISSED) [could]
     COMPLETED --> [*]
     MISSED --> [*]
     SKIPPED --> [*]
 ```
 
-**Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate or state was OVERDUE). Timing is judged against the **clinical occurrence time** of the completing event (see §4.2), not the ingestion time — so a visit that happened on time but was reported late is still `ON_TIME`.
+**Completion status:** `EARLY` (before dueDate), `ON_TIME` (between due and overdue), `LATE` (after overdueDate). `overdueDate` is no longer a state threshold — it survives purely as the end of the tolerance window that separates `ON_TIME` from `LATE`. Timing is judged against the **clinical occurrence time** of the completing event (see §4.2), not the ingestion time — so a visit that happened on time but was reported late is still `ON_TIME`.
 
-**Intelligence action evaluation:** On step completion and on deviation detection (OVERDUE, MISSED), the intelligence action evaluator is invoked. See §6.3 for details.
+**Intelligence action evaluation:** On step completion and on deviation detection (MISSED, ORDER_VIOLATION), the intelligence action evaluator is invoked. See §6.3 for details.
 
-**Required behavior:** Steps with `requiredBehavior=could` (from `PlanDefinition.action.requiredBehavior`) are optional. When the scheduler fires `OVERDUE_TO_MISSED` on a `could` step, it transitions to `SKIPPED` (no deviation) instead of `MISSED`. Additionally, when any step completes, preceding `could` steps still in actionable states are auto-skipped.
+**Required behavior:** Steps with `requiredBehavior=could` (from `PlanDefinition.action.requiredBehavior`) are optional. When the scheduler fires `DUE_TO_MISSED` on a `could` step, it transitions to `SKIPPED` (no deviation) instead of `MISSED`. Additionally, when any step completes, preceding `could` steps still in actionable states are auto-skipped.
 
 **Backfilling unrecorded mandatory predecessors:** progressive instantiation only works *forward* from a completed step, so a step created reactively from its own trigger (`ComplianceEngine.createInitialStep`) leaves the mandatory steps that should have preceded it with **no `step_instance` row at all** — e.g. a `treatment` event arriving for a patient whose `vitals-recording`, `consultation` and `diagnosis` were never reported. Those steps read as "not started" in the journey view and, having no row, are invisible to the Scheduler, so they never surface as a deviation.
 
 `StepInstanceService.backfillMissingMandatorySteps` closes that gap. After every completion, any mandatory step that is a transitive `relatedAction` predecessor of the progress observed so far (`PlanDefinitionParser.computeMustPredecessorSteps`) but that has no `step_instance` row is created in `PENDING` state:
 
 - **Scope — predecessors only** — the backfill covers work that is *already late*, never mandatory work still ahead in the chain. Materializing steps still ahead would stamp them with this completion's time and flatten the schedule their own `relatedAction` offsets define (e.g. `lab-results`' `+3d` after `lab-order`), so they are left to progressive instantiation, which creates them on their predecessor's completion with the intended due dates. For example, completing `chief-complaints` does **not** backfill `diagnosis`; a later `treatment` completion does, because `diagnosis` is then a predecessor of observed progress.
-- **Dates** — `due_date` is the clinical completion time of the step that revealed the gap. Every backfilled step is a prerequisite that should already have happened, so they are all equally past due and there is no future schedule left to preserve among them. `overdue_date`/`missed_date` are derived from the step's `tolerance-days` extension. The Scheduler then drives the row `PENDING → DUE → OVERDUE → MISSED`, so mandatory work that is never recorded surfaces as an `OVERDUE` and then a `MISSED` deviation. If the event does arrive later, `findActionableStep` picks the row up and completes it (`LATE`). A step with no `tolerance-days` gets no thresholds and therefore never advances past `DUE`.
+- **Dates** — `due_date` is the clinical completion time of the step that revealed the gap. Every backfilled step is a prerequisite that should already have happened, so they are all equally past due and there is no future schedule left to preserve among them. `overdue_date`/`missed_date` are derived from the step's `tolerance-days` extension. The Scheduler then drives the row `PENDING → DUE → MISSED`, so mandatory work that is never recorded surfaces as a `MISSED` deviation. If the event does arrive later, `findActionableStep` picks the row up and completes it (`LATE`). A step with no `tolerance-days` gets no thresholds and therefore never advances past `DUE`.
 - **Ordering within `completeStep`** — backfill runs *after* `detectOrderViolations`, so a freshly backfilled row is never counted as an incomplete prerequisite for the completion that revealed it; this pass does not invent an `ORDER_VIOLATION`. Subsequent completions do see those rows, so a genuinely out-of-order journey raises `ORDER_VIOLATION` from the next completion onward.
 - **Idempotent** — a mandatory step that already has any row, in any state (pre-existing, terminal, or created earlier in the same transaction by progressive instantiation), is left alone. One row per step (`repeat_index` 0) regardless of `timing.repeat.count`: this is a placeholder for work never recorded, not a scheduled recurrence.
 
@@ -536,14 +536,14 @@ stateDiagram-v2
 
 `ProtocolInstanceStatus` defines `ACTIVE`, `COMPLETED`, `WITHDRAWN`, and `EXPIRED`, but **no code currently transitions an instance out of `ACTIVE`** — there is no manual complete/withdraw endpoint, and automatic completion has been removed pending finalized criteria. Every enrolled instance stays `ACTIVE` indefinitely today; its steps still progress through the normal step state machine (§6.1) and raise deviations as usual.
 
-> **Removed — automatic completion:** an earlier version of `ProtocolInstanceService.checkAndCompleteProtocol` evaluated, after every step completion and every scheduler-driven `OVERDUE_TO_MISSED` transition, whether every mandatory (`must`) step implied by observed progress — the step itself, its transitive `relatedAction` predecessors, and mandatory siblings nested under the same top-level PlanDefinition action — had reached a terminal state, and if so moved the instance to `COMPLETED`. That method, along with its supporting `PlanDefinitionParser.computeExpectedMustSteps` and `computeMustGroupSteps`, was removed while the completion criteria is reworked. `PlanDefinitionParser.computeAncestors` and `computeMustPredecessorSteps` remain — they still drive the backfill in §6.1.
+> **Removed — automatic completion:** an earlier version of `ProtocolInstanceService.checkAndCompleteProtocol` evaluated, after every step completion and every scheduler-driven `DUE_TO_MISSED` transition, whether every mandatory (`must`) step implied by observed progress — the step itself, its transitive `relatedAction` predecessors, and mandatory siblings nested under the same top-level PlanDefinition action — had reached a terminal state, and if so moved the instance to `COMPLETED`. That method, along with its supporting `PlanDefinitionParser.computeExpectedMustSteps` and `computeMustGroupSteps`, was removed while the completion criteria is reworked. `PlanDefinitionParser.computeAncestors` and `computeMustPredecessorSteps` remain — they still drive the backfill in §6.1.
 
 ### 6.3 Intelligence Action Evaluation
 
 Intelligence actions are modeled as **nested actions** within a PlanDefinition step (`action.action[]`). Each intelligence action defines a condition (JSONLogic/FHIRPath) evaluated against step runtime state, and a `definitionCanonical` pointing to an `ActivityDefinition` (stored in the `action_definition` table) that defines the action to take.
 
 Intelligence action evaluation is triggered on any Step State change. Example:
-1. **On deviation detection** — when a step transitions to `OVERDUE` or `MISSED` (scheduler-driven)
+1. **On deviation detection** — when a step transitions to `MISSED` (scheduler-driven) or an `ORDER_VIOLATION` is detected on completion
 2. **On step completion** — when a step is completed by an inbound event (for actions like "notify on late completion")
 
 ```mermaid
@@ -573,8 +573,8 @@ flowchart TD
 
 | Variable | Type | Source | Available On |
 |---|---|---|---|
-| `stepState` | String | Current step state (e.g., `overdue`, `missed`, `completed`) | Both |
-| `deviationType` | String | `overdue` or `missed` | Deviation only |
+| `stepState` | String | Current step state (e.g., `missed`, `completed`) | Both |
+| `deviationType` | String | `missed` or `order_violation` (legacy rows may carry `overdue`) | Deviation only |
 | `daysOverdue` | Long | Days past `dueDate` at detection time | Deviation only |
 | `daysPastMissedDate` | Long | Days past `missedDate` at detection time | MISSED only |
 | `actionId` | String | Step definition action ID | Both |
@@ -619,7 +619,7 @@ flowchart LR
         PROTO["Protocol Definition"]
         S1["Step: anc-visit-1"]
         S2["Step: anc-visit-2"]
-        R1["Intelligence Action:<br/>overdue-escalation"]
+        R1["Intelligence Action:<br/>missed-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
         SUB1["Step: referral<br/>(flattened, own trigger — no implicit link to anc-visit-2)"]
         SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral — explicit relatedAction)"]
@@ -659,12 +659,12 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
   "trigger": [{ "..." : "..." }],
   "action": [
     {
-      "id": "anc-visit-2-overdue-escalation",
+      "id": "anc-visit-2-missed-escalation",
       "condition": [{
         "kind": "applicability",
         "expression": {
           "language": "text/jsonlogic",
-          "expression": "{\"and\": [{\"==\": [{\"var\": \"stepState\"}, \"overdue\"]}, {\">\": [{\"var\": \"daysOverdue\"}, 3]}]}"
+          "expression": "{\"and\": [{\"==\": [{\"var\": \"stepState\"}, \"missed\"]}, {\">\": [{\"var\": \"daysOverdue\"}, 3]}]}"
         }
       }],
       "definitionCanonical": "ActivityDefinition/anc-escalation-notification|1.0",
@@ -703,7 +703,7 @@ Each **intelligence action** (`PlanDefinition.action.action`) contains:
 |---|---|
 | `published` | `false` → `true` (on successful Kafka publish) |
 | `event_payload` | Complete `IntelligenceTriggerEvent` JSON published to Kafka |
-| `trigger_reason` | Why the action fired: `overdue`, `missed`, `completion` |
+| `trigger_reason` | Why the action fired: `missed`, `order_violation`, `completion` (legacy rows may carry `overdue`) |
 | `evaluation_context` | Runtime variables passed to the condition evaluator |
 
 All execution and evaluation context is stored in a single row — no FK constraints, no joins required. See [Data Dictionary §11](data-dictionary.md#11-intelligence_event_log).

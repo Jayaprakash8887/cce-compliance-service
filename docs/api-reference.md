@@ -489,7 +489,7 @@ View intelligence action execution records.
     "actionType": "CommunicationRequest",
     "severity": "HIGH",
     "intelligenceDestination": "openMRS",
-    "stepState": "overdue",
+    "stepState": "missed",
     "actionId": "anc-visit-2",
     "protocolCanonical": "http://openphc.org/fhir/PlanDefinition/anc-high-risk|2.1",
     "detectedAt": "2026-04-07T10:30:05Z"
@@ -501,13 +501,13 @@ View intelligence action execution records.
   "subject": "260225-0002-5501",
   "actionType": "CommunicationRequest",
   "intelligenceDestination": "openMRS",
-  "stepState": "overdue",
-  "triggerReason": "overdue",
-  "stepActionId": "anc-visit-2-overdue-escalation",
-  "evaluationExpression": "{\"and\": [{\"==\": [{\"var\": \"stepState\"}, \"overdue\"]}, {\">\": [{\"var\": \"daysOverdue\"}, 3]}]}",
+  "stepState": "missed",
+  "triggerReason": "missed",
+  "stepActionId": "anc-visit-2-missed-escalation",
+  "evaluationExpression": "{\"and\": [{\"==\": [{\"var\": \"stepState\"}, \"missed\"]}, {\">\": [{\"var\": \"daysOverdue\"}, 3]}]}",
   "evaluationContext": {
-    "stepState": "overdue",
-    "deviationType": "overdue",
+    "stepState": "missed",
+    "deviationType": "missed",
     "actionId": "anc-visit-2",
     "daysOverdue": 5
   },
@@ -557,7 +557,7 @@ View intelligence action execution records.
 | `actionType` | String | No | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | `intelligenceDestination` | String | Yes | Intelligence destination |
 | `stepState` | String | Yes | Step state at evaluation time |
-| `triggerReason` | String | No | `overdue`, `missed`, `completion` |
+| `triggerReason` | String | No | `missed`, `order_violation`, `completion` (legacy rows may carry `overdue`) |
 | `stepActionId` | String | Yes | PlanDefinition intelligence action ID that fired |
 | `evaluationExpression` | String | Yes | Condition expression evaluated (audit/debug) |
 | `evaluationContext` | JsonNode | Yes | Runtime variables passed to evaluator (JSONB) |

@@ -45,31 +45,6 @@ class DeviationServiceTest {
     }
 
     @Test
-    void createOverdueDeviation_persistsCorrectly() {
-        ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
-        step.setDueDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(3));
-
-        when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
-            Deviation d = invocation.getArgument(0);
-            if (d.getId() == null) d.setId(UUID.randomUUID());
-            return d;
-        });
-
-        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
-
-        assertTrue(result.created(), "A newly inserted deviation should signal created=true");
-        assertNotNull(result.deviation().getId());
-        assertEquals(DeviationType.OVERDUE, result.deviation().getDeviationType());
-        assertEquals(protocolInstance, result.deviation().getProtocolInstance());
-        assertEquals(step, result.deviation().getStepInstance());
-        assertNotNull(result.deviation().getDetectedAt());
-        assertNotNull(result.deviation().getMetadata());
-
-        verify(deviationRepository).save(any(Deviation.class));
-    }
-
-    @Test
     void createMissedDeviation_persistsCorrectly() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
         StepInstance step = buildStep(protocolInstance, StepState.MISSED);
@@ -83,16 +58,22 @@ class DeviationServiceTest {
 
         DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.MISSED);
 
+        assertTrue(result.created(), "A newly inserted deviation should signal created=true");
         assertNotNull(result.deviation().getId());
         assertEquals(DeviationType.MISSED, result.deviation().getDeviationType());
         assertEquals(protocolInstance, result.deviation().getProtocolInstance());
         assertEquals(step, result.deviation().getStepInstance());
+        assertNotNull(result.deviation().getDetectedAt());
+        // Enriched with daysPastMissedDate.
+        assertNotNull(result.deviation().getMetadata());
+
+        verify(deviationRepository).save(any(Deviation.class));
     }
 
     @Test
     void createDeviation_auditsDeviationDetected() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
+        StepInstance step = buildStep(protocolInstance, StepState.MISSED);
 
         when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
             Deviation d = invocation.getArgument(0);
@@ -100,7 +81,7 @@ class DeviationServiceTest {
             return d;
         });
 
-        service.createDeviation(step, DeviationType.OVERDUE);
+        service.createDeviation(step, DeviationType.MISSED);
 
         verify(auditService).audit(eq("COMPLIANCE"), eq("DEVIATION_DETECTED"),
                 eq("system"), eq("Deviation"), anyString(), anyMap());
@@ -109,8 +90,8 @@ class DeviationServiceTest {
     @Test
     void createDeviation_withNoEnrichableMetadata_handlesGracefully() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
-        step.setDueDate(null);
+        StepInstance step = buildStep(protocolInstance, StepState.MISSED);
+        step.setMissedDate(null);
 
         when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
             Deviation d = invocation.getArgument(0);
@@ -118,7 +99,7 @@ class DeviationServiceTest {
             return d;
         });
 
-        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.MISSED);
 
         assertNotNull(result.deviation().getId());
         assertNull(result.deviation().getMetadata());
@@ -127,7 +108,7 @@ class DeviationServiceTest {
     @Test
     void createDeviation_withAdditionalMetadata_mergesMetadata() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
+        StepInstance step = buildStep(protocolInstance, StepState.MISSED);
 
         when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
             Deviation d = invocation.getArgument(0);
@@ -147,20 +128,20 @@ class DeviationServiceTest {
         // Idempotency: a redelivered / concurrent trigger must not create a second
         // deviation of the same type for the same step.
         ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
+        StepInstance step = buildStep(protocolInstance, StepState.MISSED);
 
         Deviation existing = Deviation.builder()
                 .id(UUID.randomUUID())
                 .protocolInstance(protocolInstance)
                 .stepInstance(step)
-                .deviationType(DeviationType.OVERDUE)
+                .deviationType(DeviationType.MISSED)
                 .detectedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
 
-        when(deviationRepository.findByStepInstanceIdAndDeviationType(step.getId(), DeviationType.OVERDUE))
+        when(deviationRepository.findByStepInstanceIdAndDeviationType(step.getId(), DeviationType.MISSED))
                 .thenReturn(java.util.Optional.of(existing));
 
-        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.MISSED);
 
         assertFalse(result.created(), "Should signal the deviation already existed");
         assertSame(existing, result.deviation(), "Should return the pre-existing deviation");
@@ -171,7 +152,7 @@ class DeviationServiceTest {
     @Test
     void createDeviation_doesNotPublishIntelligenceTrigger() {
         ProtocolInstance protocolInstance = buildProtocolInstance();
-        StepInstance step = buildStep(protocolInstance, StepState.OVERDUE);
+        StepInstance step = buildStep(protocolInstance, StepState.MISSED);
 
         when(deviationRepository.save(any(Deviation.class))).thenAnswer(invocation -> {
             Deviation d = invocation.getArgument(0);
@@ -179,7 +160,7 @@ class DeviationServiceTest {
             return d;
         });
 
-        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.OVERDUE);
+        DeviationService.DeviationResult result = service.createDeviation(step, DeviationType.MISSED);
 
         // Intelligence trigger publishing is deferred to a future phase
         assertNull(result.deviation().getIntelligenceEventId());

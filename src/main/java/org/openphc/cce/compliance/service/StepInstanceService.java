@@ -33,8 +33,19 @@ public class StepInstanceService {
 
     private static final Logger log = LoggerFactory.getLogger(StepInstanceService.class);
 
+    // OVERDUE is no longer reachable (see applySchedulerTransition) but stays in the set so the
+    // legacy rows described on {@link StepState#OVERDUE} remain completable, order-checkable and
+    // auto-skippable for as long as any survive.
     private static final Set<StepState> ACTIONABLE_STATES = Set.of(
             StepState.PENDING, StepState.DUE, StepState.OVERDUE);
+
+    /**
+     * States a step may be in when the scheduler reports its missedDate has been reached.
+     * DUE is the only one the current lifecycle produces; legacy OVERDUE rows are accepted
+     * so they terminalize normally instead of being stranded.
+     */
+    private static final Set<StepState> MISSED_SOURCE_STATES = Set.of(
+            StepState.DUE, StepState.OVERDUE);
 
     private final StepInstanceRepository stepInstanceRepository;
     private final PlanDefinitionParser planDefinitionParser;
@@ -146,44 +157,57 @@ public class StepInstanceService {
     }
 
     /**
-     * Apply a scheduler-driven state transition.
-     * Creates deviations for OVERDUE and MISSED transitions.
+     * Apply a scheduler-driven state transition. The lifecycle is PENDING → DUE → MISSED
+     * (or SKIPPED for optional steps); creating a deviation is part of the MISSED transition.
+     *
+     * <p>The retired {@code DUE_TO_OVERDUE} and {@code OVERDUE_TO_MISSED} triggers are still
+     * accepted: {@code cce.scheduler.triggers} is at-least-once, so a not-yet-upgraded
+     * Scheduler can have either in flight across a rolling deploy.
      */
     public void applySchedulerTransition(SchedulerTriggerMessage trigger) {
         StepInstance step = findByIdOrThrow(trigger.getStepInstanceId());
 
         switch (trigger.getTransitionType()) {
             case "PENDING_TO_DUE" -> applyTransition(step, StepState.PENDING, StepState.DUE);
-            case "DUE_TO_OVERDUE" -> {
-                // Only raise a deviation if the transition actually happened. A redelivered
-                // or duplicate scheduler trigger finds the step already OVERDUE, so
-                // applyTransition returns false and we skip the (otherwise duplicate) deviation.
-                if (applyTransition(step, StepState.DUE, StepState.OVERDUE)) {
-                    DeviationService.DeviationResult result =
-                            deviationService.createDeviation(step, DeviationType.OVERDUE);
-                    // Only evaluate intelligence for a freshly created deviation. If a
-                    // concurrent thread already created it, skip to avoid a duplicate event.
-                    if (result.created()) {
-                        intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
-                    }
-                }
-            }
-            case "OVERDUE_TO_MISSED" -> {
-                if ("could".equals(step.getRequiredBehavior())) {
-                    if (applyTransition(step, StepState.OVERDUE, StepState.SKIPPED)) {
-                        log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
-                                step.getId());
-                    }
-                } else if (applyTransition(step, StepState.OVERDUE, StepState.MISSED)) {
-                    DeviationService.DeviationResult result =
-                            deviationService.createDeviation(step, DeviationType.MISSED);
-                    if (result.created()) {
-                        intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
-                    }
-                }
-            }
+            // OVERDUE_TO_MISSED is the pre-removal name for this same terminal transition, and
+            // applyMissed accepts a legacy OVERDUE step, so an in-flight one still terminalizes.
+            case "DUE_TO_MISSED", "OVERDUE_TO_MISSED" -> applyMissed(step);
+            // DUE → OVERDUE no longer exists; a DUE step now waits for its missedDate. Dropped
+            // rather than thrown so a stale in-flight trigger does not churn retries into the DLQ
+            // — the step stays DUE and its own DUE_TO_MISSED arrives when missedDate is reached.
+            case "DUE_TO_OVERDUE" -> log.info(
+                    "Ignoring retired DUE_TO_OVERDUE trigger for step {} (state={}) — "
+                            + "the DUE → OVERDUE transition has been removed",
+                    step.getId(), step.getState());
             default -> throw new IllegalArgumentException(
                     "Unknown transition type: " + trigger.getTransitionType());
+        }
+    }
+
+    /**
+     * Terminalize a step whose missedDate has been reached: optional ("could") steps are
+     * SKIPPED without a deviation, everything else is MISSED with one.
+     */
+    private void applyMissed(StepInstance step) {
+        if ("could".equals(step.getRequiredBehavior())) {
+            if (applyTransition(step, MISSED_SOURCE_STATES, StepState.SKIPPED)) {
+                log.info("Optional step {} skipped instead of missed (requiredBehavior=could)",
+                        step.getId());
+            }
+            return;
+        }
+
+        // Only raise a deviation if the transition actually happened. A redelivered or duplicate
+        // scheduler trigger finds the step already MISSED, so applyTransition returns false and
+        // we skip the (otherwise duplicate) deviation.
+        if (applyTransition(step, MISSED_SOURCE_STATES, StepState.MISSED)) {
+            DeviationService.DeviationResult result =
+                    deviationService.createDeviation(step, DeviationType.MISSED);
+            // Only evaluate intelligence for a freshly created deviation. If a concurrent
+            // thread already created it, skip to avoid a duplicate event.
+            if (result.created()) {
+                intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
+            }
         }
     }
 
@@ -198,7 +222,7 @@ public class StepInstanceService {
     }
 
     /**
-     * Find the first actionable step (PENDING, DUE, OVERDUE) for a given protocol instance and actionId.
+     * Find the first actionable step (see {@link #ACTIONABLE_STATES}) for a given protocol instance and actionId.
      * Returns null if no actionable step exists.
      */
     @Transactional(readOnly = true)
@@ -208,19 +232,24 @@ public class StepInstanceService {
         return steps.isEmpty() ? null : steps.get(0);
     }
 
+    private boolean applyTransition(StepInstance step, StepState expectedState, StepState newState) {
+        return applyTransition(step, Set.of(expectedState), newState);
+    }
+
     /**
-     * Apply a state transition if the step is in the expected state.
+     * Apply a state transition if the step is in one of the expected source states.
      *
      * @return true if the transition was applied, false if it was skipped because the
-     *         step was not in the expected state (e.g. a redelivered/duplicate trigger).
+     *         step was not in an expected state (e.g. a redelivered/duplicate trigger).
      */
-    private boolean applyTransition(StepInstance step, StepState expectedState, StepState newState) {
-        if (step.getState() != expectedState) {
-            log.warn("Step {} is in state {} — expected {} for transition to {}. Skipping.",
-                    step.getId(), step.getState(), expectedState, newState);
+    private boolean applyTransition(StepInstance step, Set<StepState> expectedStates, StepState newState) {
+        if (!expectedStates.contains(step.getState())) {
+            log.warn("Step {} is in state {} — expected one of {} for transition to {}. Skipping.",
+                    step.getId(), step.getState(), expectedStates, newState);
             return false;
         }
 
+        StepState previousState = step.getState();
         step.setState(newState);
         stepInstanceRepository.save(step);
 
@@ -228,7 +257,7 @@ public class StepInstanceService {
         stateTransitionHistoryService.recordStepInstanceTransition(step, OffsetDateTime.now(ZoneOffset.UTC));
 
         log.info("Transitioned step {} from {} to {} (actionId={})",
-                step.getId(), expectedState, newState, step.getActionId());
+                step.getId(), previousState, newState, step.getActionId());
         return true;
     }
 
@@ -237,7 +266,7 @@ public class StepInstanceService {
     /**
      * Detect order violations: when a step completes, check if any immediate
      * predecessor steps (with requiredBehavior="must") are still in
-     * non-terminal incomplete states (PENDING, DUE, OVERDUE).
+     * non-terminal incomplete states (see {@link #ACTIONABLE_STATES}).
      * A predecessor of step X is any step whose relatedSteps list contains X.
      */
     private void detectOrderViolations(StepInstance completedStep,
@@ -346,7 +375,7 @@ public class StepInstanceService {
             // Only pre-create PENDING instances for mandatory (must) steps. Optional steps
             // (could / unspecified) are not instantiated on predecessor completion:
             // we may never receive their events, and a dangling PENDING row would later be
-            // driven to OVERDUE/MISSED and raise a spurious deviation. When an optional step's
+            // driven to MISSED and raise a spurious deviation. When an optional step's
             // event does arrive, ComplianceEngine.processMatch creates the instance on the fly
             // (createInitialStep) and completes it in the same transaction.
             if (!"must".equals(requiredBehavior)) {
@@ -455,7 +484,7 @@ public class StepInstanceService {
      * <p>Runs after {@link #detectOrderViolations} deliberately: backfilled rows must not count as
      * incomplete prerequisites for the completion that revealed them, so this does not invent an
      * ORDER_VIOLATION at completion time. A mandatory step that is never recorded is instead caught
-     * by the scheduler driving the backfilled row OVERDUE and then MISSED. If its event does arrive
+     * by the scheduler driving the backfilled row DUE and then MISSED. If its event does arrive
      * later, {@link #findActionableStep} picks the row up and completes it (LATE).
      *
      * <p>Idempotent: a mandatory step that already has any step instance — in any state, whether
@@ -542,9 +571,14 @@ public class StepInstanceService {
 
     /**
      * Determine completion status based on timing:
-     * EARLY (before dueDate), ON_TIME (between due and overdue), LATE (after overdueDate or state was OVERDUE).
+     * EARLY (before dueDate), ON_TIME (between due and overdue), LATE (after overdueDate).
+     *
+     * <p>{@code overdueDate} is no longer a state threshold — it survives purely as the end of the
+     * tolerance window that separates ON_TIME from LATE.
      */
     private CompletionStatus determineCompletionStatus(StepInstance step, OffsetDateTime completedAt) {
+        // A legacy OVERDUE row (see StepState.OVERDUE) is by definition past its tolerance window,
+        // even where overdueDate was never populated.
         if (step.getState() == StepState.OVERDUE) {
             return CompletionStatus.LATE;
         }

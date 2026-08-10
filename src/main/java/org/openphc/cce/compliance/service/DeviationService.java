@@ -67,10 +67,7 @@ public class DeviationService {
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         Map<String, Object> metadata = new LinkedHashMap<>();
-        if (deviationType == DeviationType.OVERDUE && step.getDueDate() != null) {
-            metadata.put("daysOverdue",
-                    Duration.between(step.getDueDate(), now).toDays());
-        }
+        // No enrichment branch for DeviationType.OVERDUE: it is legacy and no longer raised.
         if (deviationType == DeviationType.MISSED && step.getMissedDate() != null) {
             metadata.put("daysPastMissedDate",
                     Duration.between(step.getMissedDate(), now).toDays());

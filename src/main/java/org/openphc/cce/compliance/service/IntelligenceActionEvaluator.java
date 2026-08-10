@@ -65,7 +65,7 @@ public class IntelligenceActionEvaluator {
     }
 
     /**
-     * Evaluate intelligence actions when a deviation is detected (OVERDUE or MISSED).
+     * Evaluate intelligence actions when a deviation is detected (MISSED or ORDER_VIOLATION).
      *
      * PlanDefinition
      * └─ action (protocol step)        → match by step.actionId

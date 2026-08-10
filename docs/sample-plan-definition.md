@@ -184,8 +184,8 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
           ]
         },
         {
-          "id": "hba1c-overdue-deviation",
-          "title": "HbA1c Overdue — Worker Alert",
+          "id": "hba1c-missed-deviation",
+          "title": "HbA1c Missed — Worker Alert",
           "type": {
             "coding": [
               { "system": "http://terminology.hl7.org/CodeSystem/action-type", "code": "fire-event" }
@@ -196,7 +196,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
               "kind": "applicability",
               "expression": {
                 "language": "text/jsonlogic",
-                "expression": "{\"==\": [{\"var\": \"event.deviationType\"}, \"overdue\"]}"
+                "expression": "{\"==\": [{\"var\": \"event.deviationType\"}, \"missed\"]}"
               }
             }
           ],
@@ -640,7 +640,7 @@ Each `definitionCanonical` referenced in the PlanDefinition must have a register
 | Intelligence sub-action condition | `action[].condition[kind=applicability]` | `text/fhirpath`, `text/jsonlogic` |
 | Intelligence severity | `intelligence-severity` extension | `LOW`, `MEDIUM`, `HIGH`, `CRITICAL` |
 | Intelligence destination | `intelligence-destination` extension | Free-form string (routing destination for the Intelligence Service); this example uses `PATIENT`, `ASSIGNED_WORKER`, `SUPERVISOR`, `FACILITY` |
-| Deviation type (jsonlogic var) | `event.deviationType` | `"overdue"`, `"missed"` |
+| Deviation type (jsonlogic var) | `event.deviationType` | `"missed"`, `"order_violation"` — **not** `"overdue"`: the `DUE → OVERDUE` transition has been removed, so an action conditioned on `"overdue"` never fires |
 | Step tolerance window | `tolerance-days` extension | Integer (days) |
 | Required step | `requiredBehavior` | `must`, `could`, `must-unless-documented` — only `must` and `could` have distinct handling today (see note below) |
 | Step scheduling | `timingTiming.repeat` | `count`, `frequency`, `period`, `periodUnit` |

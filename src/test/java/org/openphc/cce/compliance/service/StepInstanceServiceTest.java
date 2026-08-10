@@ -400,7 +400,7 @@ class StepInstanceServiceTest {
         }
 
         @Test
-        void dueToOverdue_createsDeviation() {
+        void dueToMissed_createsDeviationAndChecksProtocol() {
             UUID stepId = UUID.randomUUID();
             StepInstance step = buildStep(StepState.DUE, null, null);
             step.setId(stepId);
@@ -409,28 +409,31 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("DUE_TO_OVERDUE")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
             service.applySchedulerTransition(trigger);
 
-            assertEquals(StepState.OVERDUE, step.getState());
+            assertEquals(StepState.MISSED, step.getState());
 
-            verify(deviationService).createDeviation(eq(step), eq(DeviationType.OVERDUE));
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
+
+            // The MISSED transition is recorded in append-only history.
+            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
 
         @Test
-        void dueToOverdue_redelivered_createsDeviationOnlyOnce() {
-            // Kafka is at-least-once: the same DUE_TO_OVERDUE trigger may arrive twice.
-            // The first delivery transitions DUE->OVERDUE and raises the deviation; the
-            // redelivery finds the step already OVERDUE, so applyTransition returns false
+        void dueToMissed_redelivered_createsDeviationOnlyOnce() {
+            // Kafka is at-least-once: the same DUE_TO_MISSED trigger may arrive twice.
+            // The first delivery transitions DUE->MISSED and raises the deviation; the
+            // redelivery finds the step already MISSED, so applyTransition returns false
             // and no second (duplicate) deviation is created.
             UUID stepId = UUID.randomUUID();
             StepInstance step = buildStep(StepState.DUE, null, null);
@@ -440,12 +443,12 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(new DeviationService.DeviationResult(deviation, true));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("DUE_TO_OVERDUE")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
@@ -453,13 +456,13 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
             service.applySchedulerTransition(trigger);
 
-            assertEquals(StepState.OVERDUE, step.getState());
-            verify(deviationService, times(1)).createDeviation(eq(step), eq(DeviationType.OVERDUE));
+            assertEquals(StepState.MISSED, step.getState());
+            verify(deviationService, times(1)).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator, times(1)).evaluateOnDeviation(step, deviation);
         }
 
         @Test
-        void dueToOverdue_deviationAlreadyExisted_skipsIntelligenceEvaluation() {
+        void dueToMissed_deviationAlreadyExisted_skipsIntelligenceEvaluation() {
             // Concurrent race: the transition applies, but createDeviation finds a deviation
             // another thread already created (created=false). Intelligence must NOT be
             // evaluated again, otherwise a duplicate intelligence event would fire.
@@ -471,26 +474,59 @@ class StepInstanceServiceTest {
 
             when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
             when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
-            when(deviationService.createDeviation(any(), eq(DeviationType.OVERDUE)))
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
                     .thenReturn(new DeviationService.DeviationResult(existing, false));
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("DUE_TO_OVERDUE")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
             service.applySchedulerTransition(trigger);
 
-            assertEquals(StepState.OVERDUE, step.getState());
-            verify(deviationService).createDeviation(eq(step), eq(DeviationType.OVERDUE));
+            assertEquals(StepState.MISSED, step.getState());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
         }
 
         @Test
-        void overdueToMissed_createsDeviationAndChecksProtocol() {
+        void dueToMissed_legacyOverdueStep_stillTerminalizes() {
+            // A row an adopted environment left in OVERDUE that the V8 reconciliation did not
+            // catch (written by an old Compliance instance mid rolling-deploy). The Scheduler
+            // never scans OVERDUE, so accepting it as a source state here is what stops it
+            // being stranded once the reconciliation moves it back into scan range.
             UUID stepId = UUID.randomUUID();
             StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            step.setId(stepId);
+
+            Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+            when(deviationService.createDeviation(any(), eq(DeviationType.MISSED)))
+                    .thenReturn(new DeviationService.DeviationResult(deviation, true));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_MISSED")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.MISSED, step.getState());
+            verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
+            verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
+        }
+
+        @Test
+        void legacyOverdueToMissed_treatedAsDueToMissed() {
+            // A pre-upgrade Scheduler can still have OVERDUE_TO_MISSED in flight on the topic.
+            // It names the same terminal transition, so it must terminalize rather than be
+            // rejected into the DLQ.
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.DUE, null, null);
             step.setId(stepId);
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
@@ -509,12 +545,51 @@ class StepInstanceServiceTest {
             service.applySchedulerTransition(trigger);
 
             assertEquals(StepState.MISSED, step.getState());
-
             verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
-            verify(intelligenceActionEvaluator).evaluateOnDeviation(step, deviation);
+        }
 
-            // The MISSED transition is recorded in append-only history.
-            verify(stateTransitionHistoryService).recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
+        @Test
+        void legacyDueToOverdue_isIgnored_leavingStepDue() {
+            // The DUE -> OVERDUE transition is removed. A stale in-flight trigger must be
+            // dropped silently — no state change, no deviation, and no exception that would
+            // churn consumer retries into the DLQ.
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.DUE, null, null);
+            step.setId(stepId);
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_OVERDUE")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.DUE, step.getState());
+            verify(stepInstanceRepository, never()).save(any());
+            verify(stateTransitionHistoryService, never()).recordStepInstanceTransition(any(), any());
+            verify(deviationService, never()).createDeviation(any(), any());
+            verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
+        }
+
+        @Test
+        void unknownTransitionType_throws() {
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.DUE, null, null);
+            step.setId(stepId);
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_ATLANTIS")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            assertThrows(IllegalArgumentException.class,
+                    () -> service.applySchedulerTransition(trigger));
         }
 
         @Test
@@ -752,9 +827,9 @@ class StepInstanceServiceTest {
     class SchedulerSkipForOptionalSteps {
 
         @Test
-        void overdueToMissed_couldStep_becomesSkipped_noDeviation() {
+        void dueToMissed_couldStep_becomesSkipped_noDeviation() {
             UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            StepInstance step = buildStep(StepState.DUE, null, null);
             step.setId(stepId);
             step.setRequiredBehavior("could");
 
@@ -763,7 +838,7 @@ class StepInstanceServiceTest {
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("OVERDUE_TO_MISSED")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
@@ -775,9 +850,9 @@ class StepInstanceServiceTest {
         }
 
         @Test
-        void overdueToMissed_mustStep_becomesMissed_withDeviation() {
+        void dueToMissed_mustStep_becomesMissed_withDeviation() {
             UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            StepInstance step = buildStep(StepState.DUE, null, null);
             step.setId(stepId);
             step.setRequiredBehavior("must");
             step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
@@ -791,7 +866,7 @@ class StepInstanceServiceTest {
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("OVERDUE_TO_MISSED")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
@@ -803,9 +878,9 @@ class StepInstanceServiceTest {
         }
 
         @Test
-        void overdueToMissed_nullRequiredBehavior_becomesMissed() {
+        void dueToMissed_nullRequiredBehavior_becomesMissed() {
             UUID stepId = UUID.randomUUID();
-            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            StepInstance step = buildStep(StepState.DUE, null, null);
             step.setId(stepId);
             step.setRequiredBehavior(null);
             step.setMissedDate(OffsetDateTime.now(ZoneOffset.UTC).minusDays(1));
@@ -819,7 +894,7 @@ class StepInstanceServiceTest {
 
             SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
                     .stepInstanceId(stepId)
-                    .transitionType("OVERDUE_TO_MISSED")
+                    .transitionType("DUE_TO_MISSED")
                     .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
                     .build();
 
@@ -828,6 +903,30 @@ class StepInstanceServiceTest {
             assertEquals(StepState.MISSED, step.getState());
             verify(deviationService).createDeviation(eq(step), eq(DeviationType.MISSED));
             verify(intelligenceActionEvaluator).evaluateOnDeviation(eq(step), eq(deviation));
+        }
+
+        @Test
+        void dueToMissed_legacyOverdueCouldStep_becomesSkipped() {
+            // Same legacy-row tolerance as the mandatory case: an optional step left in OVERDUE
+            // must still be skipped rather than stranded.
+            UUID stepId = UUID.randomUUID();
+            StepInstance step = buildStep(StepState.OVERDUE, null, null);
+            step.setId(stepId);
+            step.setRequiredBehavior("could");
+
+            when(stepInstanceRepository.findById(stepId)).thenReturn(Optional.of(step));
+            when(stepInstanceRepository.save(any())).thenAnswer(i -> i.getArgument(0));
+
+            SchedulerTriggerMessage trigger = SchedulerTriggerMessage.builder()
+                    .stepInstanceId(stepId)
+                    .transitionType("DUE_TO_MISSED")
+                    .triggeredAt(OffsetDateTime.now(ZoneOffset.UTC))
+                    .build();
+
+            service.applySchedulerTransition(trigger);
+
+            assertEquals(StepState.SKIPPED, step.getState());
+            verify(deviationService, never()).createDeviation(any(), any());
         }
     }
 

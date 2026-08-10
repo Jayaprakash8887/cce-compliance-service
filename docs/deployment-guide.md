@@ -244,8 +244,34 @@ Flyway manages all schema migrations automatically on application startup.
 - `V5__deviation_unique_constraint.sql` adds a unique constraint on `deviation` (`step_instance_id`, `deviation_type`) — at most one deviation of each type per step. Pre-existing duplicates (e.g., from at-least-once Kafka redelivery or concurrent consumer threads) are deduplicated before the constraint is applied.
 - `V6__drop_uuid_defaults_for_v7.sql` drops the DB-side `gen_random_uuid()` defaults on the `protocol_instance`, `step_instance`, and `deviation` id columns, since ids are now generated application-side as time-ordered UUIDv7 (Hibernate `UuidV7Generator`).
 - `V7__facility_district.sql` adds a `district_name` column to `facility`.
+- `V8__reconcile_legacy_overdue_steps.sql` moves every `step_instance` still in the retired `OVERDUE` state back to `DUE` (appending the matching `step_instance_history` rows), so the Scheduler scans them again against their own `missed_date`. Idempotent and a no-op on a fresh database. See [Removal of the `DUE → OVERDUE` transition](#removal-of-the-due--overdue-transition) below.
 - `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
 - **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
+
+### Removal of the `DUE → OVERDUE` transition
+
+The `OVERDUE` state has been taken out of the step lifecycle. A `DUE` step now waits for its `missed_date` and goes straight to `MISSED` (or `SKIPPED` for `could` steps); the Scheduler emits only `PENDING_TO_DUE` and `DUE_TO_MISSED`, and never scans `OVERDUE` — see [cce-scheduler-service#12](https://github.com/openphc/cce-scheduler-service/pull/12).
+
+**Upgrading an adopted environment:**
+
+1. **Deploy the Compliance Service first.** `V8` runs on startup and reconciles existing `OVERDUE` rows to `DUE`. The new consumer already understands `DUE_TO_MISSED`, so it is compatible with both the old and new Scheduler.
+2. **Then deploy the Scheduler Service** (its own `V3` realigns the partial scan indexes).
+
+Either order is safe — the consumer accepts `OVERDUE` as a source state for `DUE_TO_MISSED`, treats an in-flight `OVERDUE_TO_MISSED` as its alias, and drops an in-flight `DUE_TO_OVERDUE` without erroring — but Compliance-first avoids a window in which reconciled rows sit unscanned.
+
+**Post-deploy checks:**
+
+```sql
+-- Expect 0. Anything here was written after V8 by an instance still running the old code.
+SELECT count(*) FROM step_instance WHERE state = 'OVERDUE';
+
+-- Reconciled rows whose missed_date has already passed. These need the Scheduler to scan
+-- them again; if its keyset cursor has already advanced past their missed_date they will not
+-- be re-selected, so reset the Scheduler's scan cursor once after the upgrade.
+SELECT count(*) FROM step_instance WHERE state = 'DUE' AND missed_date <= now();
+```
+
+Existing `OVERDUE` **deviation** rows are deliberately left in place — they record a threshold that genuinely was crossed. No new ones are raised.
 
 ### Connection Pool Sizing
 

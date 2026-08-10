@@ -152,7 +152,7 @@ class CloudEventMessageTest {
         UUID stepId = UUID.randomUUID();
         SchedulerTriggerMessage msg = SchedulerTriggerMessage.builder()
                 .stepInstanceId(stepId)
-                .transitionType("DUE_TO_OVERDUE")
+                .transitionType("DUE_TO_MISSED")
                 .triggeredAt(OffsetDateTime.of(2026, 3, 25, 0, 0, 0, 0, ZoneOffset.UTC))
                 .correlationid("sched-corr-123")
                 .build();
@@ -161,7 +161,7 @@ class CloudEventMessageTest {
         JsonNode node = objectMapper.readTree(json);
 
         assertEquals(stepId.toString(), node.get("stepInstanceId").asText());
-        assertEquals("DUE_TO_OVERDUE", node.get("transitionType").asText());
+        assertEquals("DUE_TO_MISSED", node.get("transitionType").asText());
         assertEquals("sched-corr-123", node.get("correlationid").asText());
     }
 
@@ -186,7 +186,7 @@ class CloudEventMessageTest {
 
     @Test
     void deserialize_schedulerTrigger_allTransitionTypes() throws Exception {
-        for (String tt : new String[]{"PENDING_TO_DUE", "DUE_TO_OVERDUE", "OVERDUE_TO_MISSED"}) {
+        for (String tt : new String[]{"PENDING_TO_DUE", "DUE_TO_MISSED"}) {
             String json = String.format("""
                     {
                       "stepInstanceId": "770e8400-e29b-41d4-a716-446655440002",

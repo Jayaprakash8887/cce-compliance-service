@@ -231,27 +231,24 @@ sequenceDiagram
     alt PENDING_TO_DUE
         StepSvc->>StepSvc: applyTransition(PENDING → DUE)
         StepSvc->>DB: UPDATE state = DUE (if applied)
-    else DUE_TO_OVERDUE
-        StepSvc->>StepSvc: applyTransition(DUE → OVERDUE)
-        opt transition applied
-            StepSvc->>DB: UPDATE state = OVERDUE
-            StepSvc->>DevSvc: createDeviation(OVERDUE)
-            DevSvc->>DB: SELECT existing (step, OVERDUE)
-            Note right of DevSvc: Insert only if none exists —<br/>unique constraint (step_instance_id, deviation_type)<br/>is the backstop against concurrent inserts
-            DevSvc->>DB: INSERT INTO deviation
-        end
-    else OVERDUE_TO_MISSED
+    else DUE_TO_MISSED (or legacy alias OVERDUE_TO_MISSED)
+        Note over StepSvc: Source state DUE, or legacy OVERDUE for a row<br/>an adopted environment has not yet had reconciled
         alt requiredBehavior == could
-            StepSvc->>StepSvc: applyTransition(OVERDUE → SKIPPED)
+            StepSvc->>StepSvc: applyTransition(DUE → SKIPPED)
             Note right of StepSvc: No deviation for optional steps
         else requiredBehavior == must (or null)
-            StepSvc->>StepSvc: applyTransition(OVERDUE → MISSED)
+            StepSvc->>StepSvc: applyTransition(DUE → MISSED)
             opt transition applied
                 StepSvc->>DB: UPDATE state = MISSED
                 StepSvc->>DevSvc: createDeviation(MISSED)
-                DevSvc->>DB: INSERT INTO deviation (idempotent)
+                DevSvc->>DB: SELECT existing (step, MISSED)
+                Note right of DevSvc: Insert only if none exists —<br/>unique constraint (step_instance_id, deviation_type)<br/>is the backstop against concurrent inserts
+                DevSvc->>DB: INSERT INTO deviation
             end
         end
+    else DUE_TO_OVERDUE (retired)
+        StepSvc->>StepSvc: Log and drop — no state change
+        Note right of StepSvc: DUE → OVERDUE is removed from the lifecycle.<br/>Dropped rather than thrown so a stale in-flight<br/>trigger does not churn retries into the DLQ.
     end
 
     Consumer->>Kafka: Acknowledge offset
@@ -305,12 +302,12 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph "Deviation Triggers"
-        T1["Scheduler: DUE → OVERDUE"]
-        T2["Scheduler: OVERDUE → MISSED"]
+        T1["Scheduler: DUE → MISSED"]
+        T2["Completion: must-predecessor still incomplete"]
     end
 
-    T1 -->|"type=OVERDUE"| RD
-    T2 -->|"type=MISSED"| RD
+    T1 -->|"type=MISSED"| RD
+    T2 -->|"type=ORDER_VIOLATION"| RD
 
     RD["DeviationService.recordDeviation()"]
     RD --> DX{"Deviation of this type<br/>already exists for step?"}
@@ -318,7 +315,7 @@ flowchart TD
     DX -->|"No"| D1["Create Deviation entity"]
     D1 --> D2["Set deviationType"]
     D2 --> D3["Set detectedAt = now()"]
-    D3 --> D4["Build metadata:<br/>daysOverdue/daysPastMissedDate"]
+    D3 --> D4["Build metadata:<br/>daysPastMissedDate (MISSED) /<br/>incompletePrerequisites (ORDER_VIOLATION)"]
     D4 --> D5["Link to ProtocolInstance + StepInstance"]
     D5 --> D6["Persist to DB"]
     D6 --> D7["Audit: DEVIATION_DETECTED"]
@@ -327,7 +324,7 @@ flowchart TD
 
 ## 6. Intelligence Action Evaluation & Trigger Publishing
 
-This flow is triggered after a deviation is detected (OVERDUE/MISSED) or after a step is completed. The `IntelligenceActionEvaluator` evaluates PlanDefinition intelligence action conditions and publishes intelligence events.
+This flow is triggered after a deviation is detected (MISSED/ORDER_VIOLATION) or after a step is completed. The `IntelligenceActionEvaluator` evaluates PlanDefinition intelligence action conditions and publishes intelligence events.
 
 ```mermaid
 sequenceDiagram
@@ -410,13 +407,13 @@ flowchart TD
 
     subgraph "IntelligenceTriggerEvent"
         E_ID["id: UUID (new)"]
-        E_TYPE["type: cce.compliance.deviation.overdue"]
+        E_TYPE["type: cce.compliance.deviation.missed"]
         E_SUBJECT["subject: patientId"]
         E_PI["protocolInstanceId"]
         E_SI["stepInstanceId"]
         E_DI["deviationId"]
-        E_DT["deviationType: overdue"]
-        E_SS["stepState: overdue"]
+        E_DT["deviationType: missed"]
+        E_SS["stepState: missed"]
         E_AID["actionId: anc-visit-2"]
         E_PC["protocolCanonical: url|version"]
         E_FID["facilityId: 0002"]
@@ -539,7 +536,7 @@ flowchart TD
     LOOP --> DEDUP{"An instance for this step<br/>already exists?"}
     DEDUP -->|"Yes"| SKIP["Skip — avoid duplicate<br/>(already created reactively via its own<br/>trigger, or by a redelivered predecessor)"]
     DEDUP -->|"No"| MUST{"target step's<br/>requiredBehavior == must?"}
-    MUST -->|"No (could / unspecified)"| SKIP2["Skip pre-creation — a dangling PENDING row could<br/>later go OVERDUE/MISSED even though its event never<br/>arrives; created on the fly if its own trigger fires"]
+    MUST -->|"No (could / unspecified)"| SKIP2["Skip pre-creation — a dangling PENDING row could<br/>later go MISSED even though its event never<br/>arrives; created on the fly if its own trigger fires"]
     MUST -->|"Yes"| CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
     CALC --> RECURRING{"TimingInfo.count > 1?"}
 
@@ -565,10 +562,10 @@ flowchart TD
     PRED --> MISSING{"Any with no<br/>step_instance row?"}
     MISSING -->|"No"| DONE["Return — nothing to backfill"]
     MISSING -->|"Yes"| LOOP{"For each missing<br/>mandatory step"}
-    LOOP --> DATES["due_date = completedStep.completed_at (clinical time)<br/>overdue/missed = due + tolerance-days (null if unset)"]
+    LOOP --> DATES["due_date = completedStep.completed_at (clinical time)<br/>overdue (tolerance window) / missed = due + tolerance-days (null if unset)"]
     DATES --> CREATE["createStep(stepId, repeatIndex 0) — state=PENDING"]
     CREATE --> LOOP
-    LOOP -->|"Done"| DONE2["Scheduler now sees the rows:<br/>PENDING → DUE → OVERDUE → MISSED (deviations),<br/>or a late event completes them (LATE)"]
+    LOOP -->|"Done"| DONE2["Scheduler now sees the rows:<br/>PENDING → DUE → MISSED (deviation),<br/>or a late event completes them (LATE)"]
 ```
 
 > Steps still **ahead** in the chain are deliberately excluded — backfilling them would stamp them with this completion's time and flatten the schedule their own `relatedAction` offsets define. They are left to progressive instantiation.

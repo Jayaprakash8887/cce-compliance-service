@@ -176,7 +176,7 @@ erDiagram
 | 1 | `protocol_definition` | Stores FHIR R4 PlanDefinition resources (protocol templates) | Low (tens) |
 | 2 | `protocol_instance` | Patient enrollments in specific protocols | Medium (per-patient) |
 | 3 | `step_instance` | Individual action steps within a patient's protocol journey | Medium–High |
-| 4 | `deviation` | Compliance deviations (overdue, missed) | Medium |
+| 4 | `deviation` | Compliance deviations (missed, order violation) | Medium |
 | 5 | `trigger_index` | Inverted index for fast Tier 1 structural event matching | Low (rebuilt on protocol load) |
 | 6 | `compliance_event_log` | Lean idempotency log of all inbound CloudEvents and their processing outcomes | High (every event) |
 | 7 | `audit_log` | System and user audit trail | Medium–High |
@@ -249,7 +249,7 @@ Represents a **patient's enrollment** in a specific compliance protocol. Created
 
 ## 5. step_instance
 
-Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition (including nested actions that are flattened at parse time). Steps follow a state machine lifecycle: `PENDING → DUE → OVERDUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Nested sub-steps from FHIR `action.action[]` are flattened to peer-level steps connected via `relatedSteps` references — there is no parent-child column.
+Tracks an **individual action occurrence** within a patient's protocol journey. Each step corresponds to a single `action` from the protocol definition (including nested actions that are flattened at parse time). Steps follow a state machine lifecycle: `PENDING → DUE → MISSED` (scheduler-driven, for `must` steps) or `→ SKIPPED` (scheduler-driven, for `could` steps) or `→ COMPLETED` (event-driven). Repeating steps are differentiated by `repeat_index`. Nested sub-steps from FHIR `action.action[]` are flattened to peer-level steps connected via `relatedSteps` references — there is no parent-child column.
 
 ### Columns
 
@@ -261,7 +261,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `repeat_index` | `INTEGER` | **NOT NULL** | `0` | Zero-based occurrence counter for repeating actions. Non-repeating actions always have index 0. |
 | `state` | `VARCHAR` | **NOT NULL** | — | Current step state. See [StepState](#stepstate). |
 | `due_date` | `TIMESTAMPTZ` | Yes | — | Scheduled due date. Calculated from `relatedAction.offsetDuration`, anchored to the predecessor's `completed_at` (clinical occurrence time — see §4.2). `NULL` for event-triggered steps. |
-| `overdue_date` | `TIMESTAMPTZ` | Yes | — | Overdue threshold. Typically `due_date + tolerance_days`. |
+| `overdue_date` | `TIMESTAMPTZ` | Yes | — | End of the tolerance window. Typically `due_date + tolerance_days`. **Not a state threshold** — since the removal of `DUE → OVERDUE` it is read only to separate `ON_TIME` from `LATE` on completion. |
 | `missed_date` | `TIMESTAMPTZ` | Yes | — | Missed cutoff date. Typically `overdue_date + tolerance_days`. |
 | `completed_at` | `TIMESTAMPTZ` | Yes | — | **Clinical occurrence time** of the completing event (when the act happened), not ingestion time — clamped to `now()`. Drives completion status and dependent steps' due dates. `NULL` for non-completed steps. See [Architecture §4.2](architecture-overview.md#42-clinical-event-time-extraction). |
 | `completed_by_source` | `VARCHAR` | Yes | — | CloudEvent `source` that completed this step. |
@@ -277,12 +277,12 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 |------|------|---------|
 | Primary Key | `step_instance_pkey` | `id` |
 | Foreign Key | `step_instance_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
-| Check | — | `state IN ('PENDING', 'DUE', 'OVERDUE', 'MISSED', 'COMPLETED', 'SKIPPED')` |
+| Check | — | `state IN ('PENDING', 'DUE', 'OVERDUE', 'MISSED', 'COMPLETED', 'SKIPPED')` — `OVERDUE` is deliberately retained as a legal value so a legacy row (see `StepState`) still satisfies the constraint. |
 | Check | — | `completion_status IN ('ON_TIME', 'EARLY', 'LATE')` |
 | Check | — | `required_behavior IN ('must', 'could', 'must-unless-documented')` |
 | B-tree Index | `idx_step_instance_protocol` | `protocol_instance_id` — All steps within a protocol instance. |
-| Partial B-tree | `idx_step_instance_state` | `state WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Active (non-terminal) steps. |
-| Partial B-tree | `idx_step_instance_due_date` | `due_date WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Scheduler time-based transitions. |
+| Partial B-tree | `idx_step_instance_state` | `state WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Active (non-terminal) steps. The `OVERDUE` arm now matches nothing but is kept so legacy rows stay indexed; it is not worth a rebuild to drop. |
+| Partial B-tree | `idx_step_instance_due_date` | `due_date WHERE state IN ('PENDING', 'DUE', 'OVERDUE')` — Scheduler time-based transitions. As above, the `OVERDUE` arm is retained but matches nothing. |
 
 ### State Machine
 
@@ -293,21 +293,19 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
     │  scheduler   │               │ event match
     │  (due_date   │               │ (completes)
     │   reached)   ▼               ▼
-    │         ┌──────────┐    ┌───────────┐
-    │         │   DUE    │───▶│ COMPLETED │
-    │         └────┬─────┘    └───────────┘
-    │  tolerance   │               ▲
-    │  window      │               │ event match
-    │  expired     ▼               │
-    │         ┌──────────┐         │
-    └────────▶│ OVERDUE  │─────────┘
-              └────┬─────┴─────────┐
-       missed     │                │  missed cutoff
-       cutoff     ▼                │  (could)
-              ┌──────────┐         ▼
-              │  MISSED  │    ┌──────────┐
-              └──────────┘    │ SKIPPED  │
-                (must)        └──────────┘
+              ┌──────────┐    ┌───────────┐
+              │   DUE    │───▶│ COMPLETED │
+              └────┬─────┘    └───────────┘
+                   │               ▲
+                   │               │ event match
+                   │               │
+              ┌────┴─────┬─────────┘
+   missed     │          │  missed cutoff
+   cutoff     ▼          │  (could)
+         ┌──────────┐    ▼
+         │  MISSED  │  ┌──────────┐
+         └──────────┘  │ SKIPPED  │
+           (must)      └──────────┘
                                 (could)
 ```
 
@@ -315,7 +313,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 
 ## 6. deviation
 
-Records **compliance deviations** detected during protocol execution. Created when a step transitions to `OVERDUE` or `MISSED`, or when an order violation is detected on completion. When intelligence actions are configured on the step's PlanDefinition action, the `IntelligenceActionEvaluator` is invoked and the `intelligence_event_id` is populated with the published event's UUID.
+Records **compliance deviations** detected during protocol execution. Created when a step transitions to `MISSED`, or when an order violation is detected on completion. When intelligence actions are configured on the step's PlanDefinition action, the `IntelligenceActionEvaluator` is invoked and the `intelligence_event_id` is populated with the published event's UUID.
 
 A step has **at most one deviation per type** — enforced by the `deviation_step_type_key` unique constraint on `(step_instance_id, deviation_type)`. This makes deviation creation idempotent against redelivered scheduler triggers (Kafka is at-least-once) and concurrent consumer threads: `DeviationService.createDeviation` pre-checks for an existing deviation and returns it instead of inserting a duplicate, with the unique constraint as the ultimate backstop. It returns a `DeviationResult(deviation, created)`; the `created` flag lets callers fire one-time side effects (intelligence action evaluation) **only** when a new deviation was actually inserted, so a redelivered or concurrent trigger produces neither a duplicate deviation row nor a duplicate intelligence event.
 
@@ -340,7 +338,7 @@ A step has **at most one deviation per type** — enforced by the `deviation_ste
 | Foreign Key | `deviation_protocol_instance_id_fkey` | `protocol_instance_id` → `protocol_instance(id)` |
 | Foreign Key | `deviation_step_instance_id_fkey` | `step_instance_id` → `step_instance(id)` |
 | Unique | `deviation_step_type_key` | `(step_instance_id, deviation_type)` — At most one deviation per type per step. Idempotency guard against redelivered / concurrent scheduler triggers. |
-| Check | — | `deviation_type IN ('OVERDUE', 'MISSED', 'ORDER_VIOLATION')` |
+| Check | — | `deviation_type IN ('OVERDUE', 'MISSED', 'ORDER_VIOLATION')` — `OVERDUE` is retained for the legacy rows described under `DeviationType`. |
 | B-tree Index | `idx_deviation_protocol` | `protocol_instance_id` |
 | B-tree Index | `idx_deviation_type` | `deviation_type` |
 
@@ -524,8 +522,8 @@ Records each execution of an **intelligence action** (`PlanDefinition.action.act
 | `subject` | `VARCHAR` | **NOT NULL** | — | Patient identifier (UPID). Denormalized for direct queries. |
 | `action_type` | `VARCHAR` | **NOT NULL** | — | FHIR `ActivityDefinition.kind` (e.g., `CommunicationRequest`, `Task`, `ServiceRequest`). |
 | `intelligence_destination` | `VARCHAR` | **NOT NULL** | — | Intelligence destination from PlanDefinition override or ActionDefinition. |
-| `step_state` | `VARCHAR` | Yes | — | Step state at time of evaluation (e.g., `overdue`, `missed`, `completed`). |
-| `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this action was evaluated: `overdue`, `missed`, `completion`. |
+| `step_state` | `VARCHAR` | Yes | — | Step state at time of evaluation (e.g., `missed`, `completed`). |
+| `trigger_reason` | `VARCHAR` | **NOT NULL** | — | Why this action was evaluated: `missed`, `order_violation`, `completion` (legacy rows may carry `overdue`). |
 | `step_action_id` | `VARCHAR` | Yes | — | The PlanDefinition intelligence action ID that fired (e.g., `bp-high-alert`). |
 | `evaluation_expression` | `TEXT` | Yes | — | The condition expression that was evaluated (for debugging/audit). |
 | `evaluation_context` | `JSONB` | Yes | — | Runtime variables passed to the expression evaluator. See [JSONB: intelligence_event_log evaluation_context](#intelligence_event_log--evaluation_context). |
@@ -620,7 +618,7 @@ and historical rebuilds of the ClickHouse daily-summary MVs are otherwise imposs
 
 - **Populated at the application layer** by `StateTransitionHistoryService`, invoked from
   `ProtocolInstanceService` / `StepInstanceService` immediately after every status/state write
-  (enrollment, event-driven completion, scheduler-driven DUE/OVERDUE/MISSED, auto-skip). The
+  (enrollment, event-driven completion, scheduler-driven DUE/MISSED, auto-skip). The
   history INSERT runs in the **same transaction** as the parent change (`Propagation.MANDATORY`),
   so it is atomic with the transition — no gaps across the service layer. (`V4__state_history.sql`
   creates the tables only.) Caveat: it does **not** capture raw out-of-band SQL UPDATEs — all
@@ -687,15 +685,15 @@ Indexes: **none beyond the PK** (same rationale as `protocol_instance_history`).
 | Value | Description | Transitions From | Transitions To |
 |-------|-------------|-----------------|----------------|
 | `PENDING` | Created but not yet due. | *(initial)* | `DUE`, `COMPLETED` |
-| `DUE` | Due date reached. | `PENDING` | `OVERDUE`, `COMPLETED` |
-| `OVERDUE` | Tolerance window expired. Deviation recorded (for `must` steps). | `DUE` | `MISSED`, `SKIPPED`, `COMPLETED` |
-| `MISSED` | Missed cutoff exceeded. Deviation recorded. Only for `must` steps. | `OVERDUE` | *(terminal)* |
-| `COMPLETED` | Completed by a matching inbound event. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
-| `SKIPPED` | Optional step (`requiredBehavior=could`) auto-skipped by scheduler or when a subsequent step completes. | `PENDING`, `DUE`, `OVERDUE` | *(terminal)* |
+| `DUE` | Due date reached. | `PENDING` | `MISSED`, `SKIPPED`, `COMPLETED` |
+| `OVERDUE` | **Legacy — out of the lifecycle.** Nothing transitions into it: `DUE → OVERDUE` has been removed and a `DUE` step now goes straight to `MISSED`/`SKIPPED` at `missed_date`. Migration `V8__reconcile_legacy_overdue_steps.sql` moves the rows adopted environments already hold back to `DUE`; the value is retained so any that arrive later (an old Compliance instance mid rolling-deploy) still map and still terminalize. | *(none)* | `MISSED`, `SKIPPED`, `COMPLETED` |
+| `MISSED` | Missed cutoff exceeded. Deviation recorded. Only for `must` steps. | `DUE` (or legacy `OVERDUE`) | *(terminal)* |
+| `COMPLETED` | Completed by a matching inbound event. | `PENDING`, `DUE` (or legacy `OVERDUE`) | *(terminal)* |
+| `SKIPPED` | Optional step (`requiredBehavior=could`) auto-skipped by scheduler or when a subsequent step completes. | `PENDING`, `DUE` (or legacy `OVERDUE`) | *(terminal)* |
 
 ### CompletionStatus
 
-Evaluated against `completed_at` (the **clinical occurrence time** of the completing event — see [Architecture §4.2](architecture-overview.md#42-clinical-event-time-extraction)), so timeliness reflects when the act happened, not when the event was ingested. A step already in `OVERDUE` when completed is always `LATE`.
+Evaluated against `completed_at` (the **clinical occurrence time** of the completing event — see [Architecture §4.2](architecture-overview.md#42-clinical-event-time-extraction)), so timeliness reflects when the act happened, not when the event was ingested. A legacy step still in `OVERDUE` when completed is always `LATE`.
 
 | Value | Condition |
 |-------|-----------|
@@ -707,8 +705,8 @@ Evaluated against `completed_at` (the **clinical occurrence time** of the comple
 
 | Value | Trigger |
 |-------|---------|
-| `OVERDUE` | Scheduler transitions step `DUE` → `OVERDUE`. |
-| `MISSED` | Scheduler transitions step `OVERDUE` → `MISSED`. |
+| `OVERDUE` | **Legacy — no longer raised.** It marked the removed `DUE → OVERDUE` transition. Retained read-only so the deviations adopted environments already hold still map. |
+| `MISSED` | Scheduler transitions step `DUE` → `MISSED`. |
 | `ORDER_VIOLATION` | Step completed out of sequence (violates `relatedAction` ordering). |
 
 
@@ -837,15 +835,17 @@ Contains deviation-type-specific timing information.
 
 | Field | Type | Presence | Description |
 |-------|------|----------|-------------|
-| `daysOverdue` | Long | OVERDUE only | Number of days past the step's `due_date` at detection time |
 | `daysPastMissedDate` | Long | MISSED only | Number of days past the step's `missed_date` at detection time |
+| `incompletePrerequisites` | String[] | ORDER_VIOLATION only | Action ids of the `must` predecessors still incomplete at completion time |
+| `daysOverdue` | Long | Legacy OVERDUE rows only | Days past the step's `due_date` at detection time. No longer written. |
 
 **Examples:**
 
 | Type | Example |
 |------|---------||
-| OVERDUE | `{"daysOverdue": 3}` |
 | MISSED | `{"daysPastMissedDate": 0}` |
+| ORDER_VIOLATION | `{"incompletePrerequisites": ["vitals-recording"], "completedActionId": "treatment"}` |
+| OVERDUE *(legacy)* | `{"daysOverdue": 3}` |
 
 
 ### compliance_event_log — `data`
@@ -919,7 +919,7 @@ The `event_payload` column stores the complete `IntelligenceTriggerEvent` publis
   "actionType": "CommunicationRequest",
   "severity": "HIGH",
   "intelligenceDestination": "openMRS",
-  "stepState": "overdue",
+  "stepState": "missed",
   "actionId": "viral-load-check",
   "protocolCanonical": "http://example.org/PlanDefinition/hiv-treatment|1.0",
   "detectedAt": "2026-03-25T00:00:05Z",
@@ -937,8 +937,8 @@ Captures the full runtime variable map that was passed to the condition expressi
 
 | Field | Type | Presence | Description |
 |-------|------|----------|-------------|
-| `stepState` | String | Always | Step state at evaluation time (e.g., `overdue`, `missed`) |
-| `deviationType` | String | Always | `overdue` or `missed` |
+| `stepState` | String | Always | Step state at evaluation time (e.g., `missed`, `completed`) |
+| `deviationType` | String | Always | `missed` or `order_violation` |
 | `actionId` | String | Always | Step definition action ID |
 | `repeatIndex` | Integer | Always | 0-based repeat index for recurring steps |
 | `dueDate` | String | When set | ISO-8601 `OffsetDateTime` of step due date |
@@ -960,5 +960,5 @@ Captures the full runtime variable map that was passed to the condition expressi
 
 | Trigger Reason | Example |
 |----------------|---------|
-| Deviation (overdue) | `{"stepState": "overdue", "deviationType": "overdue", "actionId": "anc-visit-2", "repeatIndex": 0, "dueDate": "2026-03-01T00:00:00Z", "daysOverdue": 5}` |
+| Deviation (missed) | `{"stepState": "missed", "deviationType": "missed", "actionId": "anc-visit-2", "repeatIndex": 0, "dueDate": "2026-03-01T00:00:00Z", "daysOverdue": 5}` |
 | Completion | `{"stepState": "completed", "actionId": "anc-visit-2", "repeatIndex": 0, "completedAt": "2026-03-09T14:30:00Z", "dueDate": "2026-03-07T00:00:00Z", "completionStatus": "late"}` |
