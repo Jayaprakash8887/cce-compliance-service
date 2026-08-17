@@ -64,17 +64,7 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       ],
       "timingTiming": {
         "repeat": { "count": 1, "frequency": 1, "period": 1, "periodUnit": "d" }
-      },
-      "relatedAction": [
-        {
-          "actionId": "hba1c-check",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "value": 30, "unit": "d",
-            "system": "http://unitsofmeasure.org", "code": "d"
-          }
-        }
-      ]
+      }
     },
 
     {
@@ -116,10 +106,10 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
       ],
       "relatedAction": [
         {
-          "actionId": "blood-glucose-check",
+          "actionId": "enrollment",
           "relationship": "after-end",
           "offsetDuration": {
-            "value": 7, "unit": "d",
+            "value": 30, "unit": "d",
             "system": "http://unitsofmeasure.org", "code": "d"
           }
         }
@@ -279,6 +269,16 @@ This document provides a complete, annotated `PlanDefinition` that exercises eve
         {
           "url": "http://openphc.org/fhir/StructureDefinition/tolerance-days",
           "valueInteger": 2
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "hba1c-check",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 7, "unit": "d",
+            "system": "http://unitsofmeasure.org", "code": "d"
+          }
         }
       ],
       "action": [
@@ -644,7 +644,7 @@ Each `definitionCanonical` referenced in the PlanDefinition must have a register
 | Step tolerance window | `tolerance-days` extension | Integer (days) |
 | Required step | `requiredBehavior` | `must`, `could`, `must-unless-documented` — only `must` and `could` have distinct handling today (see note below) |
 | Step scheduling | `timingTiming.repeat` | `count`, `frequency`, `period`, `periodUnit` |
-| Action ordering | `relatedAction[].offsetDuration` | Days after predecessor action ends |
+| Action ordering | `relatedAction[].actionId` + `offsetDuration` | The step names its **prerequisite** — `offsetDuration` is how long after that prerequisite this step is due |
 | ActivityDefinition type | `kind` | `CommunicationRequest`, `Task`, `ServiceRequest` |
 | Canonical reference format | `definitionCanonical` | `<url>|<version>` |
 

@@ -5,6 +5,19 @@ All notable changes to the CCE Compliance Service will be documented in this fil
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+#### `relatedAction` direction corrected (breaking for stored protocol definitions)
+- FHIR `PlanDefinition.action.relatedAction` is a **relative** pointer: `relationship` describes the declaring action's relationship to the referenced one, so an `after-*` edge names the declaring step's **prerequisite** rather than a step it leads to. The service read every edge as a forward pointer ("completing A creates the steps A lists"), so `after-*` graphs were inverted.
+- `PlanDefinitionParser` — added `classifyRelationship()` / `RelationshipDirection` and `buildDependencyGraph()`, which normalizes **both** ordering families into one directed graph exposed in both directions (`successorsOf`, `predecessorsOf`). `after-*` names the prerequisite; `before-*` states the same ordering from the other end and is now honoured rather than ignored; `concurrent-*` states no ordering. `computeAncestors()` and `computeMustPredecessorSteps()` traverse that graph.
+- `StepInstanceService` — builds the graph once per completion and shares it across all four passes. `createDependentSteps()` instantiates the steps ordered after the completed one, using the offset on the edge between them; `detectOrderViolations()` reads prerequisites from the graph.
+- **Fan-in handling (new):** a step with several prerequisites is now created only once none of the others is still in flight, so its due date anchors to the last prerequisite to finish rather than whichever completed first. A prerequisite with no `step_instance` row does not block.
+- **Inert edges are reported at load time.** `loadProtocol` warns on `concurrent-*` edges (which no longer sequence steps) and on `relatedAction` naming an action the definition does not declare — previously both were silently inert.
+- **Migration `V9__reverse_related_action_direction.sql`** flips the `after-*` edges in `protocol_definition.definition`. `before-*` edges are left as authored, since they already state the intended ordering correctly. Any `concurrent-*` edges are listed via `RAISE NOTICE` in the Flyway log, because they stop being sequential. The migration must ship in the same release as the code: new code against unflipped JSON yields no prerequisite edges, silently stopping progressive instantiation, `ORDER_VIOLATION` detection and the mandatory-step backfill. No other table needs migrating — `trigger_index` is built from `action.trigger[]` only, and existing `step_instance` dates stay correct because flipping reader and data together is behaviour-neutral.
+- **Upstream authoring must flip too.** Any system publishing PlanDefinitions to `POST /protocol-definitions` has to emit the corrected direction for `after-*` edges, or the next publish reintroduces an inverted definition — which cannot be detected automatically, since a reversed graph is still structurally valid FHIR.
+
 ## [1.2.0] - 2026-05
 
 ### Added

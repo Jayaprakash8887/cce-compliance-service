@@ -13,7 +13,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Deque;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -52,22 +54,159 @@ public class PlanDefinitionParser {
     }
 
     /**
+     * How a FHIR {@code relatedAction.relationship} code positions the step that declares it
+     * relative to the step it references.
+     *
+     * <p>{@code relatedAction} is a <strong>relative</strong> pointer: {@code relationship}
+     * describes the declaring action's relationship to the referenced one. Which of the two comes
+     * first therefore depends on the family:
+     *
+     * <ul>
+     *   <li>{@code AFTER} — {@code lab-results.relatedAction = {actionId: lab-order,
+     *       relationship: after-end, offset: 3d}} reads "lab-results happens 3 days after lab-order
+     *       ends", so the <em>referenced</em> action is the prerequisite. An absent relationship is
+     *       treated as {@code after-end}, the overwhelmingly common intent in authored protocols.</li>
+     *   <li>{@code BEFORE} — {@code visit-encounter.relatedAction = {actionId: vitals-recording,
+     *       relationship: before}} reads "visit-encounter happens before vitals-recording", so the
+     *       <em>declaring</em> action is the prerequisite. Same ordering, stated from the other
+     *       end.</li>
+     *   <li>{@code UNORDERED} — {@code concurrent-*} says the two happen together and so implies no
+     *       ordering. Such an edge drives neither progressive instantiation nor order checks;
+     *       {@link #findUnorderedRelationships} reports them at load time so a protocol relying on
+     *       one does not fail silently.</li>
+     * </ul>
+     */
+    public enum RelationshipDirection { AFTER, BEFORE, UNORDERED }
+
+    /** Classify a {@code relatedAction.relationship} code. A null relationship means after-end. */
+    public static RelationshipDirection classifyRelationship(String relationship) {
+        if (relationship == null) {
+            return RelationshipDirection.AFTER;
+        }
+        return switch (relationship) {
+            case "after", "after-start", "after-end" -> RelationshipDirection.AFTER;
+            case "before", "before-start", "before-end" -> RelationshipDirection.BEFORE;
+            default -> RelationshipDirection.UNORDERED;
+        };
+    }
+
+    /**
+     * The directed dependency graph of a protocol, in both directions.
+     *
+     * @param successors   prerequisite action id → the steps that depend on it, each paired with the
+     *                     edge positioning it relative to that prerequisite. Drives progressive
+     *                     instantiation, which works forward from a completed step.
+     * @param predecessors dependent action id → the ids of the prerequisites it waits on
+     */
+    public record DependencyGraph(
+            Map<String, List<StepDependency>> successors,
+            Map<String, List<String>> predecessors
+    ) {
+        public List<StepDependency> successorsOf(String actionId) {
+            return successors.getOrDefault(actionId, List.of());
+        }
+
+        public List<String> predecessorsOf(String actionId) {
+            return predecessors.getOrDefault(actionId, List.of());
+        }
+    }
+
+    /**
+     * Normalize every ordering {@code relatedAction} into a single directed graph, whichever end of
+     * the relationship it was written from (see {@link RelationshipDirection}).
+     *
+     * <p>Each resulting edge is expressed the {@code after-*} way round — the dependent step paired
+     * with a {@link RelatedStepInfo} naming its prerequisite — so consumers need only handle one
+     * form. {@code before-*} carries no start/end distinction that survives the flip (there is no
+     * "before the prerequisite started"), so it normalizes to {@code after-end}: the dependent is
+     * scheduled from the prerequisite's completion, offset by the same duration.
+     *
+     * <p>Edges naming an action the definition does not declare are skipped — there is no step to
+     * schedule or wait on. {@link #findDanglingRelatedActions} reports them at load time.
+     */
+    public static DependencyGraph buildDependencyGraph(List<StepMetadata> steps) {
+        Map<String, StepMetadata> stepsById = steps.stream()
+                .collect(Collectors.toMap(StepMetadata::id, s -> s, (a, b) -> a));
+
+        Map<String, List<StepDependency>> successors = new LinkedHashMap<>();
+        Map<String, List<String>> predecessors = new LinkedHashMap<>();
+
+        for (StepMetadata step : steps) {
+            for (RelatedStepInfo edge : step.relatedSteps()) {
+                if (edge.actionId() == null || edge.actionId().isBlank()) {
+                    continue;
+                }
+
+                String prerequisiteId;
+                StepMetadata dependent;
+                String relationship;
+
+                switch (classifyRelationship(edge.relationship())) {
+                    case AFTER -> {
+                        prerequisiteId = edge.actionId();
+                        dependent = step;
+                        relationship = "after-start".equals(edge.relationship())
+                                ? "after-start" : "after-end";
+                    }
+                    case BEFORE -> {
+                        prerequisiteId = step.id();
+                        dependent = stepsById.get(edge.actionId());
+                        relationship = "after-end";
+                    }
+                    // concurrent-*: no ordering to derive
+                    case UNORDERED -> {
+                        continue;
+                    }
+                    default -> {
+                        continue;
+                    }
+                }
+
+                if (dependent == null || !stepsById.containsKey(prerequisiteId)) {
+                    continue;
+                }
+
+                RelatedStepInfo normalized = new RelatedStepInfo(
+                        prerequisiteId, relationship, edge.offsetValue(), edge.offsetUnit());
+
+                successors.computeIfAbsent(prerequisiteId, k -> new ArrayList<>())
+                        .add(new StepDependency(dependent, normalized));
+                predecessors.computeIfAbsent(dependent.id(), k -> new ArrayList<>())
+                        .add(prerequisiteId);
+            }
+        }
+
+        return new DependencyGraph(successors, predecessors);
+    }
+
+    /** Look up a step's metadata by action id, or null when the definition has no such step. */
+    public static StepMetadata findStep(List<StepMetadata> steps, String actionId) {
+        return steps.stream()
+                .filter(s -> actionId.equals(s.id()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * Compute all transitive ancestors of a step in the dependency graph.
-     * An ancestor of X is any step A such that A's relatedSteps (directly or transitively)
-     * lead to X being created.
+     * An ancestor of X is any step X depends on, directly or transitively.
      */
     public static Set<String> computeAncestors(String stepId, List<StepMetadata> steps) {
+        return computeAncestors(stepId, buildDependencyGraph(steps));
+    }
+
+    public static Set<String> computeAncestors(String stepId, DependencyGraph graph) {
         Set<String> ancestors = new HashSet<>();
+        Set<String> visited = new HashSet<>();
         Deque<String> queue = new ArrayDeque<>();
         queue.add(stepId);
+        visited.add(stepId);
 
         while (!queue.isEmpty()) {
-            String current = queue.poll();
-            for (StepMetadata step : steps) {
-                boolean createsTarget = step.relatedSteps().stream()
-                        .anyMatch(ra -> current.equals(ra.actionId()));
-                if (createsTarget && ancestors.add(step.id())) {
-                    queue.add(step.id());
+            for (String prerequisiteId : graph.predecessorsOf(queue.poll())) {
+                ancestors.add(prerequisiteId);
+                if (visited.add(prerequisiteId)) {
+                    queue.add(prerequisiteId);
                 }
             }
         }
@@ -88,6 +227,12 @@ public class PlanDefinitionParser {
      */
     public static Set<String> computeMustPredecessorSteps(Collection<String> observedStepIds,
                                                          List<StepMetadata> steps) {
+        return computeMustPredecessorSteps(observedStepIds, steps, buildDependencyGraph(steps));
+    }
+
+    public static Set<String> computeMustPredecessorSteps(Collection<String> observedStepIds,
+                                                         List<StepMetadata> steps,
+                                                         DependencyGraph graph) {
         Set<String> mustStepIds = mustStepIds(steps);
         if (mustStepIds.isEmpty()) {
             return Set.of();
@@ -95,13 +240,53 @@ public class PlanDefinitionParser {
 
         Set<String> predecessors = new HashSet<>();
         for (String stepId : observedStepIds) {
-            for (String ancestorId : computeAncestors(stepId, steps)) {
+            for (String ancestorId : computeAncestors(stepId, graph)) {
                 if (mustStepIds.contains(ancestorId)) {
                     predecessors.add(ancestorId);
                 }
             }
         }
         return predecessors;
+    }
+
+    /**
+     * Describe every {@code relatedAction} whose relationship implies no ordering
+     * ({@code concurrent-*}), so a protocol that expects one to sequence steps is reported at load
+     * time instead of quietly producing a disconnected graph.
+     */
+    public static List<String> findUnorderedRelationships(List<StepMetadata> steps) {
+        List<String> found = new ArrayList<>();
+        for (StepMetadata step : steps) {
+            for (RelatedStepInfo edge : step.relatedSteps()) {
+                if (classifyRelationship(edge.relationship()) == RelationshipDirection.UNORDERED) {
+                    found.add("action '" + step.id() + "' -> '" + edge.actionId()
+                            + "' (relationship=" + edge.relationship() + ")");
+                }
+            }
+        }
+        return found;
+    }
+
+    /**
+     * Describe every {@code relatedAction} naming an action the definition does not declare. Such an
+     * edge can neither schedule a step nor be waited on, so it is silently inert — reported at load
+     * time so an authoring typo does not pass unnoticed.
+     */
+    public static List<String> findDanglingRelatedActions(List<StepMetadata> steps) {
+        Set<String> knownIds = steps.stream()
+                .map(StepMetadata::id)
+                .collect(Collectors.toSet());
+
+        List<String> found = new ArrayList<>();
+        for (StepMetadata step : steps) {
+            for (RelatedStepInfo edge : step.relatedSteps()) {
+                if (edge.actionId() != null && !knownIds.contains(edge.actionId())) {
+                    found.add("action '" + step.id() + "' -> unknown action '"
+                            + edge.actionId() + "'");
+                }
+            }
+        }
+        return found;
     }
 
     /** The ids of every step whose requiredBehavior is "must". */
@@ -298,9 +483,8 @@ public class PlanDefinitionParser {
 
     /**
      * Recursively flatten an action and its nested sub-steps into the result list.
-     * Each nested step-type action becomes a peer entry. If a nested step has no explicit
-     * relatedStep pointing to its parent, one is added (after-end, no offset) to preserve
-     * the progressive instantiation relationship.
+     * Each nested step-type action becomes a peer entry. Nesting carries no dependency of its
+     * own — see the comment on the implicit-link decision below.
      */
     private void flattenAction(PlanDefinition.PlanDefinitionActionComponent action,
                                String parentActionId, List<StepMetadata> result) {
@@ -334,10 +518,14 @@ public class PlanDefinitionParser {
         // implicit step dependency. Ordering between a parent and its sub-steps (and among
         // sub-steps) must be expressed explicitly via relatedAction.
         //
-        // Historically a backward relatedStep (child -> parent, after-end) was auto-added
-        // here. Under the forward progressive-instantiation model (see
-        // StepInstanceService.createDependentSteps) that link meant "completing the child
-        // re-creates the parent", spawning duplicate parent steps. It has been removed.
+        // Historically a relatedStep (child -> parent, after-end) was auto-added here, and was
+        // removed because the then-inverted reading of relatedAction turned it into "completing
+        // the child re-creates the parent", spawning duplicate parent steps. That hazard is gone
+        // now that relatedAction is read as a backward pointer — such a link would correctly mean
+        // "the child comes after the parent ends" — but it is deliberately still not added:
+        // whether a sub-step waits on its parent is a clinical decision for the protocol author,
+        // and plenty of sub-steps (e.g. a referral raised during a visit) are meant to be created
+        // by their own trigger without waiting.
 
         result.add(new StepMetadata(
                 action.getId(),
@@ -425,6 +613,11 @@ public class PlanDefinitionParser {
         return triggers;
     }
 
+    /**
+     * Extract an action's {@code relatedAction} entries verbatim. Each one names a step this action
+     * is positioned <em>relative to</em>, not a step this action leads to — see
+     * {@link #classifyRelationship} for which end comes first.
+     */
     private List<RelatedStepInfo> extractRelatedSteps(PlanDefinition.PlanDefinitionActionComponent action) {
         List<RelatedStepInfo> relatedSteps = new ArrayList<>();
         for (PlanDefinition.PlanDefinitionActionRelatedActionComponent ra : action.getRelatedAction()) {
@@ -609,6 +802,18 @@ public class PlanDefinitionParser {
             String relationship,
             java.math.BigDecimal offsetValue,
             String offsetUnit
+    ) {}
+
+    /**
+     * A forward edge in the dependency graph: {@code step} depends on the prerequisite named by
+     * {@code edge.actionId()}, positioned by {@code edge}'s relationship and offset.
+     *
+     * @param step the dependent step — the one to create once the prerequisite completes
+     * @param edge the {@code relatedAction} the dependent step declares toward that prerequisite
+     */
+    public record StepDependency(
+            StepMetadata step,
+            RelatedStepInfo edge
     ) {}
 
     public record TimingInfo(

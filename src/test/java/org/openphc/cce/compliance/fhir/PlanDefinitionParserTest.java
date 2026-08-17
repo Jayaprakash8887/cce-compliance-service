@@ -69,7 +69,8 @@ class PlanDefinitionParserTest {
         assertEquals("initial-enrollment", enrollment.id());
         assertEquals("Initial Enrollment on ANC Encounter", enrollment.title());
         assertEquals(1, enrollment.triggers().size());
-        assertEquals(1, enrollment.relatedSteps().size());
+        // Chain head — it depends on nothing, so it declares no relatedAction
+        assertTrue(enrollment.relatedSteps().isEmpty());
     }
 
     @Test
@@ -90,21 +91,24 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(fixtureJson);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        // initial-enrollment → blood-pressure-check after 7 days
-        PlanDefinitionParser.StepMetadata enrollment = actions.get(0);
-        assertEquals(1, enrollment.relatedSteps().size());
-
-        PlanDefinitionParser.RelatedStepInfo ra = enrollment.relatedSteps().get(0);
-        assertEquals("blood-pressure-check", ra.actionId());
-        assertEquals("after-end", ra.relationship());
-        assertEquals(0, new BigDecimal("7").compareTo(ra.offsetValue()));
-        assertEquals("d", ra.offsetUnit());
-
-        // blood-pressure-check → lab-work after 14 days
+        // relatedAction points at the prerequisite: blood-pressure-check comes 7 days
+        // after initial-enrollment ends
         PlanDefinitionParser.StepMetadata bp = actions.get(1);
+        assertEquals("blood-pressure-check", bp.id());
+        assertEquals(1, bp.relatedSteps().size());
+
         PlanDefinitionParser.RelatedStepInfo bpRa = bp.relatedSteps().get(0);
-        assertEquals("lab-work", bpRa.actionId());
-        assertEquals(0, new BigDecimal("14").compareTo(bpRa.offsetValue()));
+        assertEquals("initial-enrollment", bpRa.actionId());
+        assertEquals("after-end", bpRa.relationship());
+        assertEquals(0, new BigDecimal("7").compareTo(bpRa.offsetValue()));
+        assertEquals("d", bpRa.offsetUnit());
+
+        // lab-work comes 14 days after blood-pressure-check ends
+        PlanDefinitionParser.StepMetadata labWork = actions.get(2);
+        assertEquals("lab-work", labWork.id());
+        PlanDefinitionParser.RelatedStepInfo labRa = labWork.relatedSteps().get(0);
+        assertEquals("blood-pressure-check", labRa.actionId());
+        assertEquals(0, new BigDecimal("14").compareTo(labRa.offsetValue()));
     }
 
     @Test
@@ -281,10 +285,10 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(fixtureJson);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        // lab-work has no relatedAction
-        PlanDefinitionParser.StepMetadata labWork = actions.get(2);
-        assertEquals("lab-work", labWork.id());
-        assertTrue(labWork.relatedSteps().isEmpty());
+        // initial-enrollment heads the chain, so it declares no relatedAction
+        PlanDefinitionParser.StepMetadata enrollment = actions.get(0);
+        assertEquals("initial-enrollment", enrollment.id());
+        assertTrue(enrollment.relatedSteps().isEmpty());
     }
 
     @Test
@@ -382,12 +386,13 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(rmnchJson);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        PlanDefinitionParser.StepMetadata pwProfile = actions.stream()
-                .filter(a -> "pregnancy-profile".equals(a.id()))
+        // anc-visit-1 declares pregnancy-profile as its prerequisite
+        PlanDefinitionParser.StepMetadata ancVisit1 = actions.stream()
+                .filter(a -> "anc-visit-1".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertEquals(1, pwProfile.relatedSteps().size());
-        assertEquals("anc-visit-1", pwProfile.relatedSteps().get(0).actionId());
-        assertEquals("after-end", pwProfile.relatedSteps().get(0).relationship());
+        assertEquals(1, ancVisit1.relatedSteps().size());
+        assertEquals("pregnancy-profile", ancVisit1.relatedSteps().get(0).actionId());
+        assertEquals("after-end", ancVisit1.relatedSteps().get(0).relationship());
     }
 
     // ── Intelligence Actions Tests ──
@@ -834,12 +839,13 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        // anc-visit-1-referral has relatedStep → anc-visit-1-referral-ack (progressive instantiation)
-        PlanDefinitionParser.StepMetadata referral = actions.stream()
-                .filter(a -> "anc-visit-1-referral".equals(a.id()))
+        // anc-visit-1-referral-ack declares anc-visit-1-referral as its prerequisite, so
+        // completing the referral progressively instantiates the ack
+        PlanDefinitionParser.StepMetadata ack = actions.stream()
+                .filter(a -> "anc-visit-1-referral-ack".equals(a.id()))
                 .findFirst().orElseThrow();
-        assertTrue(referral.relatedSteps().stream()
-                .anyMatch(r -> "anc-visit-1-referral-ack".equals(r.actionId()) && "after-end".equals(r.relationship())));
+        assertTrue(ack.relatedSteps().stream()
+                .anyMatch(r -> "anc-visit-1-referral".equals(r.actionId()) && "after-end".equals(r.relationship())));
     }
 
     @Test
@@ -878,25 +884,26 @@ class PlanDefinitionParserTest {
     }
 
     @Test
-    void extractActions_subStepsPlanDefinition_subStepsHaveNoBackwardRelatedStepToParent() throws IOException {
+    void extractActions_subStepsPlanDefinition_subStepsHaveNoImplicitDependencyOnParent() throws IOException {
         String json = loadFixture("/fhir/plan-definition-with-sub-steps.json");
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        // Nesting is organizational only — no implicit backward (child -> parent) relatedStep
-        // is created. Under the forward progressive-instantiation model such a link would make
-        // completing the child re-create the parent, spawning duplicate parent steps.
+        // Nesting is organizational only — a sub-step gets no implicit prerequisite on its parent,
+        // so it is created by its own trigger rather than waiting for the parent to complete.
         PlanDefinitionParser.StepMetadata referral = actions.stream()
                 .filter(a -> "anc-visit-1-referral".equals(a.id()))
                 .findFirst().orElseThrow();
+        assertTrue(referral.relatedSteps().isEmpty(),
+                "Entry-point sub-step must not have an implicit prerequisite on its parent");
 
-        // referral keeps ONLY its explicit relatedStep (to the ack sub-step) — no link to parent anc-visit-1
-        assertTrue(referral.relatedSteps().stream()
-                        .anyMatch(r -> "anc-visit-1-referral-ack".equals(r.actionId())),
-                "Sub-step should keep its explicit relatedStep");
-        assertFalse(referral.relatedSteps().stream()
-                        .anyMatch(r -> "anc-visit-1".equals(r.actionId())),
-                "Sub-step must NOT have an implicit backward relatedStep to its parent");
+        // Its sibling declares only the explicit prerequisite the protocol author wrote
+        PlanDefinitionParser.StepMetadata ack = actions.stream()
+                .filter(a -> "anc-visit-1-referral-ack".equals(a.id()))
+                .findFirst().orElseThrow();
+        assertEquals(List.of("anc-visit-1-referral"),
+                ack.relatedSteps().stream()
+                        .map(PlanDefinitionParser.RelatedStepInfo::actionId).toList());
     }
 
     @Test
@@ -905,19 +912,19 @@ class PlanDefinitionParserTest {
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.StepMetadata> actions = parser.extractSteps(pd);
 
-        // anc-visit-1 → anc-visit-2 (30 days)
-        PlanDefinitionParser.StepMetadata visit1 = actions.stream()
-                .filter(a -> "anc-visit-1".equals(a.id()))
-                .findFirst().orElseThrow();
-        assertTrue(visit1.relatedSteps().stream()
-                .anyMatch(r -> "anc-visit-2".equals(r.actionId()) && BigDecimal.valueOf(30).equals(r.offsetValue())));
-
-        // anc-visit-2 → anc-visit-3 (30 days)
+        // anc-visit-2 comes 30 days after anc-visit-1
         PlanDefinitionParser.StepMetadata visit2 = actions.stream()
                 .filter(a -> "anc-visit-2".equals(a.id()))
                 .findFirst().orElseThrow();
         assertTrue(visit2.relatedSteps().stream()
-                .anyMatch(r -> "anc-visit-3".equals(r.actionId())));
+                .anyMatch(r -> "anc-visit-1".equals(r.actionId()) && BigDecimal.valueOf(30).equals(r.offsetValue())));
+
+        // anc-visit-3 comes 30 days after anc-visit-2
+        PlanDefinitionParser.StepMetadata visit3 = actions.stream()
+                .filter(a -> "anc-visit-3".equals(a.id()))
+                .findFirst().orElseThrow();
+        assertTrue(visit3.relatedSteps().stream()
+                .anyMatch(r -> "anc-visit-2".equals(r.actionId())));
     }
 
     // ── EMR Service (nested consultation) protocol ──
@@ -939,50 +946,170 @@ class PlanDefinitionParserTest {
     }
 
     @Test
-    void emrNestedProtocol_hasForwardChainAndNoBackwardParentLinks() throws IOException {
+    void emrNestedProtocol_declaresPrerequisiteChainAndNoImplicitParentLinks() throws IOException {
         String json = loadFixture("/fhir/emr-service-protocol-nested.json");
         PlanDefinition pd = parser.parse(json);
         List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(pd);
 
-        java.util.Map<String, List<String>> next = new java.util.HashMap<>();
+        java.util.Map<String, List<String>> prerequisites = new java.util.HashMap<>();
         for (PlanDefinitionParser.StepMetadata s : steps) {
-            next.put(s.id(), s.relatedSteps().stream()
+            prerequisites.put(s.id(), s.relatedSteps().stream()
                     .map(PlanDefinitionParser.RelatedStepInfo::actionId).toList());
         }
 
-        // The full clinical sequence is expressed as an explicit forward chain
-        assertEquals(List.of("vitals-recording"), next.get("visit-encounter"));
-        assertEquals(List.of("consultation"), next.get("vitals-recording"));
-        assertEquals(List.of("chief-complaints"), next.get("consultation"));
-        assertEquals(List.of("history-assessment"), next.get("chief-complaints"));
-        assertEquals(List.of("lab-order"), next.get("history-assessment"));
-        assertEquals(List.of("lab-results"), next.get("lab-order"));
-        assertEquals(List.of("diagnosis"), next.get("lab-results"));
-        assertEquals(List.of("treatment"), next.get("diagnosis"));
-        assertEquals(List.of("referral"), next.get("treatment"));
-        assertEquals(List.of(), next.get("referral"));
+        // Each step names the step it comes after — relatedAction points at the prerequisite
+        assertEquals(List.of(), prerequisites.get("visit-encounter"));
+        assertEquals(List.of("visit-encounter"), prerequisites.get("vitals-recording"));
+        assertEquals(List.of("vitals-recording"), prerequisites.get("consultation"));
+        assertEquals(List.of("consultation"), prerequisites.get("chief-complaints"));
+        assertEquals(List.of("chief-complaints"), prerequisites.get("history-assessment"));
+        assertEquals(List.of("history-assessment"), prerequisites.get("lab-order"));
+        assertEquals(List.of("lab-order"), prerequisites.get("lab-results"));
+        assertEquals(List.of("lab-results"), prerequisites.get("diagnosis"));
+        assertEquals(List.of("diagnosis"), prerequisites.get("treatment"));
+        assertEquals(List.of("treatment"), prerequisites.get("referral"));
 
-        // Nesting is organizational only — no nested sub-step carries an implicit backward
-        // relatedStep to its parent. The only links into the parent steps are the legitimate
-        // forward ones from the immediately preceding sibling.
-        long linksIntoConsultation = steps.stream()
-                .filter(s -> s.relatedSteps().stream().anyMatch(r -> "consultation".equals(r.actionId())))
-                .count();
-        long linksIntoLabOrder = steps.stream()
-                .filter(s -> s.relatedSteps().stream().anyMatch(r -> "lab-order".equals(r.actionId())))
-                .count();
-        assertEquals(1, linksIntoConsultation, "only vitals-recording should point to consultation");
-        assertEquals(1, linksIntoLabOrder, "only history-assessment should point to lab-order");
+        // Nesting is organizational only — no nested sub-step gains an implicit prerequisite on
+        // its parent. The only step depending on a parent step is the legitimate next sibling.
+        PlanDefinitionParser.DependencyGraph graph = PlanDefinitionParser.buildDependencyGraph(steps);
+        assertEquals(List.of("chief-complaints"),
+                graph.successorsOf("consultation").stream().map(d -> d.step().id()).toList(),
+                "only chief-complaints should depend on consultation");
+        assertEquals(List.of("lab-results"),
+                graph.successorsOf("lab-order").stream().map(d -> d.step().id()).toList(),
+                "only lab-results should depend on lab-order");
+        assertTrue(graph.successorsOf("referral").isEmpty(), "referral ends the chain");
 
-        // Every step is reachable from the enrollment step via the forward chain
+        // Every step is reachable from the enrollment step by walking the derived forward chain
         java.util.Set<String> seen = new java.util.HashSet<>();
         java.util.Deque<String> queue = new java.util.ArrayDeque<>(List.of("visit-encounter"));
         while (!queue.isEmpty()) {
             String n = queue.poll();
             if (!seen.add(n)) continue;
-            queue.addAll(next.getOrDefault(n, List.of()));
+            graph.successorsOf(n).forEach(d -> queue.add(d.step().id()));
         }
         assertEquals(10, seen.size(), "all 10 steps reachable from visit-encounter");
+    }
+
+    @Test
+    void buildDependencyGraph_carriesTheDependentStepsOwnOffset() throws IOException {
+        String json = loadFixture("/fhir/emr-service-protocol-nested.json");
+        List<PlanDefinitionParser.StepMetadata> steps = parser.extractSteps(parser.parse(json));
+
+        // lab-results declares "+3d after lab-order", so the edge indexed under lab-order must
+        // carry lab-results' own offset — not anything lab-order declares.
+        PlanDefinitionParser.StepDependency dependency =
+                PlanDefinitionParser.buildDependencyGraph(steps).successorsOf("lab-order").get(0);
+
+        assertEquals("lab-results", dependency.step().id());
+        assertEquals("after-end", dependency.edge().relationship());
+        assertEquals(0, new BigDecimal("3").compareTo(dependency.edge().offsetValue()));
+        assertEquals("d", dependency.edge().offsetUnit());
+
+        // Predecessor direction agrees
+        assertEquals(List.of("lab-order"),
+                PlanDefinitionParser.buildDependencyGraph(steps).predecessorsOf("lab-results"));
+    }
+
+    @Test
+    void classifyRelationship_distinguishesTheThreeFamilies() {
+        // relatedAction is relative: which end comes first depends on the family.
+        assertEquals(PlanDefinitionParser.RelationshipDirection.AFTER,
+                PlanDefinitionParser.classifyRelationship("after"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.AFTER,
+                PlanDefinitionParser.classifyRelationship("after-start"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.AFTER,
+                PlanDefinitionParser.classifyRelationship("after-end"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.AFTER,
+                PlanDefinitionParser.classifyRelationship(null), "absent defaults to after-end");
+
+        assertEquals(PlanDefinitionParser.RelationshipDirection.BEFORE,
+                PlanDefinitionParser.classifyRelationship("before"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.BEFORE,
+                PlanDefinitionParser.classifyRelationship("before-start"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.BEFORE,
+                PlanDefinitionParser.classifyRelationship("before-end"));
+
+        assertEquals(PlanDefinitionParser.RelationshipDirection.UNORDERED,
+                PlanDefinitionParser.classifyRelationship("concurrent"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.UNORDERED,
+                PlanDefinitionParser.classifyRelationship("concurrent-with-start"));
+        assertEquals(PlanDefinitionParser.RelationshipDirection.UNORDERED,
+                PlanDefinitionParser.classifyRelationship("concurrent-with-end"));
+    }
+
+    // ── Normalizing both ordering families into one graph ──
+
+    private static PlanDefinitionParser.StepMetadata step(
+            String id, PlanDefinitionParser.RelatedStepInfo... related) {
+        return new PlanDefinitionParser.StepMetadata(id, id, List.of(), List.of(related),
+                null, null, "must", List.of(), null);
+    }
+
+    private static PlanDefinitionParser.RelatedStepInfo edge(
+            String actionId, String relationship, String offsetDays) {
+        return new PlanDefinitionParser.RelatedStepInfo(
+                actionId, relationship, offsetDays == null ? null : new BigDecimal(offsetDays), "d");
+    }
+
+    @Test
+    void buildDependencyGraph_beforeRelationshipOrdersTheSameWayRoundAsAfter() {
+        // "a before b" and "b after-end a" state the same ordering from opposite ends, so both
+        // must yield the same directed edge a -> b.
+        PlanDefinitionParser.DependencyGraph viaBefore = PlanDefinitionParser.buildDependencyGraph(
+                List.of(step("a", edge("b", "before", "2")), step("b")));
+        PlanDefinitionParser.DependencyGraph viaAfter = PlanDefinitionParser.buildDependencyGraph(
+                List.of(step("a"), step("b", edge("a", "after-end", "2"))));
+
+        for (PlanDefinitionParser.DependencyGraph graph : List.of(viaBefore, viaAfter)) {
+            assertEquals(List.of("b"),
+                    graph.successorsOf("a").stream().map(d -> d.step().id()).toList());
+            assertEquals(List.of("a"), graph.predecessorsOf("b"));
+            assertTrue(graph.successorsOf("b").isEmpty());
+
+            PlanDefinitionParser.RelatedStepInfo normalized = graph.successorsOf("a").get(0).edge();
+            assertEquals("a", normalized.actionId(), "normalized edge names the prerequisite");
+            assertEquals("after-end", normalized.relationship());
+            assertEquals(0, new BigDecimal("2").compareTo(normalized.offsetValue()));
+        }
+    }
+
+    @Test
+    void buildDependencyGraph_beforeStartAndBeforeEndBothOrderForward() {
+        for (String relationship : List.of("before", "before-start", "before-end")) {
+            PlanDefinitionParser.DependencyGraph graph = PlanDefinitionParser.buildDependencyGraph(
+                    List.of(step("a", edge("b", relationship, "0")), step("b")));
+            assertEquals(List.of("a"), graph.predecessorsOf("b"),
+                    relationship + " must order a before b");
+        }
+    }
+
+    @Test
+    void buildDependencyGraph_concurrentAndDanglingEdgesEstablishNoOrdering() {
+        PlanDefinitionParser.DependencyGraph graph = PlanDefinitionParser.buildDependencyGraph(
+                List.of(step("a", edge("b", "concurrent-with-start", "0"),
+                                  edge("ghost", "after-end", "0")),
+                        step("b")));
+
+        assertTrue(graph.successors().isEmpty(), "neither edge orders anything");
+        assertTrue(graph.predecessors().isEmpty());
+        assertTrue(PlanDefinitionParser.computeAncestors("a", graph).isEmpty(),
+                "a dangling prerequisite is not an ancestor — there is no such step");
+    }
+
+    @Test
+    void findUnorderedRelationships_andFindDanglingRelatedActions_reportInertEdges() {
+        List<PlanDefinitionParser.StepMetadata> steps =
+                List.of(step("a", edge("b", "concurrent", "0"), edge("ghost", "after-end", "0")),
+                        step("b"));
+
+        List<String> unordered = PlanDefinitionParser.findUnorderedRelationships(steps);
+        assertEquals(1, unordered.size());
+        assertTrue(unordered.get(0).contains("concurrent"), unordered.get(0));
+
+        List<String> dangling = PlanDefinitionParser.findDanglingRelatedActions(steps);
+        assertEquals(1, dangling.size());
+        assertTrue(dangling.get(0).contains("ghost"), dangling.get(0));
     }
 
     // ── Expected mandatory actions ──

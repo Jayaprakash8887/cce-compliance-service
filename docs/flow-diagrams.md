@@ -520,24 +520,26 @@ All steps (including those originally nested in `action.action[]`) are treated a
 flowchart TD
     MATCH["Tier 1/2 match returns actionId"] --> NORMAL["Standard step processing<br/>(Section 1, Step 6)"]
     NORMAL --> COMPLETE["completeStep(step)"]
-    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps with relatedStep pointing to this step id)"]
+    COMPLETE --> DEPS["createDependentSteps()<br/>(find steps declaring this step id as their prerequisite)"]
     DEPS --> CREATED["Create dependent steps (PENDING)"]
     CREATED --> BACKFILL["backfillMissingMandatorySteps()<br/>(see 'Unrecorded Mandatory Predecessor Backfill' below)"]
 ```
 
 ### Dependent Step Creation on Completion
 
-When any step completes, `createDependentSteps()` finds all steps whose `relatedSteps` reference the completed step's id and creates them with appropriate due dates.
+`relatedAction` is a **relative** pointer — a step states how it sits against another, from either end (`after-*` or `before-*`) — so the forward direction needed here comes from the normalized graph built by `PlanDefinitionParser.buildDependencyGraph()`. When any step completes, `createDependentSteps()` looks up the steps that depend on it and creates them with due dates taken from the offset on the edge between them.
 
 ```mermaid
 flowchart TD
-    START["createDependentSteps(completedStep, allSteps)"] --> FIND["Find steps with relatedStep → the completed step's id"]
+    START["createDependentSteps(completedStep, graph)"] --> FIND["graph.successorsOf(completedStep):<br/>steps ordered after it by either an after-* edge<br/>of their own or a before-* edge on the completed step"]
     FIND --> LOOP{"For each dependent step"}
     LOOP --> DEDUP{"An instance for this step<br/>already exists?"}
     DEDUP -->|"Yes"| SKIP["Skip — avoid duplicate<br/>(already created reactively via its own<br/>trigger, or by a redelivered predecessor)"]
-    DEDUP -->|"No"| MUST{"target step's<br/>requiredBehavior == must?"}
+    DEDUP -->|"No"| MUST{"dependent step's<br/>requiredBehavior == must?"}
     MUST -->|"No (could / unspecified)"| SKIP2["Skip pre-creation — a dangling PENDING row could<br/>later go MISSED even though its event never<br/>arrives; created on the fly if its own trigger fires"]
-    MUST -->|"Yes"| CALC["Calculate due date from offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
+    MUST -->|"Yes"| FANIN{"Any OTHER prerequisite of this<br/>step still in flight (PENDING/DUE)?"}
+    FANIN -->|"Yes"| SKIP3["Defer — that prerequisite's own completion<br/>re-runs this, so the due date anchors to<br/>the LAST prerequisite to finish"]
+    FANIN -->|"No"| CALC["Calculate due date from the dependent step's own<br/>offset + relationship<br/>(after-end → completedAt [clinical time], after-start → dueDate)"]
     CALC --> RECURRING{"TimingInfo.count > 1?"}
 
     RECURRING -->|"Yes"| MULTI["Create N recurring instances with staggered due dates"]
@@ -547,6 +549,7 @@ flowchart TD
     SINGLE --> NEXT
     SKIP --> NEXT
     SKIP2 --> NEXT
+    SKIP3 --> NEXT
     NEXT --> LOOP
     LOOP -->|"Done"| END["Return"]
 ```

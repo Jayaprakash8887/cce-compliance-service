@@ -34,13 +34,6 @@
       "timingTiming": {
         "repeat": { "count": 1, "period": 1, "frequency": 1, "periodUnit": "d" }
       },
-      "relatedAction": [
-        {
-          "actionId": "vitals-recording",
-          "relationship": "after-start",
-          "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
-        }
-      ],
       "requiredBehavior": "must"
     },
     {
@@ -77,8 +70,8 @@
       },
       "relatedAction": [
         {
-          "actionId": "consultation",
-          "relationship": "after-end",
+          "actionId": "visit-encounter",
+          "relationship": "after-start",
           "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
         }
       ],
@@ -118,7 +111,7 @@
       },
       "relatedAction": [
         {
-          "actionId": "chief-complaints",
+          "actionId": "vitals-recording",
           "relationship": "after-end",
           "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
         }
@@ -159,7 +152,7 @@
           },
           "relatedAction": [
             {
-              "actionId": "history-assessment",
+              "actionId": "consultation",
               "relationship": "after-end",
               "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
             }
@@ -200,7 +193,7 @@
           },
           "relatedAction": [
             {
-              "actionId": "lab-order",
+              "actionId": "chief-complaints",
               "relationship": "after-end",
               "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
             }
@@ -231,9 +224,9 @@
           },
           "relatedAction": [
             {
-              "actionId": "lab-results",
+              "actionId": "history-assessment",
               "relationship": "after-end",
-              "offsetDuration": { "code": "d", "unit": "d", "value": 3, "system": "http://unitsofmeasure.org" }
+              "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
             }
           ],
           "requiredBehavior": "must",
@@ -272,9 +265,9 @@
               },
               "relatedAction": [
                 {
-                  "actionId": "diagnosis",
+                  "actionId": "lab-order",
                   "relationship": "after-end",
-                  "offsetDuration": { "code": "d", "unit": "d", "value": 1, "system": "http://unitsofmeasure.org" }
+                  "offsetDuration": { "code": "d", "unit": "d", "value": 3, "system": "http://unitsofmeasure.org" }
                 }
               ],
               "requiredBehavior": "must"
@@ -315,9 +308,9 @@
           },
           "relatedAction": [
             {
-              "actionId": "treatment",
+              "actionId": "lab-results",
               "relationship": "after-end",
-              "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
+              "offsetDuration": { "code": "d", "unit": "d", "value": 1, "system": "http://unitsofmeasure.org" }
             }
           ],
           "requiredBehavior": "must"
@@ -346,7 +339,7 @@
           },
           "relatedAction": [
             {
-              "actionId": "referral",
+              "actionId": "diagnosis",
               "relationship": "after-end",
               "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
             }
@@ -385,6 +378,13 @@
           "timingTiming": {
             "repeat": { "count": 1, "period": 1, "frequency": 1, "periodUnit": "d" }
           },
+          "relatedAction": [
+            {
+              "actionId": "treatment",
+              "relationship": "after-end",
+              "offsetDuration": { "code": "d", "unit": "d", "value": 0, "system": "http://unitsofmeasure.org" }
+            }
+          ],
           "requiredBehavior": "could"
         }
       ]

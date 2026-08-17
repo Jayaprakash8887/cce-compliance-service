@@ -131,8 +131,9 @@ class SchedulerTriggerIntegrationTest extends IntegrationTestBase {
         // But in integration test mode we can't easily inject... let's work around this.
 
         // Actually, the step was created AND completed in one flow (completeStep is called after createInitialStep).
-        // Check if the blood-pressure-check dependent step was created (relatedAction: after-end, 7d).
-        // The "any-encounter-log" action has NO relatedActions, so no dependent step exists.
+        // Check if the blood-pressure-check dependent step was created (it declares
+        // initial-enrollment as its prerequisite: after-end, 7d). No step declares
+        // "any-encounter-log" as a prerequisite, so it has no dependent step.
 
         // For a proper test, let's use the initial-enrollment path which creates dependent steps.
         // But initial-enrollment requires type+serviceType matching which won't work due to extractor limitations.

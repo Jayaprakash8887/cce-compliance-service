@@ -199,7 +199,7 @@ Stores FHIR R4 **PlanDefinition** resources that define compliance protocols. Ea
 | `url` | `VARCHAR` | **NOT NULL** | — | FHIR canonical URL (e.g., `http://openphc.org/fhir/PlanDefinition/anc-high-risk`). Combined with `version` forms the canonical reference. |
 | `version` | `VARCHAR` | **NOT NULL** | — | Semantic version (e.g., `2.1`). Allows multiple versions of the same protocol URL to coexist. |
 | `status` | `VARCHAR` | **NOT NULL** | — | Lifecycle status. Only `ACTIVE` definitions participate in trigger matching. See [ProtocolDefinitionStatus](#protocoldefinitionstatus). |
-| `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 PlanDefinition resource. Contains `action[]` with triggers, conditions, timing, and related actions. See [JSONB: definition](#protocol_definition--definition). |
+| `definition` | `JSONB` | **NOT NULL** | — | Full FHIR R4 PlanDefinition resource. Contains `action[]` with triggers, conditions, timing, and related actions. `relatedAction[].actionId` names the step's **prerequisite** (see the direction note in [Architecture Overview §6.4](architecture-overview.md#64-flat-step-model-nested-actions-flattened)); migration `V9__reverse_related_action_direction.sql` flipped definitions authored against the earlier inverted reading. See [JSONB: definition](#protocol_definition--definition). |
 | `loaded_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | When this protocol definition was loaded into the system. |
 | `updated_at` | `TIMESTAMPTZ` | **NOT NULL** | `now()` | Last modification timestamp (e.g., status change to RETIRED). |
 
@@ -260,7 +260,7 @@ Tracks an **individual action occurrence** within a patient's protocol journey. 
 | `action_id` | `VARCHAR` | **NOT NULL** | — | Protocol definition `action.id` this step instantiates (e.g., `anc-visit-1`). Must be unique within a PlanDefinition. |
 | `repeat_index` | `INTEGER` | **NOT NULL** | `0` | Zero-based occurrence counter for repeating actions. Non-repeating actions always have index 0. |
 | `state` | `VARCHAR` | **NOT NULL** | — | Current step state. See [StepState](#stepstate). |
-| `due_date` | `TIMESTAMPTZ` | Yes | — | Scheduled due date. Calculated from `relatedAction.offsetDuration`, anchored to the predecessor's `completed_at` (clinical occurrence time — see §4.2). `NULL` for event-triggered steps. |
+| `due_date` | `TIMESTAMPTZ` | Yes | — | Scheduled due date. Calculated from the step's own `relatedAction.offsetDuration`, anchored to the `completed_at` (clinical occurrence time — see §4.2) of the prerequisite that `relatedAction.actionId` names. `NULL` for event-triggered steps. |
 | `overdue_date` | `TIMESTAMPTZ` | Yes | — | End of the tolerance window. Typically `due_date + tolerance_days`. **Not a state threshold** — since the removal of `DUE → OVERDUE` it is read only to separate `ON_TIME` from `LATE` on completion. |
 | `missed_date` | `TIMESTAMPTZ` | Yes | — | Missed cutoff date. Typically `overdue_date + tolerance_days`. |
 | `completed_at` | `TIMESTAMPTZ` | Yes | — | **Clinical occurrence time** of the completing event (when the act happened), not ingestion time — clamped to `now()`. Drives completion status and dependent steps' due dates. `NULL` for non-completed steps. See [Architecture §4.2](architecture-overview.md#42-clinical-event-time-extraction). |
@@ -812,7 +812,7 @@ The `definition` column stores the complete FHIR R4 PlanDefinition resource. Key
           "expression": "{\">\": [{\"var\": \"resource.valueQuantity.value\"}, 140]}"
         }
       }],
-      "relatedAction": [{                      // step dependencies
+      "relatedAction": [{                      // prerequisite: anc-visit-1 comes after enrollment
         "actionId": "enrollment",
         "relationship": "after-start",
         "offsetDuration": { "value": 8, "unit": "wk" }

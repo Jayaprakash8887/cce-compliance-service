@@ -69,6 +69,7 @@ public class ProtocolDefinitionService {
         planDefinitionParser.validateActionIds(planDefinition);
         planDefinitionParser.validateActionTypes(planDefinition);
         planDefinitionParser.validateTriggers(planDefinition);
+        warnOnInertRelatedActions(planDefinition);
 
         String url = planDefinition.getUrl();
         String version = planDefinition.getVersion();
@@ -237,5 +238,31 @@ public class ProtocolDefinitionService {
     private ProtocolDefinition findByIdOrThrow(UUID id) {
         return protocolDefinitionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Protocol definition not found: " + id));
+    }
+
+    /**
+     * Warn about {@code relatedAction} entries that establish no step ordering, so a protocol that
+     * expects one to sequence its steps is flagged at load time rather than quietly producing a
+     * disconnected graph — no progressive instantiation, no ORDER_VIOLATION, no backfill along that
+     * edge, and no error to explain why.
+     *
+     * <p>Warnings rather than rejections: both shapes were accepted (and equally inert) before, so
+     * failing the load would break an upstream publisher for something already in the wild.
+     */
+    private void warnOnInertRelatedActions(PlanDefinition planDefinition) {
+        List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
+
+        for (String dangling : PlanDefinitionParser.findDanglingRelatedActions(steps)) {
+            log.warn("Protocol {} has a relatedAction naming an action that does not exist — it is "
+                            + "ignored and establishes no ordering: {}",
+                    planDefinition.getUrl(), dangling);
+        }
+
+        for (String unordered : PlanDefinitionParser.findUnorderedRelationships(steps)) {
+            log.warn("Protocol {} has a concurrent-* relatedAction, which states no ordering — it "
+                            + "will NOT sequence these steps. Use after-*/before-* if one must "
+                            + "follow the other: {}",
+                    planDefinition.getUrl(), unordered);
+        }
     }
 }

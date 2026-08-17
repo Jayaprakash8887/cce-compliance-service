@@ -36,38 +36,6 @@
           "periodUnit": "d"
         }
       },
-      "relatedAction": [
-        {
-          "actionId": "family-planning",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "code": "d",
-            "unit": "d",
-            "value": 0,
-            "system": "http://unitsofmeasure.org"
-          }
-        },
-        {
-          "actionId": "pregnancy-profile",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "code": "d",
-            "unit": "d",
-            "value": 0,
-            "system": "http://unitsofmeasure.org"
-          }
-        },
-        {
-          "actionId": "pregnancy-outcome",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "code": "d",
-            "unit": "d",
-            "value": 0,
-            "system": "http://unitsofmeasure.org"
-          }
-        }
-      ],
       "requiredBehavior": "could"
     },
     {
@@ -120,7 +88,7 @@
       },
       "relatedAction": [
         {
-          "actionId": "anc-visit-1",
+          "actionId": "registration",
           "relationship": "after-end",
           "offsetDuration": {
             "code": "d",
@@ -230,16 +198,6 @@
               "periodUnit": "d"
             }
           },
-          "relatedAction": [
-            {
-              "actionId": "anc-visit-1-referral-consultation",
-              "relationship": "after-end",
-              "offsetDuration": {
-                "unit": "min",
-                "value": 0
-              }
-            }
-          ],
           "requiredBehavior": "must"
         },
         {
@@ -295,6 +253,16 @@
               "periodUnit": "d"
             }
           },
+          "relatedAction": [
+            {
+              "actionId": "anc-visit-1-referral",
+              "relationship": "after-end",
+              "offsetDuration": {
+                "unit": "min",
+                "value": 0
+              }
+            }
+          ],
           "requiredBehavior": "must",
           "action": [
             {
@@ -468,12 +436,12 @@
       },
       "relatedAction": [
         {
-          "actionId": "anc-visit-2",
+          "actionId": "pregnancy-profile",
           "relationship": "after-end",
           "offsetDuration": {
             "code": "d",
             "unit": "d",
-            "value": 30,
+            "value": 0,
             "system": "http://unitsofmeasure.org"
           }
         }
@@ -578,16 +546,6 @@
               "periodUnit": "d"
             }
           },
-          "relatedAction": [
-            {
-              "actionId": "anc-visit-2-referral-consultation",
-              "relationship": "after-end",
-              "offsetDuration": {
-                "unit": "min",
-                "value": 0
-              }
-            }
-          ],
           "requiredBehavior": "must"
         },
         {
@@ -643,6 +601,16 @@
               "periodUnit": "d"
             }
           },
+          "relatedAction": [
+            {
+              "actionId": "anc-visit-2-referral",
+              "relationship": "after-end",
+              "offsetDuration": {
+                "unit": "min",
+                "value": 0
+              }
+            }
+          ],
           "requiredBehavior": "must",
           "action": [
             {
@@ -816,7 +784,7 @@
       },
       "relatedAction": [
         {
-          "actionId": "anc-visit-3",
+          "actionId": "anc-visit-1",
           "relationship": "after-end",
           "offsetDuration": {
             "code": "d",
@@ -926,16 +894,6 @@
               "periodUnit": "d"
             }
           },
-          "relatedAction": [
-            {
-              "actionId": "anc-visit-3-referral-consultation",
-              "relationship": "after-end",
-              "offsetDuration": {
-                "unit": "min",
-                "value": 0
-              }
-            }
-          ],
           "requiredBehavior": "must"
         },
         {
@@ -991,6 +949,16 @@
               "periodUnit": "d"
             }
           },
+          "relatedAction": [
+            {
+              "actionId": "anc-visit-3-referral",
+              "relationship": "after-end",
+              "offsetDuration": {
+                "unit": "min",
+                "value": 0
+              }
+            }
+          ],
           "requiredBehavior": "must",
           "action": [
             {
@@ -1162,6 +1130,18 @@
           "periodUnit": "d"
         }
       },
+      "relatedAction": [
+        {
+          "actionId": "anc-visit-2",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "code": "d",
+            "unit": "d",
+            "value": 30,
+            "system": "http://unitsofmeasure.org"
+          }
+        }
+      ],
       "requiredBehavior": "could"
     },
     {
@@ -1214,7 +1194,7 @@
       },
       "relatedAction": [
         {
-          "actionId": "pnc",
+          "actionId": "registration",
           "relationship": "after-end",
           "offsetDuration": {
             "code": "d",
@@ -1274,6 +1254,18 @@
           "periodUnit": "d"
         }
       },
+      "relatedAction": [
+        {
+          "actionId": "pregnancy-outcome",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "code": "d",
+            "unit": "d",
+            "value": 0,
+            "system": "http://unitsofmeasure.org"
+          }
+        }
+      ],
       "requiredBehavior": "could"
     }
   ],

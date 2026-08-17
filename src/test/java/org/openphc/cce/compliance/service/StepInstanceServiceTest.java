@@ -195,12 +195,12 @@ class StepInstanceServiceTest {
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
-                                    BigDecimal.valueOf(7), "d")),
-                            null, null, "must", List.of(), null),
+                            List.of(), List.of(), null, null, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), null, 3, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("initial-enrollment", "after-end",
+                                    BigDecimal.valueOf(7), "d")),
+                            null, 3, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source", null);
@@ -243,12 +243,12 @@ class StepInstanceServiceTest {
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-start",
-                                    BigDecimal.valueOf(14), "d")),
-                            null, null, "must", List.of(), null),
+                            List.of(), List.of(), null, null, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), null, 3, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("initial-enrollment", "after-start",
+                                    BigDecimal.valueOf(14), "d")),
+                            null, 3, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source", null);
@@ -290,12 +290,12 @@ class StepInstanceServiceTest {
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
-                                    BigDecimal.valueOf(7), "d")),
-                            null, null, "must", List.of(), null),
+                            List.of(), List.of(), null, null, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), timing, 3, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("initial-enrollment", "after-end",
+                                    BigDecimal.valueOf(7), "d")),
+                            timing, 3, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source", null);
@@ -354,12 +354,12 @@ class StepInstanceServiceTest {
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("initial-enrollment", "Enrollment",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("bp-check", "after-end",
-                                    BigDecimal.valueOf(7), "d")),
-                            null, null, "must", List.of(), null),
+                            List.of(), List.of(), null, null, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("bp-check", "BP Check",
-                            List.of(), List.of(), null, 3, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("initial-enrollment", "after-end",
+                                    BigDecimal.valueOf(7), "d")),
+                            null, 3, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(step, UUID.randomUUID(), "test-source", null);
@@ -370,6 +370,124 @@ class StepInstanceServiceTest {
             boolean createdDuplicate = captor.getAllValues().stream()
                     .anyMatch(s -> "bp-check".equals(s.getActionId()));
             assertFalse(createdDuplicate, "Existing bp-check step must not be re-created");
+        }
+
+        /**
+         * Fan-in: `review` depends on both `intake` (just completed) and `labs`. It must wait for
+         * `labs` while that is still in flight, so its due date anchors to the last prerequisite
+         * to finish rather than whichever completed first.
+         */
+        private List<PlanDefinitionParser.StepMetadata> fanInGraph() {
+            return List.of(
+                    new PlanDefinitionParser.StepMetadata("intake", "Intake",
+                            List.of(), List.of(), null, null, "must", List.of(), null),
+                    new PlanDefinitionParser.StepMetadata("labs", "Labs",
+                            List.of(), List.of(), null, null, "must", List.of(), null),
+                    new PlanDefinitionParser.StepMetadata("review", "Review",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("intake", "after-end",
+                                    BigDecimal.valueOf(2), "d"),
+                            new PlanDefinitionParser.RelatedStepInfo("labs", "after-end",
+                                    BigDecimal.valueOf(2), "d")),
+                            null, 1, "must", List.of(), null));
+        }
+
+        private List<StepInstance> completeIntakeWithLabsIn(ProtocolInstance protocolInstance,
+                                                            StepState labsState) {
+            OffsetDateTime dueDate = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
+            StepInstance intake = buildStepWithProtocol(protocolInstance, "intake",
+                    StepState.PENDING, dueDate, dueDate.plusDays(3));
+            StepInstance labs = StepInstance.builder()
+                    .id(UUID.randomUUID())
+                    .protocolInstance(protocolInstance)
+                    .actionId("labs")
+                    .repeatIndex(0)
+                    .state(labsState)
+                    .requiredBehavior("must")
+                    .build();
+
+            when(stepInstanceRepository.save(any(StepInstance.class))).thenAnswer(invocation -> {
+                StepInstance s = invocation.getArgument(0);
+                if (s.getId() == null) s.setId(UUID.randomUUID());
+                return s;
+            });
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any()))
+                    .thenReturn(List.of(intake, labs));
+
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(fanInGraph());
+
+            service.completeStep(intake, UUID.randomUUID(), "test-source", null);
+
+            ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
+            verify(stepInstanceRepository, atLeastOnce()).save(captor.capture());
+            return captor.getAllValues();
+        }
+
+        @Test
+        void beforeRelationship_onThePredecessor_stillInstantiatesTheDependent() {
+            // A protocol may state the ordering from the other end: visit-encounter declares
+            // "before vitals-recording" rather than vitals-recording declaring "after-end
+            // visit-encounter". Both must create vitals-recording when visit-encounter completes.
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+            OffsetDateTime dueDate = OffsetDateTime.now(ZoneOffset.UTC).plusDays(7);
+            StepInstance step = buildStepWithProtocol(protocolInstance, "visit-encounter",
+                    StepState.PENDING, dueDate, dueDate.plusDays(3));
+
+            when(stepInstanceRepository.save(any(StepInstance.class))).thenAnswer(invocation -> {
+                StepInstance s = invocation.getArgument(0);
+                if (s.getId() == null) s.setId(UUID.randomUUID());
+                return s;
+            });
+            lenient().when(stepInstanceRepository.findByProtocolInstanceId(any())).thenReturn(List.of(step));
+
+            PlanDefinition mockPlanDef = mock(PlanDefinition.class);
+            when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
+            when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(List.of(
+                    new PlanDefinitionParser.StepMetadata("visit-encounter", "Visit",
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("vitals-recording", "before",
+                                    BigDecimal.valueOf(2), "d")),
+                            null, null, "must", List.of(), null),
+                    new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
+                            List.of(), List.of(), null, 1, "must", List.of(), null)));
+
+            service.completeStep(step, UUID.randomUUID(), "test-source", null);
+
+            ArgumentCaptor<StepInstance> captor = ArgumentCaptor.forClass(StepInstance.class);
+            verify(stepInstanceRepository, atLeast(2)).save(captor.capture());
+
+            StepInstance dependent = captor.getAllValues().stream()
+                    .filter(s -> "vitals-recording".equals(s.getActionId()))
+                    .findFirst().orElse(null);
+
+            assertNotNull(dependent, "a 'before' edge on the predecessor must still create the dependent");
+            assertEquals(StepState.PENDING, dependent.getState());
+            // before-* normalizes to after-end: anchored to the predecessor's completion + 2d
+            assertEquals(step.getCompletedAt().plusDays(2).toLocalDate(),
+                    dependent.getDueDate().toLocalDate());
+        }
+
+        @Test
+        void fanIn_otherPrerequisiteStillInFlight_defersCreation() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            List<StepInstance> saved = completeIntakeWithLabsIn(protocolInstance, StepState.DUE);
+
+            assertFalse(saved.stream().anyMatch(s -> "review".equals(s.getActionId())),
+                    "review must wait while its other prerequisite (labs) is still DUE");
+        }
+
+        @Test
+        void fanIn_otherPrerequisiteTerminal_createsImmediately() {
+            ProtocolInstance protocolInstance = buildProtocolInstanceWithDefinition();
+
+            // labs already MISSED — it will never complete, so waiting would strand review
+            List<StepInstance> saved = completeIntakeWithLabsIn(protocolInstance, StepState.MISSED);
+
+            assertTrue(saved.stream().anyMatch(s -> "review".equals(s.getActionId())),
+                    "review must be created once no prerequisite can still complete");
         }
     }
 
@@ -679,15 +797,16 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(optionalStep, completedStep));
 
-            // Build dependency graph: optional-lab → mandatory-visit (optional-lab is ancestor)
+            // Build dependency graph: mandatory-visit comes after optional-lab, so optional-lab
+            // is the ancestor
             PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             PlanDefinitionParser.StepMetadata optionalLabAction = new PlanDefinitionParser.StepMetadata(
-                    "optional-lab", "Optional Lab", null,
-                    List.of(new PlanDefinitionParser.RelatedStepInfo("mandatory-visit", "after-end", BigDecimal.ZERO, "d")),
-                    null, null, "could", List.of(), null);
+                    "optional-lab", "Optional Lab", null, List.of(), null, null, "could", List.of(), null);
             PlanDefinitionParser.StepMetadata mandatoryVisitAction = new PlanDefinitionParser.StepMetadata(
-                    "mandatory-visit", "Mandatory Visit", null, List.of(), null, null, "must", List.of(), null);
+                    "mandatory-visit", "Mandatory Visit", null,
+                    List.of(new PlanDefinitionParser.RelatedStepInfo("optional-lab", "after-end", BigDecimal.ZERO, "d")),
+                    null, null, "must", List.of(), null);
             when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(optionalLabAction, mandatoryVisitAction));
 
@@ -727,18 +846,20 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(parallelSibling, completedStep));
 
-            // Graph: registration → family-planning, registration → pregnancy-profile (parallel branches)
+            // Graph: family-planning and pregnancy-profile both come after registration
+            // (parallel branches)
             PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
             PlanDefinitionParser.StepMetadata registrationAction = new PlanDefinitionParser.StepMetadata(
-                    "registration", "Registration", null,
-                    List.of(new PlanDefinitionParser.RelatedStepInfo("family-planning", "after-end", BigDecimal.ZERO, "d"),
-                            new PlanDefinitionParser.RelatedStepInfo("pregnancy-profile", "after-end", BigDecimal.ZERO, "d")),
-                    null, null, "must", List.of(), null);
+                    "registration", "Registration", null, List.of(), null, null, "must", List.of(), null);
             PlanDefinitionParser.StepMetadata familyPlanningAction = new PlanDefinitionParser.StepMetadata(
-                    "family-planning", "Family Planning", null, List.of(), null, null, "could", List.of(), null);
+                    "family-planning", "Family Planning", null,
+                    List.of(new PlanDefinitionParser.RelatedStepInfo("registration", "after-end", BigDecimal.ZERO, "d")),
+                    null, null, "could", List.of(), null);
             PlanDefinitionParser.StepMetadata pregnancyProfileAction = new PlanDefinitionParser.StepMetadata(
-                    "pregnancy-profile", "Pregnancy Profile", null, List.of(), null, null, "could", List.of(), null);
+                    "pregnancy-profile", "Pregnancy Profile", null,
+                    List.of(new PlanDefinitionParser.RelatedStepInfo("registration", "after-end", BigDecimal.ZERO, "d")),
+                    null, null, "could", List.of(), null);
             when(planDefinitionParser.extractSteps(mockPlanDef))
                     .thenReturn(List.of(registrationAction, familyPlanningAction, pregnancyProfileAction));
 
@@ -971,12 +1092,12 @@ class StepInstanceServiceTest {
             // vitals-recording has relatedAction pointing to chief-complaints
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("chief-complaints", "after-end",
-                                    BigDecimal.ZERO, "d")),
-                            null, 1, "must", List.of(), null),
+                            List.of(), List.of(), null, 1, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("chief-complaints", "Chief Complaints",
-                            List.of(), List.of(), null, 1, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("vitals-recording", "after-end",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             Deviation deviation = Deviation.builder().id(UUID.randomUUID()).build();
@@ -1029,12 +1150,12 @@ class StepInstanceServiceTest {
 
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("chief-complaints", "after-end",
-                                    BigDecimal.ZERO, "d")),
-                            null, 1, "must", List.of(), null),
+                            List.of(), List.of(), null, 1, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("chief-complaints", "Chief Complaints",
-                            List.of(), List.of(), null, 1, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("vitals-recording", "after-end",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
@@ -1075,15 +1196,15 @@ class StepInstanceServiceTest {
             PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
-            // history-assessment (could) → lab-order
+            // lab-order comes after history-assessment (could)
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("history-assessment", "History",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("lab-order", "after-end",
-                                    BigDecimal.ZERO, "d")),
-                            null, 1, "could", List.of(), null),
+                            List.of(), List.of(), null, 1, "could", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("lab-order", "Lab Order",
-                            List.of(), List.of(), null, 1, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("history-assessment", "after-end",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
@@ -1115,15 +1236,15 @@ class StepInstanceServiceTest {
             PlanDefinition mockPlanDef = mock(PlanDefinition.class);
             when(planDefinitionParser.parse(anyString())).thenReturn(mockPlanDef);
 
-            // visit-encounter has relatedAction but no one points TO it
+            // visit-encounter declares no prerequisite — it heads the chain
             List<PlanDefinitionParser.StepMetadata> actions = List.of(
                     new PlanDefinitionParser.StepMetadata("visit-encounter", "Visit",
-                            List.of(), List.of(
-                            new PlanDefinitionParser.RelatedStepInfo("vitals-recording", "after-start",
-                                    BigDecimal.ZERO, "d")),
-                            null, 1, "must", List.of(), null),
+                            List.of(), List.of(), null, 1, "must", List.of(), null),
                     new PlanDefinitionParser.StepMetadata("vitals-recording", "Vitals",
-                            List.of(), List.of(), null, 1, "must", List.of(), null));
+                            List.of(), List.of(
+                            new PlanDefinitionParser.RelatedStepInfo("visit-encounter", "after-start",
+                                    BigDecimal.ZERO, "d")),
+                            null, 1, "must", List.of(), null));
             when(planDefinitionParser.extractSteps(mockPlanDef)).thenReturn(actions);
 
             service.completeStep(completedStep, UUID.randomUUID(), "test-source", null);
@@ -1143,30 +1264,31 @@ class StepInstanceServiceTest {
          */
         private List<PlanDefinitionParser.StepMetadata> emrJourney() {
             return List.of(
-                    action("visit-encounter", "vitals-recording", null, null),
-                    action("vitals-recording", "consultation", "must", null),
-                    action("consultation", "chief-complaints", "must", null),
-                    action("chief-complaints", "history-assessment", null, "consultation"),
-                    action("history-assessment", "lab-order", "could", "consultation"),
-                    action("lab-order", "lab-results", null, "consultation"),
-                    action("lab-results", "diagnosis", null, "lab-order"),
-                    action("diagnosis", "treatment", "must", "consultation"),
-                    action("treatment", "referral", null, "consultation"),
-                    action("referral", null, "could", "consultation"));
+                    action("visit-encounter", null, null, null),
+                    action("vitals-recording", "visit-encounter", "must", null),
+                    action("consultation", "vitals-recording", "must", null),
+                    action("chief-complaints", "consultation", null, "consultation"),
+                    action("history-assessment", "chief-complaints", "could", "consultation"),
+                    action("lab-order", "history-assessment", null, "consultation"),
+                    action("lab-results", "lab-order", null, "lab-order"),
+                    action("diagnosis", "lab-results", "must", "consultation"),
+                    action("treatment", "diagnosis", null, "consultation"),
+                    action("referral", "treatment", "could", "consultation"));
         }
 
-        private PlanDefinitionParser.StepMetadata action(String id, String nextActionId,
+        private PlanDefinitionParser.StepMetadata action(String id, String prerequisiteActionId,
                                                          String requiredBehavior, String parentActionId) {
-            return action(id, nextActionId, requiredBehavior, parentActionId, 1);
+            return action(id, prerequisiteActionId, requiredBehavior, parentActionId, 1);
         }
 
-        private PlanDefinitionParser.StepMetadata action(String id, String nextActionId,
+        /** A step that comes after {@code prerequisiteActionId} — relatedAction names what it depends on. */
+        private PlanDefinitionParser.StepMetadata action(String id, String prerequisiteActionId,
                                                          String requiredBehavior, String parentActionId,
                                                          Integer toleranceDays) {
-            List<PlanDefinitionParser.RelatedStepInfo> related = nextActionId == null
+            List<PlanDefinitionParser.RelatedStepInfo> related = prerequisiteActionId == null
                     ? List.of()
                     : List.of(new PlanDefinitionParser.RelatedStepInfo(
-                            nextActionId, "after-end", BigDecimal.ZERO, "d"));
+                            prerequisiteActionId, "after-end", BigDecimal.ZERO, "d"));
             return new PlanDefinitionParser.StepMetadata(id, id, List.of(), related,
                     null, toleranceDays, requiredBehavior, List.of(), parentActionId);
         }
@@ -1332,8 +1454,8 @@ class StepInstanceServiceTest {
             when(stepInstanceRepository.findByProtocolInstanceId(protocolInstance.getId()))
                     .thenReturn(List.of(consultation));
             stubGraph(List.of(
-                    action("vitals-recording", "consultation", "must", null, null),
-                    action("consultation", null, "must", null, null)));
+                    action("vitals-recording", null, "must", null, null),
+                    action("consultation", "vitals-recording", "must", null, null)));
 
             service.completeStep(consultation, UUID.randomUUID(), "ebuzima", occurredAt);
 

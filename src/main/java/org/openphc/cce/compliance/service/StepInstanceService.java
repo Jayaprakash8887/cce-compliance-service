@@ -143,17 +143,20 @@ public class StepInstanceService {
         PlanDefinition planDefinition = planDefinitionParser.parse(definition.toString());
         List<PlanDefinitionParser.StepMetadata> steps = planDefinitionParser.extractSteps(planDefinition);
 
+        // Normalize relatedAction into a directed graph once — all four passes below traverse it
+        PlanDefinitionParser.DependencyGraph graph = PlanDefinitionParser.buildDependencyGraph(steps);
+
         // Detect order violations (must-have prerequisites still incomplete)
-        detectOrderViolations(step, steps);
+        detectOrderViolations(step, steps, graph);
 
         // Progressive step instantiation for dependent steps
-        createDependentSteps(step, steps);
+        createDependentSteps(step, graph);
 
         // Auto-skip preceding optional (could) steps that are still actionable
-        autoSkipPrecedingOptionalSteps(step, steps);
+        autoSkipPrecedingOptionalSteps(step, graph);
 
         // Materialize mandatory predecessors this journey never recorded
-        backfillMissingMandatorySteps(step, steps);
+        backfillMissingMandatorySteps(step, steps, graph);
     }
 
     /**
@@ -267,20 +270,24 @@ public class StepInstanceService {
      * Detect order violations: when a step completes, check if any immediate
      * predecessor steps (with requiredBehavior="must") are still in
      * non-terminal incomplete states (see {@link #ACTIONABLE_STATES}).
-     * A predecessor of step X is any step whose relatedSteps list contains X.
+     * The immediate predecessors of step X are the prerequisites the normalized dependency graph
+     * records for it (see {@link PlanDefinitionParser#buildDependencyGraph}).
      */
     private void detectOrderViolations(StepInstance completedStep,
-                                       List<PlanDefinitionParser.StepMetadata> steps) {
+                                       List<PlanDefinitionParser.StepMetadata> steps,
+                                       PlanDefinitionParser.DependencyGraph graph) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
         String completedStepId = completedStep.getActionId();
 
-        // Find immediate predecessors: steps whose relatedSteps contain this step's id
-        // and that have requiredBehavior="must"
-        List<String> mustPredecessorIds = steps.stream()
+        Set<String> mustStepIds = steps.stream()
                 .filter(s -> "must".equals(s.requiredBehavior()))
-                .filter(s -> s.relatedSteps().stream()
-                        .anyMatch(ra -> completedStepId.equals(ra.actionId())))
                 .map(PlanDefinitionParser.StepMetadata::id)
+                .collect(Collectors.toSet());
+
+        // Immediate predecessors of this step, restricted to mandatory ones
+        List<String> mustPredecessorIds = graph.predecessorsOf(completedStepId).stream()
+                .distinct()
+                .filter(mustStepIds::contains)
                 .toList();
 
         if (mustPredecessorIds.isEmpty()) {
@@ -323,24 +330,37 @@ public class StepInstanceService {
     }
 
     /**
-     * Progressive step instantiation: when a step completes, create dependent PENDING
-     * steps from relatedStep definitions with calculated due dates.
+     * Progressive step instantiation: when a step completes, create the PENDING steps that declare
+     * it as a prerequisite, with due dates calculated from their own {@code relatedAction} offsets.
+     *
+     * <p>{@code relatedAction} is relative rather than forward — a step states how it sits against
+     * another — so the forward direction needed here comes from the normalized graph (see
+     * {@link PlanDefinitionParser#buildDependencyGraph}). The offset that positions a dependent step
+     * is the one on the edge between it and this prerequisite, whichever end declared it.
      */
     private void createDependentSteps(StepInstance completedStep,
-                                      List<PlanDefinitionParser.StepMetadata> steps) {
+                                      PlanDefinitionParser.DependencyGraph graph) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
-        // Find the completed step's metadata to get its relatedSteps
-        PlanDefinitionParser.StepMetadata completedStepMetadata = steps.stream()
-                .filter(s -> completedStep.getActionId().equals(s.id()))
-                .findFirst()
-                .orElse(null);
+        // Steps that depend on the just-completed step
+        List<PlanDefinitionParser.StepDependency> dependents =
+                graph.successorsOf(completedStep.getActionId());
 
-        if (completedStepMetadata == null || completedStepMetadata.relatedSteps().isEmpty()) {
+        if (dependents.isEmpty()) {
             return;
         }
 
-        for (PlanDefinitionParser.RelatedStepInfo relatedStep : completedStepMetadata.relatedSteps()) {
+        // Mutable: steps created below are appended, so a dependent processed later in this same
+        // pass sees a step created earlier here as an in-flight prerequisite. Without that, a
+        // step depending on both this completion and on one of its other dependents (a diamond)
+        // would be created immediately instead of waiting.
+        List<StepInstance> siblings = new ArrayList<>(stepInstanceRepository
+                .findByProtocolInstanceId(protocolInstance.getId()));
+
+        for (PlanDefinitionParser.StepDependency dependent : dependents) {
+            PlanDefinitionParser.StepMetadata targetStep = dependent.step();
+            PlanDefinitionParser.RelatedStepInfo edge = dependent.edge();
+
             // Dedup guard: skip if an instance for this step already exists.
             // A target may already exist because it was created reactively by its own
             // trigger (createInitialStep) before its predecessor completed, or because a
@@ -348,29 +368,13 @@ public class StepInstanceService {
             // instantiation would create a duplicate step that later goes overdue/missed and
             // raises a spurious deviation.
             if (stepInstanceRepository.existsByProtocolInstanceIdAndActionId(
-                    protocolInstance.getId(), relatedStep.actionId())) {
+                    protocolInstance.getId(), targetStep.id())) {
                 log.debug("Skipping progressive instantiation of {} — an instance for this step already exists (instanceId={})",
-                        relatedStep.actionId(), protocolInstance.getId());
+                        targetStep.id(), protocolInstance.getId());
                 continue;
             }
 
-            // after-start: offset from when predecessor became active (dueDate)
-            // after-end (default): offset from when predecessor completed (completedAt)
-            OffsetDateTime baseTime = "after-start".equals(relatedStep.relationship())
-                    ? completedStep.getDueDate()
-                    : completedStep.getCompletedAt();
-            if (baseTime == null) {
-                baseTime = completedStep.getCompletedAt();
-            }
-            OffsetDateTime dueDate = calculateDueDate(baseTime, relatedStep);
-
-            // Find the target step's timing for overdue/missed dates
-            PlanDefinitionParser.StepMetadata targetStep = steps.stream()
-                    .filter(s -> relatedStep.actionId().equals(s.id()))
-                    .findFirst()
-                    .orElse(null);
-
-            String requiredBehavior = targetStep != null ? targetStep.requiredBehavior() : null;
+            String requiredBehavior = targetStep.requiredBehavior();
 
             // Only pre-create PENDING instances for mandatory (must) steps. Optional steps
             // (could / unspecified) are not instantiated on predecessor completion:
@@ -381,15 +385,37 @@ public class StepInstanceService {
             if (!"must".equals(requiredBehavior)) {
                 log.debug("Skipping progressive instantiation of non-mandatory step {} "
                                 + "(requiredBehavior={}, instanceId={})",
-                        relatedStep.actionId(), requiredBehavior, protocolInstance.getId());
+                        targetStep.id(), requiredBehavior, protocolInstance.getId());
                 continue;
             }
+
+            // Fan-in: a step may declare several prerequisites. Wait while any of the others is
+            // still in flight, so the due date anchors to the last prerequisite to finish rather
+            // than whichever happened to complete first — each of their completions re-runs this
+            // method, so the wait resolves itself.
+            String blockingPrerequisite = firstInFlightPrerequisite(
+                    graph.predecessorsOf(targetStep.id()), completedStep.getActionId(), siblings);
+            if (blockingPrerequisite != null) {
+                log.debug("Deferring progressive instantiation of {} — prerequisite {} is still in flight (instanceId={})",
+                        targetStep.id(), blockingPrerequisite, protocolInstance.getId());
+                continue;
+            }
+
+            // after-start: offset from when the prerequisite became active (dueDate)
+            // after-end / after (default): offset from when the prerequisite completed (completedAt)
+            OffsetDateTime baseTime = "after-start".equals(edge.relationship())
+                    ? completedStep.getDueDate()
+                    : completedStep.getCompletedAt();
+            if (baseTime == null) {
+                baseTime = completedStep.getCompletedAt();
+            }
+            OffsetDateTime dueDate = calculateDueDate(baseTime, edge);
 
             // Create step instances — if timing specifies recurring, create N instances
             int repeatCount = 1;
             java.math.BigDecimal repeatPeriod = null;
             String repeatPeriodUnit = null;
-            if (targetStep != null && targetStep.timing() != null) {
+            if (targetStep.timing() != null) {
                 PlanDefinitionParser.TimingInfo timing = targetStep.timing();
                 if (timing.count() != null && timing.count() > 1) {
                     repeatCount = timing.count();
@@ -406,20 +432,45 @@ public class StepInstanceService {
 
                 OffsetDateTime instanceOverdueDate = null;
                 OffsetDateTime instanceMissedDate = null;
-                if (targetStep != null && targetStep.toleranceDays() != null) {
+                if (targetStep.toleranceDays() != null) {
                     instanceOverdueDate = instanceDueDate.plusDays(targetStep.toleranceDays());
                     instanceMissedDate = instanceOverdueDate.plusDays(targetStep.toleranceDays());
                 }
 
-                createStep(protocolInstance, relatedStep.actionId(),
+                siblings.add(createStep(protocolInstance, targetStep.id(),
                         i, instanceDueDate, instanceOverdueDate, instanceMissedDate,
-                        requiredBehavior);
+                        requiredBehavior));
 
                 log.info("Progressive instantiation: created step {} (repeat {}/{}) due at {} (triggered by {}, relationship={})",
-                        relatedStep.actionId(), i, repeatCount, instanceDueDate,
-                        completedStep.getActionId(), relatedStep.relationship());
+                        targetStep.id(), i, repeatCount, instanceDueDate,
+                        completedStep.getActionId(), edge.relationship());
             }
         }
+    }
+
+    /**
+     * The first prerequisite of {@code targetStep}, other than the one that just completed, that
+     * still has an actionable (in-flight) step instance — or null when none does.
+     *
+     * <p>A prerequisite with no instance at all does not block: it may never be recorded, and
+     * waiting on it would strand the dependent step forever. Neither does a terminal one
+     * (COMPLETED / MISSED / SKIPPED), which will never complete later than now.
+     */
+    private String firstInFlightPrerequisite(List<String> prerequisiteIds,
+                                             String completedActionId,
+                                             List<StepInstance> siblings) {
+        for (String prerequisiteId : prerequisiteIds) {
+            if (prerequisiteId.equals(completedActionId)) {
+                continue;
+            }
+            boolean inFlight = siblings.stream()
+                    .filter(s -> prerequisiteId.equals(s.getActionId()))
+                    .anyMatch(s -> ACTIONABLE_STATES.contains(s.getState()));
+            if (inFlight) {
+                return prerequisiteId;
+            }
+        }
+        return null;
     }
 
     /**
@@ -427,17 +478,16 @@ public class StepInstanceService {
      * Only skips steps that are direct ancestors (predecessors in the dependency graph)
      * of the completed step AND have requiredBehavior=could AND are still actionable.
      *
-     * A predecessor of step X is any step whose relatedSteps list contains X
-     * (i.e., completing that step would create X). This is computed transitively
+     * A predecessor of step X is any step X is meant to happen after, computed transitively
      * to cover the full ancestor chain.
      */
     private void autoSkipPrecedingOptionalSteps(StepInstance completedStep,
-                                                List<PlanDefinitionParser.StepMetadata> steps) {
+                                                PlanDefinitionParser.DependencyGraph graph) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
         // Compute all ancestor step ids of the completed step (transitive predecessors)
         Set<String> ancestorStepIds = PlanDefinitionParser.computeAncestors(
-                completedStep.getActionId(), steps);
+                completedStep.getActionId(), graph);
 
         if (ancestorStepIds.isEmpty()) {
             return;
@@ -492,7 +542,8 @@ public class StepInstanceService {
      * left alone.
      */
     private void backfillMissingMandatorySteps(StepInstance completedStep,
-                                               List<PlanDefinitionParser.StepMetadata> steps) {
+                                               List<PlanDefinitionParser.StepMetadata> steps,
+                                               PlanDefinitionParser.DependencyGraph graph) {
         ProtocolInstance protocolInstance = completedStep.getProtocolInstance();
 
         Set<String> observedStepIds = stepInstanceRepository
@@ -501,7 +552,7 @@ public class StepInstanceService {
                 .collect(Collectors.toSet());
 
         List<String> missingMustSteps = PlanDefinitionParser
-                .computeMustPredecessorSteps(observedStepIds, steps).stream()
+                .computeMustPredecessorSteps(observedStepIds, steps, graph).stream()
                 .filter(stepId -> !observedStepIds.contains(stepId))
                 .sorted()
                 .toList();

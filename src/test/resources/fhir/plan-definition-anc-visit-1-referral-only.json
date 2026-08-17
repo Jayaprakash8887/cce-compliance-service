@@ -91,18 +91,6 @@
           "periodUnit": "d"
         }
       },
-      "relatedAction": [
-        {
-          "actionId": "anc1-referral-consultation",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "code": "d",
-            "unit": "d",
-            "value": 30,
-            "system": "http://unitsofmeasure.org"
-          }
-        }
-      ],
       "requiredBehavior": "must"
     },
     {
@@ -194,8 +182,14 @@
       },
       "relatedAction": [
         {
-          "actionId": "anc1-referral-closure",
-          "relationship": "after-end"
+          "actionId": "anc1-referral-initiated",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "code": "d",
+            "unit": "d",
+            "value": 30,
+            "system": "http://unitsofmeasure.org"
+          }
         }
       ],
       "requiredBehavior": "must"
@@ -286,6 +280,12 @@
           "periodUnit": "d"
         }
       },
+      "relatedAction": [
+        {
+          "actionId": "anc1-referral-consultation",
+          "relationship": "after-end"
+        }
+      ],
       "requiredBehavior": "must"
     }
   ],

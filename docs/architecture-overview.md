@@ -622,7 +622,7 @@ flowchart LR
         R1["Intelligence Action:<br/>missed-escalation"]
         R2["Intelligence Action:<br/>missed-notification"]
         SUB1["Step: referral<br/>(flattened, own trigger — no implicit link to anc-visit-2)"]
-        SUB2["Step: referral-ack<br/>(flattened, relatedStep→referral — explicit relatedAction)"]
+        SUB2["Step: referral-ack<br/>(flattened, relatedStep names referral as its prerequisite)"]
         R3["Intelligence Action:<br/>referral-escalation"]
 
         PROTO --> S1
@@ -712,11 +712,24 @@ All execution and evaluation context is stored in a single row — no FK constra
 
 Nested `PlanDefinition.action.action[]` entries with type `"step"` are **flattened** into peer-level steps at parse time by `extractSteps()`. There is no parent-child hierarchy in the domain model — all steps (top-level and nested) are stored uniformly in `step_instance` without any `parent_step_id`. Relationships between steps are expressed exclusively via `relatedSteps` (derived from FHIR `relatedAction`).
 
+**Direction of `relatedAction`:** it is a **relative** pointer — `relationship` describes the *declaring* action's relationship to the referenced one, so which of the two comes first depends on the family (`PlanDefinitionParser.classifyRelationship`):
+
+| Family | Example | Reads as | Prerequisite |
+|---|---|---|---|
+| `after`, `after-start`, `after-end`, *absent* | `{"id": "lab-results", "relatedAction": [{"actionId": "lab-order", "relationship": "after-end", "offsetDuration": "3d"}]}` | lab-results happens 3 days after lab-order ends | the **referenced** action (`lab-order`) |
+| `before`, `before-start`, `before-end` | `{"id": "visit-encounter", "relatedAction": [{"actionId": "vitals-recording", "relationship": "before"}]}` | visit-encounter happens before vitals-recording | the **declaring** action (`visit-encounter`) |
+| `concurrent*` | — | the two happen together | none — **no ordering** |
+
+Both ordering families are normalized into one directed graph by `PlanDefinitionParser.buildDependencyGraph()`, which exposes it in both directions (`successorsOf` for progressive instantiation, which works forward from a completed step; `predecessorsOf` for order checks and ancestor walks). Every normalized edge is expressed the `after-*` way round, so consumers handle only one form. `before-*` carries no start/end distinction that survives the flip — there is no "before the prerequisite started" — so it normalizes to `after-end`: the dependent is scheduled from the prerequisite's completion, offset by the same duration.
+
+`concurrent*` edges and edges naming an action the definition does not declare establish nothing. Both are inert, so `ProtocolDefinitionService.loadProtocol` logs a warning naming them (`findUnorderedRelationships` / `findDanglingRelatedActions`) — an author who expected one to sequence steps gets told, instead of silently getting a disconnected graph.
+
 **Key design decisions:**
 - `StepMetadata` is a flat record with 9 fields (no `subSteps` list): `id`, `title`, `triggers`, `relatedSteps`, `timing`, `toleranceDays`, `requiredBehavior`, `intelligenceActions`, `parentActionId`
-- Nesting is **organizational only** — it groups a sub-step under its enclosing action but does **not** create an implicit `relatedStep`/dependency link. Ordering between a parent and its sub-steps (and among sub-steps) must be expressed explicitly via `relatedAction`. A sub-step with no explicit predecessor is created independently whenever its own trigger fires (`ComplianceEngine.createInitialStep`), exactly like a top-level step — it does not wait for its parent to complete. (An earlier version of the parser auto-added a backward `relatedStep` from child to parent; see the comment in `PlanDefinitionParser.flattenAction` — it was removed because under the forward progressive-instantiation model it meant "completing the child re-creates the parent," spawning duplicate parent steps.)
+- Nesting is **organizational only** — it groups a sub-step under its enclosing action but does **not** create an implicit `relatedStep`/dependency link. Ordering between a parent and its sub-steps (and among sub-steps) must be expressed explicitly via `relatedAction`. A sub-step with no explicit prerequisite is created independently whenever its own trigger fires (`ComplianceEngine.createInitialStep`), exactly like a top-level step — it does not wait for its parent to complete. (An earlier version of the parser auto-added a `relatedStep` from child to parent; see the comment in `PlanDefinitionParser.flattenAction`. Under the corrected reading such a link would be harmless — it would simply mean "the child comes after the parent ends" — but it is still not added: whether a sub-step waits on its parent is the protocol author's clinical decision.)
 - `parentActionId` records nesting-group membership but is currently **unused** by any code path — it backed the "group sibling" check in the automatic protocol-completion logic (§6.2), which has been removed pending finalized completion criteria. It is not used to create step dependencies or `relatedAction` links.
-- Sub-steps with `relatedAction` pointing to siblings are flattened as-is and created progressively via standard `createDependentSteps()` logic
+- A sub-step whose `relatedAction` names a sibling as its prerequisite is flattened as-is and created progressively via standard `createDependentSteps()` logic
+- **Fan-in** — a step may declare several prerequisites. It is instantiated only once none of the others is still in flight (`PENDING`/`DUE`), so its due date anchors to the last prerequisite to finish rather than whichever completed first. A prerequisite with no `step_instance` row at all does not block, since waiting on work that may never be recorded would strand the dependent step permanently.
 - All trigger indexing uses the step's **plain action ID** (e.g., `"anc-visit-1-referral"`)
 - Intelligence actions are found via flat lookup by `actionId` (no tree traversal needed)
 
@@ -752,13 +765,13 @@ Given this PlanDefinition structure:
     {
       "id": "anc-visit-1-referral",
       "type": { "coding": [{ "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }] },
-      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }],
-      "relatedAction": [{ "actionId": "anc-visit-1-referral-ack", "relationship": "after-end" }]
+      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }]
     },
     {
       "id": "anc-visit-1-referral-ack",
       "type": { "coding": [{ "system": "http://openphc.org/fhir/CodeSystem/action-type", "code": "step" }] },
-      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }]
+      "trigger": [{ "data": [{ "type": "ServiceRequest", "codeFilter": ["..."] }] }],
+      "relatedAction": [{ "actionId": "anc-visit-1-referral", "relationship": "after-end" }]
     },
     {
       "id": "anc-visit-1-escalation",
@@ -772,8 +785,8 @@ Given this PlanDefinition structure:
 
 `extractSteps()` produces 3 flat `StepMetadata` entries:
 1. `anc-visit-1` — top-level step with its trigger; `parentActionId: null`
-2. `anc-visit-1-referral` — flattened with `relatedSteps: [{actionId: "anc-visit-1-referral-ack", relationship: "after-end"}]` (its own explicit `relatedAction`) and `parentActionId: "anc-visit-1"` (nesting-group membership only — no implicit link to the parent). It has its own trigger (`ServiceRequest`), so it is created independently whenever that trigger fires rather than waiting for `anc-visit-1` to complete.
-3. `anc-visit-1-referral-ack` — flattened with no `relatedSteps` of its own and `parentActionId: "anc-visit-1"`; created progressively when `anc-visit-1-referral` completes (via its predecessor's `relatedAction`)
+2. `anc-visit-1-referral` — flattened with no `relatedSteps` of its own and `parentActionId: "anc-visit-1"` (nesting-group membership only — no implicit dependency on the parent). It has its own trigger (`ServiceRequest`), so it is created independently whenever that trigger fires rather than waiting for `anc-visit-1` to complete.
+3. `anc-visit-1-referral-ack` — flattened with `relatedSteps: [{actionId: "anc-visit-1-referral", relationship: "after-end"}]` (its own explicit `relatedAction`, naming its prerequisite) and `parentActionId: "anc-visit-1"`; created progressively when `anc-visit-1-referral` completes
 
 The intelligence action (`anc-visit-1-escalation`) is extracted into `anc-visit-1`'s `intelligenceActions` list.
 
@@ -787,12 +800,12 @@ sequenceDiagram
 
     Note over Engine: Event matches "anc-visit-1" → step created & completed (own trigger)
     Engine->>SIS: completeStep(anc-visit-1)
-    Note over SIS: createDependentSteps() — anc-visit-1 has no relatedSteps of its own, nothing created
+    Note over SIS: createDependentSteps() — no step declares anc-visit-1 as its prerequisite, nothing created
 
     Note over Engine: Later, independently — a ServiceRequest event matches<br/>"anc-visit-1-referral"'s own trigger
     Engine->>Engine: createInitialStep(anc-visit-1-referral)<br/>(no dependency on anc-visit-1 — nesting is organizational only)
     Engine->>SIS: completeStep(anc-visit-1-referral)
-    SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral-ack"<br/>(has relatedStep to anc-visit-1-referral, relationship after-end)
+    SIS->>SIS: createDependentSteps() — finds "anc-visit-1-referral-ack"<br/>(its relatedAction names anc-visit-1-referral, relationship after-end)
     SIS->>DB: Create anc-visit-1-referral-ack (PENDING)
 
     Note over Engine: Later — event matches "anc-visit-1-referral-ack" → completed

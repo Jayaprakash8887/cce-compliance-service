@@ -48,18 +48,6 @@
           }
         }
       ],
-      "relatedAction": [
-        {
-          "actionId": "blood-pressure-check",
-          "relationship": "after-end",
-          "offsetDuration": {
-            "value": 7,
-            "unit": "d",
-            "system": "http://unitsofmeasure.org",
-            "code": "d"
-          }
-        }
-      ],
       "timingTiming": {
         "repeat": {
           "count": 1,
@@ -105,10 +93,10 @@
       ],
       "relatedAction": [
         {
-          "actionId": "lab-work",
+          "actionId": "initial-enrollment",
           "relationship": "after-end",
           "offsetDuration": {
-            "value": 14,
+            "value": 7,
             "unit": "d",
             "system": "http://unitsofmeasure.org",
             "code": "d"
@@ -171,6 +159,18 @@
               ]
             }
           ]
+        }
+      ],
+      "relatedAction": [
+        {
+          "actionId": "blood-pressure-check",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 14,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
         }
       ],
       "type": {

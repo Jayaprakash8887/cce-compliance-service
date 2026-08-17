@@ -25,18 +25,6 @@
         }
       ],
       "requiredBehavior": "must",
-      "relatedAction": [
-        {
-          "actionId": "vitals-recording",
-          "relationship": "after-start",
-          "offsetDuration": {
-            "value": 0,
-            "unit": "d",
-            "system": "http://unitsofmeasure.org",
-            "code": "d"
-          }
-        }
-      ],
       "timingTiming": {
         "repeat": {
           "count": 1,
@@ -84,8 +72,8 @@
       "requiredBehavior": "must",
       "relatedAction": [
         {
-          "actionId": "chief-complaints",
-          "relationship": "after-end",
+          "actionId": "visit-encounter",
+          "relationship": "after-start",
           "offsetDuration": {
             "value": 0,
             "unit": "d",
@@ -147,7 +135,7 @@
       "requiredBehavior": "must",
       "relatedAction": [
         {
-          "actionId": "history-assessment",
+          "actionId": "vitals-recording",
           "relationship": "after-end",
           "offsetDuration": {
             "value": 0,
@@ -210,7 +198,7 @@
       "requiredBehavior": "could",
       "relatedAction": [
         {
-          "actionId": "lab-order",
+          "actionId": "chief-complaints",
           "relationship": "after-end",
           "offsetDuration": {
             "value": 0,
@@ -261,10 +249,10 @@
       "requiredBehavior": "must",
       "relatedAction": [
         {
-          "actionId": "lab-results",
+          "actionId": "history-assessment",
           "relationship": "after-end",
           "offsetDuration": {
-            "value": 3,
+            "value": 0,
             "unit": "d",
             "system": "http://unitsofmeasure.org",
             "code": "d"
@@ -324,10 +312,10 @@
       "requiredBehavior": "must",
       "relatedAction": [
         {
-          "actionId": "diagnosis",
+          "actionId": "lab-order",
           "relationship": "after-end",
           "offsetDuration": {
-            "value": 1,
+            "value": 3,
             "unit": "d",
             "system": "http://unitsofmeasure.org",
             "code": "d"
@@ -386,10 +374,10 @@
       "requiredBehavior": "must",
       "relatedAction": [
         {
-          "actionId": "treatment",
+          "actionId": "lab-results",
           "relationship": "after-end",
           "offsetDuration": {
-            "value": 0,
+            "value": 1,
             "unit": "d",
             "system": "http://unitsofmeasure.org",
             "code": "d"
@@ -435,6 +423,18 @@
         }
       ],
       "requiredBehavior": "must",
+      "relatedAction": [
+        {
+          "actionId": "diagnosis",
+          "relationship": "after-end",
+          "offsetDuration": {
+            "value": 0,
+            "unit": "d",
+            "system": "http://unitsofmeasure.org",
+            "code": "d"
+          }
+        }
+      ],
       "timingTiming": {
         "repeat": {
           "count": 1,
