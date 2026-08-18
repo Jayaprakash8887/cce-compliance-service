@@ -22,7 +22,9 @@ public class IntelligenceEventLogDto {
     private String subject;
     private String actionType;
     private String intelligenceDestination;
-    private String stepState;
+    private String stepStatus;
+
+    private String slaStatus;
     private String triggerReason;
     private String stepActionId;
     private String evaluationExpression;

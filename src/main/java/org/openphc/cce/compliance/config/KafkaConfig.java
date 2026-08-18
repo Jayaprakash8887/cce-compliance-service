@@ -1,5 +1,6 @@
 package org.openphc.cce.compliance.config;
 
+import org.openphc.cce.common.kafka.KafkaTopicProperties;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.TopicPartition;
@@ -31,48 +32,16 @@ public class KafkaConfig {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaConfig.class);
 
-    @Bean
-    public ConsumerFactory<String, Object> consumerFactory(KafkaProperties kafkaProperties) {
-        Map<String, Object> props = new HashMap<>(kafkaProperties.buildConsumerProperties(null));
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, ErrorHandlingDeserializer.class);
-        props.put(ErrorHandlingDeserializer.KEY_DESERIALIZER_CLASS, StringDeserializer.class);
-        props.put(ErrorHandlingDeserializer.VALUE_DESERIALIZER_CLASS, JsonDeserializer.class);
-        props.put(JsonDeserializer.TRUSTED_PACKAGES, "org.openphc.cce.compliance.kafka.model");
-        props.put(JsonDeserializer.USE_TYPE_INFO_HEADERS, false);
-        props.put(JsonDeserializer.VALUE_DEFAULT_TYPE, "org.openphc.cce.compliance.kafka.model.CloudEventMessage");
-        return new DefaultKafkaConsumerFactory<>(props);
-    }
 
-    @Bean
-    public ConcurrentKafkaListenerContainerFactory<String, Object> kafkaListenerContainerFactory(
-            ConsumerFactory<String, Object> consumerFactory,
-            CommonErrorHandler errorHandler,
-            KafkaProperties kafkaProperties) {
-        ConcurrentKafkaListenerContainerFactory<String, Object> factory =
-                new ConcurrentKafkaListenerContainerFactory<>();
-        factory.setConsumerFactory(consumerFactory);
-        factory.setConcurrency(kafkaProperties.getListener().getConcurrency());
-        factory.getContainerProperties().setAckMode(ContainerProperties.AckMode.RECORD);
-        factory.setCommonErrorHandler(errorHandler);
-        return factory;
-    }
 
-    @Bean
-    public CommonErrorHandler errorHandler(KafkaTemplate<String, Object> kafkaTemplate,
-                                           KafkaRetryProperties retryProperties) {
-        DeadLetterPublishingRecoverer recoverer = new DeadLetterPublishingRecoverer(kafkaTemplate,
-                (record, ex) -> {
-                    String dlqTopic = record.topic() + ".dlq";
-                    log.error("Sending record to DLQ: topic={}, key={}, offset={}",
-                            dlqTopic, record.key(), record.offset(), ex);
-                    return new TopicPartition(dlqTopic, -1);
-                });
-
-        DefaultErrorHandler errorHandler = new DefaultErrorHandler(recoverer,
-                new FixedBackOff(retryProperties.getBackoffIntervalMs(), retryProperties.getMaxAttempts()));
-        return errorHandler;
-    }
+    /**
+     * Retry with a fixed backoff, then route to {@code <topic>.dlq}.
+     *
+     * <p>{@link FixedBackOff}'s second argument is a count of <em>retries</em>, not of total
+     * deliveries. {@code cce.kafka.retry.max-attempts} is therefore passed as {@code maxAttempts - 1}
+     * so the property means what its name says: 3 attempts is one delivery plus two retries, not
+     * four deliveries.
+     */
 
     @Bean
     public ProducerFactory<String, Object> producerFactory(KafkaProperties kafkaProperties) {
@@ -90,19 +59,6 @@ public class KafkaConfig {
 
     // ── Topic declarations ──
 
-    @Bean
-    public NewTopic inboundEventsTopic(KafkaTopicProperties topicProperties) {
-        return TopicBuilder.name(topicProperties.getInboundEvents())
-                .partitions(topicProperties.getDefaultPartitions())
-                .build();
-    }
-
-    @Bean
-    public NewTopic schedulerTriggersTopic(KafkaTopicProperties topicProperties) {
-        return TopicBuilder.name(topicProperties.getSchedulerTriggers())
-                .partitions(topicProperties.getDefaultPartitions())
-                .build();
-    }
 
     @Bean
     public NewTopic intelligenceTriggersTopic(KafkaTopicProperties topicProperties) {
@@ -111,17 +67,4 @@ public class KafkaConfig {
                 .build();
     }
 
-    @Bean
-    public NewTopic inboundEventsDlqTopic(KafkaTopicProperties topicProperties) {
-        return TopicBuilder.name(topicProperties.getInboundEvents() + ".dlq")
-                .partitions(topicProperties.getDefaultPartitions())
-                .build();
-    }
-
-    @Bean
-    public NewTopic schedulerTriggersDlqTopic(KafkaTopicProperties topicProperties) {
-        return TopicBuilder.name(topicProperties.getSchedulerTriggers() + ".dlq")
-                .partitions(topicProperties.getDefaultPartitions())
-                .build();
-    }
 }

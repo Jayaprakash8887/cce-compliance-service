@@ -6,7 +6,7 @@ plugins {
 }
 
 group = 'org.openphc.cce'
-version = '1.0.0'
+version = '2.0.0'
 
 java {
     toolchain {
@@ -30,10 +30,14 @@ ext {
 }
 
 dependencies {
-    // Spring Boot starters
+    // Shared vocabulary, Kafka contracts and FHIR parsing/evaluation.
+    implementation 'org.openphc.cce:cce-common-util'
+
+    // Spring Boot starters.
+    // starter-web serves the intelligence-event read endpoint plus actuator's /actuator/health
+    // (container HEALTHCHECK and Kubernetes probes) and /actuator/prometheus.
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-    implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.kafka:spring-kafka'
 
@@ -45,8 +49,10 @@ dependencies {
     // FHIR
     implementation "ca.uhn.hapi.fhir:hapi-fhir-base:${hapiVersion}"
     implementation "ca.uhn.hapi.fhir:hapi-fhir-structures-r4:${hapiVersion}"
+    // Neither of the next two is referenced from source, but both are required at runtime — do not
+    // remove as "unused". FhirContext needs a hapi-fhir-caching-* module for its internal caches,
+    // and HAPI's FHIRPath engine loads org.fhir.ucum classes eagerly (NoClassDefFoundError without).
     implementation "ca.uhn.hapi.fhir:hapi-fhir-caching-caffeine:${hapiVersion}"
-    implementation "ca.uhn.hapi.fhir:hapi-fhir-validation-resources-r4:${hapiVersion}"
     implementation 'org.fhir:ucum:1.0.8'
 
     // Expression evaluation
@@ -66,43 +72,7 @@ dependencies {
     testImplementation 'org.springframework.kafka:spring-kafka-test'
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
-}
 
-// ==============================================================================
-// Integration Test Source Set
-// ==============================================================================
-sourceSets {
-    integrationTest {
-        java.srcDir 'src/integrationTest/java'
-        resources.srcDir 'src/integrationTest/resources'
-        compileClasspath += sourceSets.main.output + sourceSets.test.output
-        runtimeClasspath += sourceSets.main.output + sourceSets.test.output
-    }
-}
-
-tasks.named('processIntegrationTestResources') {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-}
-
-configurations {
-    integrationTestImplementation.extendsFrom testImplementation
-    integrationTestRuntimeOnly.extendsFrom testRuntimeOnly
-    integrationTestCompileOnly.extendsFrom testCompileOnly
-    integrationTestAnnotationProcessor.extendsFrom testAnnotationProcessor
-}
-
-dependencies {
-    integrationTestRuntimeOnly 'com.h2database:h2'
-    integrationTestImplementation 'org.awaitility:awaitility:4.2.2'
-}
-
-tasks.register('integrationTest', Test) {
-    description = 'Runs integration tests with EmbeddedKafka and H2.'
-    group = 'verification'
-    testClassesDirs = sourceSets.integrationTest.output.classesDirs
-    classpath = sourceSets.integrationTest.runtimeClasspath
-    useJUnitPlatform()
-    shouldRunAfter tasks.named('test')
 }
 
 tasks.named('test') {
@@ -115,4 +85,26 @@ jacocoTestReport {
         xml.required = true
         html.required = true
     }
+}
+
+// Enforced at 98%: the only uncovered code is the application's main() bootstrap, which is excluded
+// below. Raise nothing here without adding the tests first — the ratchet is the point.
+jacocoTestCoverageVerification {
+    dependsOn jacocoTestReport
+    violationRules {
+        rule {
+            // Spring Boot's entry point: covering it means starting the whole context, which the
+            // integration suite does far better than a unit test asserting main() ran.
+            excludes = ['org.openphc.cce.compliance.ComplianceServiceApplication']
+            limit {
+                counter = 'INSTRUCTION'
+                value = 'COVEREDRATIO'
+                minimum = 0.98
+            }
+        }
+    }
+}
+
+tasks.named('check') {
+    dependsOn tasks.named('jacocoTestCoverageVerification')
 }

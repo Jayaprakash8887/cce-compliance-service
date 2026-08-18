@@ -1,6 +1,6 @@
 package org.openphc.cce.compliance.web.controller;
 
-import org.openphc.cce.compliance.domain.entity.IntelligenceEventLog;
+import org.openphc.cce.common.entity.IntelligenceEventLog;
 import org.openphc.cce.compliance.service.IntelligenceEventLogService;
 import org.openphc.cce.compliance.web.DtoMapper;
 import org.openphc.cce.compliance.web.dto.IntelligenceEventLogDto;

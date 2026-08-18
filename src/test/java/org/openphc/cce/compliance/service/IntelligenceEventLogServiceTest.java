@@ -1,13 +1,13 @@
 package org.openphc.cce.compliance.service;
 
 import jakarta.persistence.EntityNotFoundException;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.openphc.cce.compliance.domain.entity.IntelligenceEventLog;
-import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
+import org.openphc.cce.common.entity.IntelligenceEventLog;
+import org.openphc.cce.common.repository.IntelligenceEventLogRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -18,39 +18,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.*;
 
-/**
- * Unit tests for {@link IntelligenceEventLogService}, a read-only query facade over
- * {@link IntelligenceEventLogRepository}. Verifies each accessor delegates to the repository and
- * that {@code findById} surfaces a not-found as {@link EntityNotFoundException}.
- */
 @ExtendWith(MockitoExtension.class)
 class IntelligenceEventLogServiceTest {
 
-    @Mock
-    private IntelligenceEventLogRepository repository;
-
-    private IntelligenceEventLogService service;
+    @Mock private IntelligenceEventLogRepository repository;
+    @InjectMocks private IntelligenceEventLogService service;
 
     private final Pageable pageable = PageRequest.of(0, 20);
 
-    @BeforeEach
-    void setUp() {
-        service = new IntelligenceEventLogService(repository);
+    private IntelligenceEventLog log(UUID id) {
+        return IntelligenceEventLog.builder().id(id).subject("patient-1").build();
     }
 
     @Test
-    void findById_whenPresent_returnsEntity() {
+    void findById_returnsTheEvent() {
         UUID id = UUID.randomUUID();
-        IntelligenceEventLog log = new IntelligenceEventLog();
-        when(repository.findById(id)).thenReturn(Optional.of(log));
+        when(repository.findById(id)).thenReturn(Optional.of(log(id)));
 
-        assertSame(log, service.findById(id));
+        assertEquals(id, service.findById(id).getId());
     }
 
     @Test
-    void findById_whenMissing_throwsEntityNotFound() {
+    void findById_missing_throwsEntityNotFoundNamingTheId() {
         UUID id = UUID.randomUUID();
         when(repository.findById(id)).thenReturn(Optional.empty());
 
@@ -59,70 +50,44 @@ class IntelligenceEventLogServiceTest {
     }
 
     @Test
-    void findAll_delegatesToRepository() {
-        List<IntelligenceEventLog> logs = List.of(new IntelligenceEventLog());
-        when(repository.findAll()).thenReturn(logs);
+    void findAll_bothForms() {
+        when(repository.findAll()).thenReturn(List.of(log(UUID.randomUUID())));
+        when(repository.findAll(pageable)).thenReturn(new PageImpl<>(List.of(log(UUID.randomUUID()))));
 
-        assertSame(logs, service.findAll());
+        assertEquals(1, service.findAll().size());
+        assertEquals(1, service.findAll(pageable).getTotalElements());
     }
 
     @Test
-    void findAllPaged_delegatesToRepository() {
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(new IntelligenceEventLog()));
-        when(repository.findAll(pageable)).thenReturn(page);
+    void findByProtocolInstanceId_bothForms() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByProtocolInstanceId(id)).thenReturn(List.of(log(UUID.randomUUID())));
+        when(repository.findByProtocolInstanceId(id, pageable))
+                .thenReturn(new PageImpl<>(List.of(log(UUID.randomUUID()))));
 
-        assertSame(page, service.findAll(pageable));
+        assertEquals(1, service.findByProtocolInstanceId(id).size());
+        assertEquals(1, service.findByProtocolInstanceId(id, pageable).getTotalElements());
     }
 
     @Test
-    void findByProtocolInstanceId_delegatesToRepository() {
-        UUID pid = UUID.randomUUID();
-        List<IntelligenceEventLog> logs = List.of(new IntelligenceEventLog());
-        when(repository.findByProtocolInstanceId(pid)).thenReturn(logs);
+    void findByActionDefinitionId_bothForms() {
+        UUID id = UUID.randomUUID();
+        when(repository.findByActionDefinitionId(id)).thenReturn(List.of(log(UUID.randomUUID())));
+        when(repository.findByActionDefinitionId(id, pageable))
+                .thenReturn(new PageImpl<>(List.of(log(UUID.randomUUID()))));
 
-        assertSame(logs, service.findByProtocolInstanceId(pid));
+        assertEquals(1, service.findByActionDefinitionId(id).size());
+        assertEquals(1, service.findByActionDefinitionId(id, pageable).getTotalElements());
     }
 
     @Test
-    void findByProtocolInstanceIdPaged_delegatesToRepository() {
-        UUID pid = UUID.randomUUID();
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(new IntelligenceEventLog()));
-        when(repository.findByProtocolInstanceId(pid, pageable)).thenReturn(page);
+    void findByPublished_bothForms() {
+        when(repository.findByPublished(false)).thenReturn(List.of(log(UUID.randomUUID())));
+        when(repository.findByPublished(false, pageable))
+                .thenReturn(new PageImpl<>(List.of(log(UUID.randomUUID()))));
 
-        assertSame(page, service.findByProtocolInstanceId(pid, pageable));
-    }
-
-    @Test
-    void findByActionDefinitionId_delegatesToRepository() {
-        UUID aid = UUID.randomUUID();
-        List<IntelligenceEventLog> logs = List.of(new IntelligenceEventLog());
-        when(repository.findByActionDefinitionId(aid)).thenReturn(logs);
-
-        assertSame(logs, service.findByActionDefinitionId(aid));
-    }
-
-    @Test
-    void findByActionDefinitionIdPaged_delegatesToRepository() {
-        UUID aid = UUID.randomUUID();
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(new IntelligenceEventLog()));
-        when(repository.findByActionDefinitionId(aid, pageable)).thenReturn(page);
-
-        assertSame(page, service.findByActionDefinitionId(aid, pageable));
-    }
-
-    @Test
-    void findByPublished_delegatesToRepository() {
-        List<IntelligenceEventLog> logs = List.of(new IntelligenceEventLog());
-        when(repository.findByPublished(true)).thenReturn(logs);
-
-        assertSame(logs, service.findByPublished(true));
-    }
-
-    @Test
-    void findByPublishedPaged_delegatesToRepository() {
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(new IntelligenceEventLog()));
-        when(repository.findByPublished(false, pageable)).thenReturn(page);
-
-        assertSame(page, service.findByPublished(false, pageable));
+        assertEquals(1, service.findByPublished(false).size());
+        Page<IntelligenceEventLog> page = service.findByPublished(false, pageable);
+        assertEquals(1, page.getTotalElements());
     }
 }

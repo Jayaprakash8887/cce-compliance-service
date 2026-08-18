@@ -1,452 +1,155 @@
-# Deployment Guide
+# Deployment Guide — Compliance Service
 
-> **CCE Compliance Service** — Production deployment reference  
-> **Version:** 1.0.0 | **Java:** 21 LTS | **Spring Boot:** 3.4.2
+Deploy **last**. This service creates no tables and validates its JPA mapping at startup, so it will
+fail fast against a `ccedb` the other two services have not yet migrated. Ordering rationale:
+[Architecture Overview §6](../../cce-common-util/docs/architecture-overview.md#6-deployment-order).
 
----
+## Requirements
 
-## Table of Contents
+| Component | Requirement |
+|---|---|
+| JRE | 21 |
+| PostgreSQL | 16, database `ccedb` — schema already applied by the Protocol and Matcher services |
+| Kafka | producer only — `cce.intelligence.triggers` must exist or be auto-creatable |
+| Memory | 1 GB heap is comfortable |
 
-1. [Infrastructure Requirements](#1-infrastructure-requirements)
-2. [Environment Variables](#2-environment-variables)
-3. [Docker Deployment](#3-docker-deployment)
-4. [Kubernetes Deployment](#4-kubernetes-deployment)
-5. [Database Setup](#5-database-setup)
-6. [Kafka Setup](#6-kafka-setup)
-7. [JVM Tuning](#7-jvm-tuning)
-8. [Health Checks & Monitoring](#8-health-checks--monitoring)
-9. [Backup & Recovery](#9-backup--recovery)
-10. [Troubleshooting](#10-troubleshooting)
+The database user needs **no DDL rights**. If it has them, that is a wider grant than this service
+requires.
 
----
+## Environment variables
 
-## 1. Infrastructure Requirements
+Full list with defaults: [Developer Setup](developer-setup.md#configuration). The ones that matter in
+production:
 
-| Component | Version | Purpose | Notes |
-|---|---|---|---|
-| **Java JDK** | 21 LTS | Runtime | Eclipse Temurin recommended |
-| **PostgreSQL** | 16+ | Primary database | JSONB support required |
-| **Apache Kafka** | 3.x | Message broker | KRaft mode (no Zookeeper) |
-| **Docker** | 24+ | Container runtime | Optional if running natively |
-
-### Resource Recommendations (Production)
-
-| Resource | Minimum | Recommended |
+| Variable | Default | Notes |
 |---|---|---|
-| CPU | 2 cores | 4 cores |
-| Memory | 1 GB | 2 GB |
-| Disk (app) | 500 MB | 1 GB |
-| Disk (PostgreSQL) | 10 GB | 50 GB+ |
-| Network | 100 Mbps | 1 Gbps |
+| `DB_HOST` / `DB_PORT` | `localhost` / `5432` | |
+| `DB_USERNAME` / `DB_PASSWORD` | `cce_user` / `cce_pass` | never leave at the default |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | |
+| `CCE_SLA_INSTANCE_ID` | `$HOSTNAME` | **set this per replica** — it lands in `processed_by` |
+| `CCE_SLA_POLL_INTERVAL_MS` | `5000` | |
+| `CCE_SLA_BATCH_SIZE` | `100` | |
 
----
+`CCE_SLA_INSTANCE_ID` defaults to `$HOSTNAME`, which is already distinct per pod in Kubernetes. Set it
+explicitly anywhere hostnames are not unique, or `processed_by` stops being able to identify a
+misbehaving replica.
 
-## 2. Environment Variables
+## Docker
 
-All configuration is externalized via environment variables. Defaults are provided for local development.
-
-### Application
-
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `SERVER_PORT` | `8091` | No | HTTP server port. The Docker image's `EXPOSE`/`HEALTHCHECK` are hardcoded to `8080` — set `SERVER_PORT=8080` explicitly for Docker/Kubernetes deployments (see §3–4) |
-| `SPRING_PROFILES_ACTIVE` | — | Yes (prod) | Set to `prod` for production |
-
-### Database
-
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `DB_HOST` | `localhost` | Yes | PostgreSQL host (shared with collector service) |
-| `DB_PORT` | `5432` | No | PostgreSQL port (standard PostgreSQL default in code — set to `5433` when connecting to the shared instance deployed by the collector service) |
-| `DB_NAME` | `ccedb` | No | Shared database name (all CCE services) |
-| `DB_USERNAME` | `cce_user` | Yes | Database username (shared with collector service) |
-| `DB_PASSWORD` | `cce_pass` | Yes | Database password (shared with collector service) |
-| `DB_POOL_SIZE` | `20` (dev) / `30` (prod) | No | HikariCP maximum pool size |
-| `DB_POOL_MIN_IDLE` | `5` (dev) / `10` (prod) | No | HikariCP minimum idle connections |
-| `DB_CONNECTION_TIMEOUT` | `30000` | No | Connection timeout (ms) |
-| `DB_IDLE_TIMEOUT` | `600000` | No | Idle connection timeout (ms) |
-| `DB_MAX_LIFETIME` | `1800000` | No | Max connection lifetime (ms) |
-
-### Kafka
-
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Yes | Kafka bootstrap servers |
-| `KAFKA_CONCURRENCY` | `3` (dev) / `5` (prod) | No | Consumer listener concurrency |
-| `KAFKA_PARTITIONS` | `25` | No | Default partition count for topics |
-| `KAFKA_RETRY_MAX_ATTEMPTS` | `3` (dev) / `5` (prod) | No | Max retry attempts before DLQ |
-| `KAFKA_RETRY_BACKOFF_MS` | `1000` (dev) / `2000` (prod) | No | Backoff interval between retries |
-
-### Intelligence
-
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `CCE_PLAN_DEFINITION_CACHE_SIZE` | `256` | No | Max cached compiled `PlanDefinition`s for intelligence action evaluation |
-
-### Observability
-
-| Variable | Default | Required | Description |
-|---|---|---|---|
-| `TRACING_SAMPLE_RATE` | `1.0` (dev) / `0.1` (prod) | No | Distributed tracing sample rate |
-
----
-
-## 3. Docker Deployment
-
-### Build the Image
+**Build from the workspace directory, not from this repository.** This service depends on
+`cce-common-util` as a Gradle composite build, and Docker's `COPY` cannot reach outside its build
+context:
 
 ```bash
-docker build -t cce-compliance-service:1.0.0 .
+cd ..            # the directory containing cce-compliance-service and cce-common-util
+docker build -f cce-compliance-service/Dockerfile -t cce-compliance-service:2.0.0 .
 ```
 
-### Run with Docker
-
 ```bash
-docker run -d \
-  --name cce-compliance-service \
-  -p 8080:8080 \
-  -e SPRING_PROFILES_ACTIVE=prod \
-  -e SERVER_PORT=8080 \
-  -e DB_HOST=postgres-host \
-  -e DB_PORT=5433 \
-  -e DB_NAME=ccedb \
-  -e DB_USERNAME=cce_user \
-  -e DB_PASSWORD=cce_pass \
+docker run -d --name cce-compliance-service \
+  -p 8092:8080 \
+  -e DB_HOST=postgres-host -e DB_PORT=5433 \
+  -e DB_USERNAME=cce_user -e DB_PASSWORD='<secret>' \
   -e KAFKA_BOOTSTRAP_SERVERS=kafka-host:9092 \
-  cce-compliance-service:1.0.0
+  -e CCE_SLA_INSTANCE_ID=compliance-1 \
+  cce-compliance-service:2.0.0
 ```
 
-### Docker Compose (Local Development)
+The image pins `SERVER_PORT=8080` to match its `EXPOSE` and healthcheck; the application's own default
+outside Docker is `8092`.
 
-PostgreSQL, Kafka, and the shared database are deployed by the **CCE Collector Service**. Start the collector infrastructure, then run the compliance service:
-
-```bash
-# 1. Start shared infrastructure (PostgreSQL on port 5433 + Kafka on port 9092)
-cd /path/to/cce-collector-service
-docker compose up -d
-
-# 2. Run the compliance service (Flyway applies schema migrations automatically)
-cd /path/to/cce-compliance-service
-./gradlew bootRun
-```
-
-The shared infrastructure (from [cce-collector-service deployment guide](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md)) provides:
-- **PostgreSQL 16** on port `5433` (user: `cce_user`, password: `cce_pass`, database: `ccedb`)
-- **Apache Kafka 3.7.0 KRaft** on port `9092` (single broker, no Zookeeper)
-
-> **Note:** All CCE services share the same `ccedb` database. Each service owns its own tables — Flyway migrations are namespaced to avoid conflicts.
-
----
-
-## 4. Kubernetes Deployment
-
-### Example Deployment Manifest
+## Kubernetes
 
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: cce-compliance-service
-  labels:
-    app: cce-compliance-service
 spec:
   replicas: 2
   selector:
-    matchLabels:
-      app: cce-compliance-service
+    matchLabels: { app: cce-compliance-service }
   template:
     metadata:
-      labels:
-        app: cce-compliance-service
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/path: "/actuator/prometheus"
-        prometheus.io/port: "8080"
+      labels: { app: cce-compliance-service }
     spec:
       containers:
         - name: cce-compliance-service
-          image: cce-compliance-service:1.0.0
-          ports:
-            - containerPort: 8080
+          image: cce-compliance-service:2.0.0
+          ports: [{ containerPort: 8080 }]
           env:
-            - name: SPRING_PROFILES_ACTIVE
-              value: "prod"
-            - name: SERVER_PORT
-              value: "8080"
+            - name: CCE_SLA_INSTANCE_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
             - name: DB_HOST
-              valueFrom:
-                configMapKeyRef:
-                  name: cce-config
-                  key: db-host
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: cce-secrets
-                  key: db-password
+              value: postgres.cce.svc.cluster.local
+            - { name: DB_USERNAME, valueFrom: { secretKeyRef: { name: cce-db, key: username } } }
+            - { name: DB_PASSWORD, valueFrom: { secretKeyRef: { name: cce-db, key: password } } }
             - name: KAFKA_BOOTSTRAP_SERVERS
-              valueFrom:
-                configMapKeyRef:
-                  name: cce-config
-                  key: kafka-bootstrap-servers
-          livenessProbe:
-            httpGet:
-              path: /actuator/health/liveness
-              port: 8080
-            initialDelaySeconds: 30
-            periodSeconds: 10
+              value: kafka.cce.svc.cluster.local:9092
           readinessProbe:
-            httpGet:
-              path: /actuator/health/readiness
-              port: 8080
-            initialDelaySeconds: 15
-            periodSeconds: 5
+            httpGet: { path: /actuator/health/readiness, port: 8080 }
+            initialDelaySeconds: 20
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8080 }
+            initialDelaySeconds: 40
           resources:
-            requests:
-              cpu: "500m"
-              memory: "512Mi"
-            limits:
-              cpu: "2000m"
-              memory: "2Gi"
+            requests: { memory: 1Gi, cpu: 500m }
+            limits:   { memory: 2Gi, cpu: "2" }
 ```
 
----
+**Multiple replicas are safe and useful.** The claim protocol needs no coordination — no leader
+election, no lease, no partition assignment — so an added replica adds claim throughput directly. This
+is unlike the Matcher Service, whose parallelism is bounded by Kafka partitions.
 
-## 5. Database Setup
+Scale on the `cce.sla.transitions.unprocessed` gauge rather than on CPU: this service is
+database-bound, and a backlog is visible in that gauge long before it shows up as CPU pressure.
 
-All CCE services share the same PostgreSQL database (`ccedb`) deployed by the [CCE Collector Service](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md). Each service owns its own tables within the shared database — Flyway migrations are namespaced to avoid conflicts.
+## Kafka
 
-### Shared Infrastructure
+Produce-only. One topic:
 
-| Property | Value |
+| Topic | Direction |
 |---|---|
-| **PostgreSQL Host** | Same as collector service |
-| **PostgreSQL Port** | `5433` (local dev) / as configured (production) |
-| **Shared User** | `cce_user` |
-| **Shared Database** | `ccedb` |
+| `cce.intelligence.triggers` | produce |
 
-### No Separate Database Creation Needed
+No consumer group, no DLQ, no inbound topic. If you find a consumer group named after this service on
+the broker, it is a leftover from the pre-split monolith and can be deleted.
 
-The database and user are created by the collector service's Docker Compose. The compliance service only needs to run its Flyway migrations, which happen automatically on startup.
+## Health checks & monitoring
 
-> **Compliance service tables:** `protocol_definition`, `protocol_instance`, `step_instance`, `deviation`, `trigger_index`, `compliance_event_log`, `audit_log`, `action_definition`, `intelligence_event_log`, `facility`
-
-### Schema Migrations
-
-Flyway manages all schema migrations automatically on application startup.
-
-- Migrations are located at `classpath:db/migration`
-- Migration history is tracked in a namespaced Flyway table, `flyway_schema_history_compliance` (not the default `flyway_schema_history`), so it doesn't collide with other CCE services' migration history in the shared `ccedb` database
-- `V1__initial_schema.sql` creates the initial 7 tables with indexes, constraints, and ORDER_VIOLATION deviation type
-- `V2__intelligence_tables.sql` adds `action_definition`, `intelligence_event_log` tables (9 total)
-- `V3__facility.sql` adds `facility` table with `REPLICA IDENTITY FULL` for CDC sync (10 total)
-- `V4__state_history.sql` adds the append-only `protocol_instance_history` + `step_instance_history` tables (12 total). Every `status`/`state` transition is recorded at the **application layer** by `StateTransitionHistoryService` (invoked from `ProtocolInstanceService` / `StepInstanceService`, in the same transaction as the change) — the migration creates the tables only. CDC replica identity / publication / grants are configured centrally in the data-pipeline (`cdc/01-configure-replication.sql`), not in this migration. See the [State-Transition History tables](data-dictionary.md#13-state-transition-history-tables) in the data dictionary.
-  - **Pre-deploy check:** if an environment ever applied the legacy `V4__facility_cdc.sql`, `flyway_schema_history` already holds a version-4 row with a different checksum → run `flyway repair` or re-version before deploying. On `release-1.0.0` (facility consolidated into `V3`) version 4 is free.
-- `V5__deviation_unique_constraint.sql` adds a unique constraint on `deviation` (`step_instance_id`, `deviation_type`) — at most one deviation of each type per step. Pre-existing duplicates (e.g., from at-least-once Kafka redelivery or concurrent consumer threads) are deduplicated before the constraint is applied.
-- `V6__drop_uuid_defaults_for_v7.sql` drops the DB-side `gen_random_uuid()` defaults on the `protocol_instance`, `step_instance`, and `deviation` id columns, since ids are now generated application-side as time-ordered UUIDv7 (Hibernate `UuidV7Generator`).
-- `V7__facility_district.sql` adds a `district_name` column to `facility`.
-- `V8__reconcile_legacy_overdue_steps.sql` moves every `step_instance` still in the retired `OVERDUE` state back to `DUE` (appending the matching `step_instance_history` rows), so the Scheduler scans them again against their own `missed_date`. Idempotent and a no-op on a fresh database. See [Removal of the `DUE → OVERDUE` transition](#removal-of-the-due--overdue-transition) below.
-- `ddl-auto=validate` ensures Hibernate validates entity mappings against the actual schema
-- **Production:** Set `spring.flyway.baseline-on-migrate=false` (default in prod profile)
-
-### Removal of the `DUE → OVERDUE` transition
-
-The `OVERDUE` state has been taken out of the step lifecycle. A `DUE` step now waits for its `missed_date` and goes straight to `MISSED` (or `SKIPPED` for `could` steps); the Scheduler emits only `PENDING_TO_DUE` and `DUE_TO_MISSED`, and never scans `OVERDUE` — see [cce-scheduler-service#12](https://github.com/openphc/cce-scheduler-service/pull/12).
-
-**Upgrading an adopted environment:**
-
-1. **Deploy the Compliance Service first.** `V8` runs on startup and reconciles existing `OVERDUE` rows to `DUE`. The new consumer already understands `DUE_TO_MISSED`, so it is compatible with both the old and new Scheduler.
-2. **Then deploy the Scheduler Service** (its own `V3` realigns the partial scan indexes).
-
-Either order is safe — the consumer accepts `OVERDUE` as a source state for `DUE_TO_MISSED`, treats an in-flight `OVERDUE_TO_MISSED` as its alias, and drops an in-flight `DUE_TO_OVERDUE` without erroring — but Compliance-first avoids a window in which reconciled rows sit unscanned.
-
-**Post-deploy checks:**
-
-```sql
--- Expect 0. Anything here was written after V8 by an instance still running the old code.
-SELECT count(*) FROM step_instance WHERE state = 'OVERDUE';
-
--- Reconciled rows whose missed_date has already passed. These need the Scheduler to scan
--- them again; if its keyset cursor has already advanced past their missed_date they will not
--- be re-selected, so reset the Scheduler's scan cursor once after the upgrade.
-SELECT count(*) FROM step_instance WHERE state = 'DUE' AND missed_date <= now();
-```
-
-Existing `OVERDUE` **deviation** rows are deliberately left in place — they record a threshold that genuinely was crossed. No new ones are raised.
-
-### Connection Pool Sizing
-
-The HikariCP pool size should account for:
-- Kafka consumer threads (concurrency setting, default 5 in prod)
-- REST thread pool (Tomcat default 200, typically ~20 active)
-- Async audit service threads
-
-**Formula:** `maximumPoolSize ≥ (kafka_concurrency × 2) + 15`
-
-With default production settings (concurrency=5): `30` connections is appropriate.
-
----
-
-## 6. Kafka Setup
-
-The CCE Compliance Service shares the Kafka cluster deployed by the [CCE Collector Service](https://github.com/Jayaprakash8887/cce-collector-service/blob/release-1.0.0/docs/deployment-guide.md). The collector publishes to `cce.events.inbound`, which this service consumes.
-
-### Topics
-
-The service auto-creates topics on startup via `KafkaAdmin` + `NewTopic` beans. For production, pre-create topics with appropriate replication:
-
-```bash
-# Primary topics
-kafka-topics.sh --create --topic cce.events.inbound \
-  --partitions 25 --replication-factor 3 --bootstrap-server kafka:9092
-
-kafka-topics.sh --create --topic cce.scheduler.triggers \
-  --partitions 25 --replication-factor 3 --bootstrap-server kafka:9092
-
-kafka-topics.sh --create --topic cce.intelligence.triggers \
-  --partitions 25 --replication-factor 3 --bootstrap-server kafka:9092
-
-# DLQ topics
-kafka-topics.sh --create --topic cce.events.inbound.dlq \
-  --partitions 25 --replication-factor 3 --bootstrap-server kafka:9092
-
-kafka-topics.sh --create --topic cce.scheduler.triggers.dlq \
-  --partitions 25 --replication-factor 3 --bootstrap-server kafka:9092
-```
-
-### Consumer Group
-
-- **Group ID:** `cce-compliance-service`
-- **Auto offset reset:** `earliest`
-- **Isolation level:** `read_committed`
-- **Max poll records:** 200 (prod)
-
-### Error Handling
-
-Failed messages are retried with `FixedBackOff` (5 attempts × 2s interval in prod), then routed to the corresponding `.dlq` topic. Monitor DLQ topics for persistent failures.
-
----
-
-## 7. JVM Tuning
-
-The Dockerfile does not set a default `JAVA_OPTS` — its entrypoint is `java $JAVA_OPTS -jar app.jar`, so the JVM runs with no extra flags unless `JAVA_OPTS` is supplied at runtime (`docker run -e JAVA_OPTS=...` or a Kubernetes env var).
-
-### Recommended Production Flags
-
-```bash
-JAVA_OPTS="\
-  -XX:+UseContainerSupport \
-  -XX:MaxRAMPercentage=75.0 \
-  -XX:+UseG1GC \
-  -XX:MaxGCPauseMillis=200 \
-  -XX:+UseStringDeduplication \
-  -XX:+OptimizeStringConcat \
-  -Djava.security.egd=file:/dev/./urandom"
-```
-
-| Flag | Purpose |
+| Endpoint | Use |
 |---|---|
-| `UseContainerSupport` | Respect container memory/CPU limits |
-| `MaxRAMPercentage=75.0` | Use 75% of container memory for heap |
-| `UseG1GC` | G1 garbage collector (recommended for services) |
-| `MaxGCPauseMillis=200` | Target max GC pause time |
-| `UseStringDeduplication` | Reduce memory for duplicate strings (FHIR payloads) |
+| `/actuator/health/readiness` | Route traffic — fails while the database is unreachable |
+| `/actuator/health/liveness` | Restart decisions |
+| `/actuator/prometheus` | Scrape target |
 
----
+Note what readiness does **not** cover: the scheduler. A pod can be ready and serving the read API
+while its SLA sweep is stalled. The metric to alert on is
+`cce.sla.transitions.unprocessed` — see
+[Architecture §6](architecture-overview.md#6-observability) for how to read it alongside
+`evaluator.cycles` and `batches.failed`.
 
-## 8. Health Checks & Monitoring
+Suggested alerts:
 
-### Health Endpoints
-
-| Endpoint | Purpose |
+| Condition | Meaning |
 |---|---|
-| `/actuator/health` | Overall application health |
-| `/actuator/health/liveness` | Kubernetes liveness probe |
-| `/actuator/health/readiness` | Kubernetes readiness probe |
-| `/actuator/prometheus` | Prometheus metrics scrape endpoint |
-| `/actuator/info` | Application info |
-| `/actuator/metrics` | Micrometer metrics browser |
+| `cce.sla.transitions.unprocessed` rising for > 15 min | the sweep is not keeping up |
+| `cce.sla.evaluator.batches.failed` increasing | rows are failing and backing off |
+| `cce.sla.evaluator.cycles` flat | the scheduler thread has stopped — liveness will not catch this |
 
-### Key Metrics to Monitor
+## Backup
 
-| Metric | Type | Alert Threshold |
-|---|---|---|
-| `cce.events.processed` | Counter | Sudden drop = consumer issue |
-| `cce.events.duplicate` | Counter | High rate = upstream replay |
-| `cce.events.zero_match` | Counter | High rate = missing protocols |
-| `cce.events.processing.duration` | Timer | p99 > 500ms |
-| `cce.step.matching.duration` | Timer | p99 > 200ms |
-| `cce.protocol.instances.active` | Gauge | Abnormal growth |
-| `hikaricp.connections.active` | Gauge | Near pool max |
-| `kafka.consumer.fetch.manager.records.lag` | Gauge | Growing lag |
+This service owns no tables, so there is nothing here to back up. `step_sla_state_transition`,
+`deviation` and `intelligence_event_log` are covered by the Matcher Service's backup.
 
-### Prometheus Scrape Configuration
+## Troubleshooting
 
-```yaml
-scrape_configs:
-  - job_name: 'cce-compliance-service'
-    metrics_path: '/actuator/prometheus'
-    scrape_interval: 15s
-    static_configs:
-      - targets: ['cce-compliance-service:8080']
-        labels:
-          application: 'cce-compliance-service'
-```
-
-### Recommended Grafana Dashboards
-
-- **Spring Boot Statistics** — JVM, HTTP, HikariCP, Tomcat metrics
-- **Kafka Consumer Lag** — Consumer group lag monitoring
-- **Custom CCE Dashboard** — Event processing rates, matching durations, active instances
-
----
-
-## 9. Backup & Recovery
-
-### Database Backup
-
-```bash
-# Full backup
-pg_dump -U cce_user -h postgres-host -p 5433 ccedb > backup_$(date +%Y%m%d).sql
-
-# Restore
-psql -U cce_user -h postgres-host -p 5433 ccedb < backup_20250101.sql
-```
-
-### Recovery Considerations
-
-- **Kafka offsets:** Consumer group offsets are stored in Kafka. On restart, processing resumes from the last committed offset.
-- **Idempotency:** The `(cloudeventsId, source)` unique constraint on `compliance_event_log` ensures safe event reprocessing.
-- **Protocol definitions:** Stored in PostgreSQL with JSONB. Trigger index can be rebuilt via the `/v1/protocol-definitions/{id}/rebuild-index` endpoint.
-- **Condition-only triggers:** Loaded in-memory from stored definitions on startup (rebuild-index).
-
----
-
-## 10. Troubleshooting
-
-### Common Issues
-
-| Problem | Possible Cause | Resolution |
-|---|---|---|
-| Service won't start | Database unreachable | Check `DB_HOST`, `DB_PORT`, network connectivity |
-| Flyway migration fails | Schema already exists | Check `baseline-on-migrate` setting |
-| No events processed | Kafka unreachable | Check `KAFKA_BOOTSTRAP_SERVERS`, broker health |
-| Events going to DLQ | Deserialization errors | Check message format matches CloudEvents schema |
-| High consumer lag | Slow processing | Increase `KAFKA_CONCURRENCY`, check DB performance |
-| Connection pool exhaustion | Too many concurrent requests | Increase `DB_POOL_SIZE` |
-
-### Log Configuration
-
-Production logging levels (in `application-prod.yml`):
-```yaml
-logging:
-  level:
-    root: WARN
-    org.openphc.cce.compliance: INFO
-    org.apache.kafka: ERROR
-    org.hibernate: ERROR
-```
-
-To enable debug logging for specific components temporarily:
-```bash
--Dlogging.level.org.openphc.cce.compliance.service.ComplianceEngine=DEBUG
-```
+| Symptom | Likely cause |
+|---|---|
+| Startup fails: schema validation error | Deployed out of order — the Protocol and Matcher services must migrate `ccedb` first |
+| `unprocessed` gauge rising, `cycles` incrementing | Sweep running but not keeping up — add replicas or raise `batch-size` |
+| `unprocessed` rising, `batches.failed` rising | Rows failing and backing off; check the logs for the rolled-back batch |
+| `cycles` not incrementing | Scheduler stopped; restart the pod. Liveness will not detect this |
+| Deviations recorded but no intelligence delivered | Check `?published=false` on the [read API](api-reference.md#get-v1complianceintelligence-events) — the trigger may be built but unconfirmed |
+| The same alert delivered repeatedly | A transition retrying against an already-recorded deviation should be de-duplicated ([Architecture §5](architecture-overview.md#5-intelligence-on-deviation)); check `attempts` on the row |
+| A step's `sla_status` looks wrong for a completed step | This service does not overwrite a completed step's SLA — check what the Matcher Service set at completion |

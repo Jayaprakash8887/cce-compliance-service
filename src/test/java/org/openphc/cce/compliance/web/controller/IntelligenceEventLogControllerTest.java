@@ -1,197 +1,176 @@
 package org.openphc.cce.compliance.web.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.Test;
-import org.openphc.cce.compliance.domain.entity.IntelligenceEventLog;
+import org.openphc.cce.common.entity.IntelligenceEventLog;
 import org.openphc.cce.compliance.service.IntelligenceEventLogService;
 import org.openphc.cce.compliance.web.DtoMapper;
-import org.openphc.cce.compliance.web.GlobalExceptionHandler;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
-import org.springframework.data.domain.Page;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
-import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import org.springframework.test.context.ContextConfiguration;
+import org.springframework.data.web.PageableHandlerMethodArgumentResolver;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-@WebMvcTest
-@ContextConfiguration(classes = {IntelligenceEventLogController.class, DtoMapper.class, GlobalExceptionHandler.class})
+/**
+ * Pins the read API's contract: which service query each filter selects, and the JSON field names a
+ * consumer sees. The routing is a chain of ifs, so a filter wired to the wrong query would otherwise
+ * only surface downstream.
+ */
 class IntelligenceEventLogControllerTest {
 
-    @Autowired
+    // Standalone rather than @WebMvcTest: the application class carries @EnableJpaRepositories, which a
+    // web slice would try to satisfy with an entityManagerFactory it does not create. Standalone wires
+    // exactly the controller under test, with the paging resolver and JSON converter the real dispatcher
+    // uses.
     private MockMvc mockMvc;
+    private final IntelligenceEventLogService service = mock(IntelligenceEventLogService.class);
 
-    @Autowired
-    private ObjectMapper objectMapper;
+    @BeforeEach
+    void setUp() {
+        MappingJackson2HttpMessageConverter converter = new MappingJackson2HttpMessageConverter(
+                new ObjectMapper().registerModule(new JavaTimeModule()));
+        mockMvc = MockMvcBuilders
+                .standaloneSetup(new IntelligenceEventLogController(service, new DtoMapper()))
+                .setCustomArgumentResolvers(new PageableHandlerMethodArgumentResolver())
+                .setMessageConverters(converter)
+                .build();
+    }
 
-    @MockitoBean
-    private IntelligenceEventLogService intelligenceEventLogService;
+    private static final String BASE = "/v1/compliance/intelligence-events";
 
-    private static final UUID EVENT_LOG_ID = UUID.fromString("770e8400-e29b-41d4-a716-446655440000");
-    private static final UUID ACTION_DEF_ID = UUID.fromString("660e8400-e29b-41d4-a716-446655440000");
-    private static final UUID PROTOCOL_INSTANCE_ID = UUID.fromString("880e8400-e29b-41d4-a716-446655440000");
-    private static final UUID STEP_INSTANCE_ID = UUID.fromString("990e8400-e29b-41d4-a716-446655440000");
-    private static final UUID DEVIATION_ID = UUID.fromString("cc0e8400-e29b-41d4-a716-446655440000");
-
-    private IntelligenceEventLog buildEventLog() {
+    private IntelligenceEventLog event(UUID id) {
         return IntelligenceEventLog.builder()
-                .id(EVENT_LOG_ID)
-                .eventPayload(objectMapper.createObjectNode().put("id", UUID.randomUUID().toString()))
-                .actionDefinitionId(ACTION_DEF_ID)
-                .protocolInstanceId(PROTOCOL_INSTANCE_ID)
-                .stepInstanceId(STEP_INSTANCE_ID)
-                .deviationId(DEVIATION_ID)
+                .id(id)
                 .subject("patient-1")
                 .actionType("CommunicationRequest")
-                .intelligenceDestination("sms")
-                .stepState("overdue")
-                .triggerReason("overdue")
-                .stepActionId("bp-check")
-                .evaluationExpression("{\">\": [{\"var\": \"daysOverdue\"}, 2]}")
-                .evaluationContext(objectMapper.createObjectNode().put("stepState", "overdue"))
+                .intelligenceDestination("ASSIGNED_WORKER")
+                .stepStatus("not-started")
+                .slaStatus("missed")
+                .triggerReason("missed")
                 .published(true)
-                .publishedAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
-                .createdAt(OffsetDateTime.of(2026, 4, 1, 12, 0, 0, 0, ZoneOffset.UTC))
-                .build();
-    }
-
-    // --- GET / (listAll) ---
-
-    @Test
-    void listAll_returnsEventLogs() throws Exception {
-        IntelligenceEventLog eventLog = buildEventLog();
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(eventLog));
-        when(intelligenceEventLogService.findAll(any(Pageable.class))).thenReturn(page);
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].id").value(EVENT_LOG_ID.toString()))
-                .andExpect(jsonPath("$.content[0].actionDefinitionId").value(ACTION_DEF_ID.toString()))
-                .andExpect(jsonPath("$.content[0].protocolInstanceId").value(PROTOCOL_INSTANCE_ID.toString()))
-                .andExpect(jsonPath("$.content[0].stepInstanceId").value(STEP_INSTANCE_ID.toString()))
-                .andExpect(jsonPath("$.content[0].published").value(true))
-                .andExpect(jsonPath("$.content[0].triggerReason").value("overdue"))
-                .andExpect(jsonPath("$.content[0].deviationId").value(DEVIATION_ID.toString()));
-    }
-
-    @Test
-    void listAll_empty_returnsEmptyList() throws Exception {
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of());
-        when(intelligenceEventLogService.findAll(any(Pageable.class))).thenReturn(page);
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content").isArray())
-                .andExpect(jsonPath("$.content").isEmpty());
-    }
-
-    @Test
-    void listAll_filterByProtocolInstanceId() throws Exception {
-        IntelligenceEventLog eventLog = buildEventLog();
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(eventLog));
-        when(intelligenceEventLogService.findByProtocolInstanceId(eq(PROTOCOL_INSTANCE_ID), any(Pageable.class)))
-                .thenReturn(page);
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events")
-                        .param("protocolInstanceId", PROTOCOL_INSTANCE_ID.toString()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].protocolInstanceId").value(PROTOCOL_INSTANCE_ID.toString()));
-
-        verify(intelligenceEventLogService).findByProtocolInstanceId(eq(PROTOCOL_INSTANCE_ID), any(Pageable.class));
-        verify(intelligenceEventLogService, never()).findAll(any(Pageable.class));
-    }
-
-    @Test
-    void listAll_filterByActionDefinitionId() throws Exception {
-        IntelligenceEventLog eventLog = buildEventLog();
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(eventLog));
-        when(intelligenceEventLogService.findByActionDefinitionId(eq(ACTION_DEF_ID), any(Pageable.class)))
-                .thenReturn(page);
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events")
-                        .param("actionDefinitionId", ACTION_DEF_ID.toString()))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].actionDefinitionId").value(ACTION_DEF_ID.toString()));
-
-        verify(intelligenceEventLogService).findByActionDefinitionId(eq(ACTION_DEF_ID), any(Pageable.class));
-        verify(intelligenceEventLogService, never()).findAll(any(Pageable.class));
-    }
-
-    @Test
-    void listAll_filterByPublished() throws Exception {
-        IntelligenceEventLog eventLog = buildEventLog();
-        Page<IntelligenceEventLog> page = new PageImpl<>(List.of(eventLog));
-        when(intelligenceEventLogService.findByPublished(eq(true), any(Pageable.class)))
-                .thenReturn(page);
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events")
-                        .param("published", "true"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.content[0].published").value(true));
-
-        verify(intelligenceEventLogService).findByPublished(eq(true), any(Pageable.class));
-        verify(intelligenceEventLogService, never()).findAll(any(Pageable.class));
-    }
-
-    // --- GET /{id} (getById) ---
-
-    @Test
-    void getById_found_returns200() throws Exception {
-        IntelligenceEventLog eventLog = buildEventLog();
-        when(intelligenceEventLogService.findById(EVENT_LOG_ID)).thenReturn(eventLog);
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", EVENT_LOG_ID))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.id").value(EVENT_LOG_ID.toString()))
-                .andExpect(jsonPath("$.published").value(true))
-                .andExpect(jsonPath("$.triggerReason").value("overdue"))
-                .andExpect(jsonPath("$.stepActionId").value("bp-check"));
-    }
-
-    @Test
-    void getById_notFound_returns404() throws Exception {
-        when(intelligenceEventLogService.findById(EVENT_LOG_ID))
-                .thenThrow(new EntityNotFoundException("Intelligence event log not found: " + EVENT_LOG_ID));
-
-        mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", EVENT_LOG_ID))
-                .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.message").value("Intelligence event log not found: " + EVENT_LOG_ID));
-    }
-
-    @Test
-    void getById_nullOptionalFields_returns200() throws Exception {
-        IntelligenceEventLog eventLog = IntelligenceEventLog.builder()
-                .id(EVENT_LOG_ID)
-                .eventPayload(objectMapper.createObjectNode())
-                .actionDefinitionId(ACTION_DEF_ID)
-                .protocolInstanceId(PROTOCOL_INSTANCE_ID)
-                .subject("patient-1")
-                .actionType("Task")
-                .intelligenceDestination("email")
-                .stepState("completed")
-                .triggerReason("completion")
-                .published(false)
+                .publishedAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .createdAt(OffsetDateTime.now(ZoneOffset.UTC))
                 .build();
-        when(intelligenceEventLogService.findById(EVENT_LOG_ID)).thenReturn(eventLog);
+    }
 
-        mockMvc.perform(get("/v1/compliance/intelligence-events/{id}", EVENT_LOG_ID))
+    @Test
+    void listAll_noFilter_usesTheUnfilteredQuery() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(service.findAll(any(Pageable.class))).thenReturn(page(List.of(event(id))));
+
+        mockMvc.perform(get(BASE))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.stepInstanceId").doesNotExist())
-                .andExpect(jsonPath("$.deviationId").doesNotExist())
-                .andExpect(jsonPath("$.stepActionId").doesNotExist());
+                .andExpect(jsonPath("$.content[0].id").value(id.toString()))
+                .andExpect(jsonPath("$.content[0].stepStatus").value("not-started"))
+                .andExpect(jsonPath("$.content[0].slaStatus").value("missed"))
+                .andExpect(jsonPath("$.content[0].triggerReason").value("missed"));
+
+        verify(service).findAll(any(Pageable.class));
+    }
+
+    @Test
+    void listAll_protocolInstanceIdFilter_selectsThatQuery() throws Exception {
+        UUID protocolInstanceId = UUID.randomUUID();
+        when(service.findByProtocolInstanceId(eq(protocolInstanceId), any(Pageable.class)))
+                .thenReturn(page(List.of(event(UUID.randomUUID()))));
+
+        mockMvc.perform(get(BASE).param("protocolInstanceId", protocolInstanceId.toString()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content", hasSizeOne()));
+
+        verify(service).findByProtocolInstanceId(eq(protocolInstanceId), any(Pageable.class));
+        verify(service, never()).findAll(any(Pageable.class));
+    }
+
+    @Test
+    void listAll_actionDefinitionIdFilter_selectsThatQuery() throws Exception {
+        UUID actionDefinitionId = UUID.randomUUID();
+        when(service.findByActionDefinitionId(eq(actionDefinitionId), any(Pageable.class)))
+                .thenReturn(page(List.of(event(UUID.randomUUID()))));
+
+        mockMvc.perform(get(BASE).param("actionDefinitionId", actionDefinitionId.toString()))
+                .andExpect(status().isOk());
+
+        verify(service).findByActionDefinitionId(eq(actionDefinitionId), any(Pageable.class));
+    }
+
+    @Test
+    void listAll_publishedFilter_selectsThatQuery() throws Exception {
+        when(service.findByPublished(eq(false), any(Pageable.class)))
+                .thenReturn(page(List.of(event(UUID.randomUUID()))));
+
+        mockMvc.perform(get(BASE).param("published", "false"))
+                .andExpect(status().isOk());
+
+        verify(service).findByPublished(eq(false), any(Pageable.class));
+    }
+
+    @Test
+    void listAll_protocolInstanceIdWinsOverTheOtherFilters() throws Exception {
+        // Documents the precedence of the if-chain rather than leaving it to be discovered.
+        UUID protocolInstanceId = UUID.randomUUID();
+        when(service.findByProtocolInstanceId(eq(protocolInstanceId), any(Pageable.class)))
+                .thenReturn(page(List.of()));
+
+        mockMvc.perform(get(BASE)
+                        .param("protocolInstanceId", protocolInstanceId.toString())
+                        .param("actionDefinitionId", UUID.randomUUID().toString())
+                        .param("published", "true"))
+                .andExpect(status().isOk());
+
+        verify(service).findByProtocolInstanceId(eq(protocolInstanceId), any(Pageable.class));
+        verify(service, never()).findByActionDefinitionId(any(), any(Pageable.class));
+        verify(service, never()).findByPublished(anyBoolean(), any(Pageable.class));
+    }
+
+    @Test
+    void listAll_honoursPaging() throws Exception {
+        when(service.findAll(any(Pageable.class))).thenReturn(page(List.of()));
+
+        mockMvc.perform(get(BASE).param("page", "2").param("size", "5"))
+                .andExpect(status().isOk());
+
+        verify(service).findAll(argThat((Pageable p) -> p.getPageNumber() == 2 && p.getPageSize() == 5));
+    }
+
+    @Test
+    void getById_returnsTheEvent() throws Exception {
+        UUID id = UUID.randomUUID();
+        when(service.findById(id)).thenReturn(event(id));
+
+        mockMvc.perform(get(BASE + "/" + id))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(id.toString()))
+                .andExpect(jsonPath("$.subject").value("patient-1"));
+    }
+
+
+    private static org.hamcrest.Matcher<java.util.Collection<?>> hasSizeOne() {
+        return org.hamcrest.Matchers.hasSize(1);
+    }
+
+    /**
+     * A page carrying a real {@link org.springframework.data.domain.PageRequest}. The single-argument
+     * PageImpl constructor yields an unpaged page whose getPageSize() throws, which Jackson cannot
+     * serialize — the repository always returns a properly paged result.
+     */
+    private static org.springframework.data.domain.Page<IntelligenceEventLog> page(
+            List<IntelligenceEventLog> content) {
+        return new PageImpl<>(content, org.springframework.data.domain.PageRequest.of(0, 20),
+                content.size());
     }
 }

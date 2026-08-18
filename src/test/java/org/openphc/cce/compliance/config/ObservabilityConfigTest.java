@@ -1,46 +1,38 @@
 package org.openphc.cce.compliance.config;
 
-import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
-import org.openphc.cce.compliance.domain.enums.ActionDefinitionStatus;
-import org.openphc.cce.compliance.domain.enums.ProtocolInstanceStatus;
-import org.openphc.cce.compliance.domain.repository.ActionDefinitionRepository;
-import org.openphc.cce.compliance.domain.repository.ProtocolInstanceRepository;
+import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ObservabilityConfigTest {
 
-    private final ObservabilityConfig config = new ObservabilityConfig();
-
     @Test
-    void cceMetrics_shouldRegisterAllCountersTimersAndGauges() {
-        MeterRegistry registry = new SimpleMeterRegistry();
-        ProtocolInstanceRepository protocolRepo = mock(ProtocolInstanceRepository.class);
-        ActionDefinitionRepository actionDefRepo = mock(ActionDefinitionRepository.class);
-        when(protocolRepo.countByStatus(ProtocolInstanceStatus.ACTIVE)).thenReturn(5L);
-        when(actionDefRepo.countByStatus(ActionDefinitionStatus.ACTIVE)).thenReturn(3L);
+    void registersTheEvaluatorBacklogGauge() {
+        // The service's primary health signal: near zero in a steady state, rising when transitions
+        // fall due faster than they are applied.
+        SlaTransitionClaimRepository repository = mock(SlaTransitionClaimRepository.class);
+        when(repository.countUnprocessed()).thenReturn(7L);
 
-        MeterBinder binder = config.cceMetrics(protocolRepo, actionDefRepo);
-
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        MeterBinder binder = new ObservabilityConfig().complianceMetrics(repository);
         binder.bindTo(registry);
 
-        assertNotNull(registry.find("cce.events.processed").counter());
-        assertNotNull(registry.find("cce.events.matched").tag("status", "matched").counter());
-        assertNotNull(registry.find("cce.events.matched").tag("status", "zero_match").counter());
-        assertNotNull(registry.find("cce.events.duplicate").counter());
-        assertNotNull(registry.find("cce.events.intelligence.published").counter());
-        assertNotNull(registry.find("cce.intelligence.actions.evaluated").counter());
-        assertNotNull(registry.find("cce.intelligence.actions.fired").counter());
-        assertNotNull(registry.find("cce.step.matching.duration").timer());
-        assertNotNull(registry.find("cce.events.processing.duration").timer());
-        assertNotNull(registry.find("cce.intelligence.publish.duration").timer());
-        assertNotNull(registry.find("cce.protocol.instances.active").gauge());
-        assertEquals(5.0, registry.find("cce.protocol.instances.active").gauge().value());
-        assertNotNull(registry.find("cce.action.definitions.active").gauge());
-        assertEquals(3.0, registry.find("cce.action.definitions.active").gauge().value());
+        assertEquals(7.0, registry.get("cce.sla.transitions.unprocessed").gauge().value());
+    }
+
+    @Test
+    void gaugeTracksTheRepositoryRatherThanASnapshot() {
+        SlaTransitionClaimRepository repository = mock(SlaTransitionClaimRepository.class);
+        when(repository.countUnprocessed()).thenReturn(2L, 5L);
+
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        new ObservabilityConfig().complianceMetrics(repository).bindTo(registry);
+
+        assertEquals(2.0, registry.get("cce.sla.transitions.unprocessed").gauge().value());
+        assertEquals(5.0, registry.get("cce.sla.transitions.unprocessed").gauge().value());
     }
 }

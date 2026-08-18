@@ -1,76 +1,88 @@
 # CCE Compliance Service
 
-![Java](https://img.shields.io/badge/Java-21-blue)
-![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.4.2-green)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue)
-![Kafka](https://img.shields.io/badge/Kafka-3.x%20KRaft-orange)
-![License](https://img.shields.io/badge/license-proprietary-lightgrey)
+The time plane of the CCE system. Claims the SLA transitions the Matcher Service scheduled as their
+deadlines pass, advances `step_instance.sla_status`, records the resulting `OVERDUE` / `MISSED`
+deviations, and publishes the intelligence actions they trigger.
 
-> **Release 1.2.0** — [Release Notes](RELEASE-NOTES.md) | [Changelog](CHANGELOG.md)
+It matches no events, enrols no patients and manages no definitions. It **owns no tables** and runs no
+migrations. Kafka is **produce-only** — nothing inbound reaches this service.
 
-A core microservice within the Clinical Compliance Engine (CCE) platform. It tracks patient adherence to clinical protocols defined as FHIR R4 `PlanDefinition` resources — consuming clinical events, matching them against protocol steps (including nested sub-steps flattened to peers), detecting deviations, evaluating intelligence actions, and publishing intelligence triggers for downstream processing.
+**Port** `8092` · **Java** 21 · **Spring Boot** 3.4.2 · **Version** 2.0.0
 
 ## Quick Start
 
+This service cannot create its own schema. Bring up the Protocol and Matcher services against `ccedb`
+first — in that order — then:
+
 ```bash
-# Start shared infrastructure (from collector service)
-cd /path/to/cce-collector-service && docker compose up -d
-
-# Build
-cd /path/to/cce-compliance-service
 ./gradlew build
-
-# Run (Flyway applies migrations to shared ccedb database)
 ./gradlew bootRun
 
-# Health check
-curl localhost:8080/actuator/health
+curl -s localhost:8092/actuator/health
 ```
+
+Starting against an unmigrated database fails at boot on `ddl-auto: validate`, by design. Full
+sequence: [Developer Setup](docs/developer-setup.md#quick-start).
 
 ## Documentation
 
-| Document | Description |
+| Document | Contents |
 |---|---|
-| [Architecture & Design](docs/architecture-overview.md) | System context, core pipeline, matching algorithm, state machines, and design decisions |
-| [API Reference](docs/api-reference.md) | RESTful API endpoints, request/response schemas, and authentication |
-| [Data Dictionary](docs/data-dictionary.md) | ER diagram, database schema, columns, indexes, enums, JSONB schemas, and JPA mapping |
-| [Kafka Events](docs/kafka-events.md) | Kafka topics, CloudEvents message formats, consumers, and producers |
-| [Flow Diagrams](docs/flow-diagrams.md) | Sequence and flow diagrams for all major workflows |
-| [Developer Setup](docs/developer-setup.md) | Prerequisites, build instructions, and local development configuration |
-| [Deployment Guide](docs/deployment-guide.md) | Production deployment, environment variables, Docker/K8s, monitoring |
-| [Release Notes](RELEASE-NOTES.md) | Version 1.0.0 features, known limitations |
-| [Changelog](CHANGELOG.md) | Full changelog with categorized changes |
+| [Architecture & Design](docs/architecture-overview.md) | The claim protocol, the applier's behaviour table, retry and backoff, observability, scaling |
+| [API Reference](docs/api-reference.md) | The read-only intelligence-event API and the operational endpoints |
+| [Developer Setup](docs/developer-setup.md) | Prerequisites, configuration and tuning, project layout, testing, and the invariants to preserve |
+| [Deployment Guide](docs/deployment-guide.md) | Docker and Kubernetes, replica scaling, alerts, troubleshooting |
 
-## Architecture
+System-wide context lives in **cce-common-util** and is not restated here:
+
+| For | See |
+|---|---|
+| Why the services are split, and the SLA handoff contract | `cce-common-util` → [docs/architecture-overview.md](../cce-common-util/docs/architecture-overview.md) |
+| Schema, columns, enums, table ownership | `cce-common-util` → [docs/data-dictionary.md](../cce-common-util/docs/data-dictionary.md) |
+| The shared entities, evaluator and exception handler this service uses | `cce-common-util` → [docs/library-reference.md](../cce-common-util/docs/library-reference.md) |
+| Status vocabularies and their FHIR provenance | `cce-common-util` → [docs/fhir-conformance.md](../cce-common-util/docs/fhir-conformance.md) |
+
+Cross-repository links assume the repositories are checked out as siblings, which is also what the
+Gradle composite build assumes.
+
+## How it works
 
 ```
-Kafka → InboundEventConsumer → ComplianceEngine
-                                  ├── Idempotency (ComplianceEventLogService)
-                                  ├── Resource Extraction (ResourceInfoExtractor)
-                                  ├── Tier 1 Matching (TriggerMatchingService)
-                                  ├── Tier 2 Evaluation (ExpressionEvaluationService)
-                                  ├── Enrollment (ProtocolInstanceService)
-                                  ├── Step Management (StepInstanceService)
-                                  │   ├── Flat step model (sub-steps flattened to peers)
-                                  │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
-                                  ├── Deviation Detection (DeviationService)
-                                  │   └── Intelligence Evaluation (IntelligenceActionEvaluator)
-                                  ├── Intelligence Publishing (IntelligenceTriggerProducer)
-                                  └── Audit Logging (AuditService)
+@Scheduled poll ──> SlaTransitionEvaluator      drives; holds no transaction
+                          │
+                          ▼
+                    SlaTransitionApplier         one transaction per batch
+                          │
+      claimDue(now, batchSize) ── FOR UPDATE SKIP LOCKED, ORDER BY process_by
+                          │
+          ┌───────────────┼────────────────┐
+          ▼               ▼                ▼
+   step_instance      deviation      intelligence_event_log
+   .sla_status                              │
+                                            ▼
+                                  Kafka cce.intelligence.triggers
 ```
+
+The row lock **is** the claim — no lease table, no heartbeat, no leader election. Every replica can
+poll the same table concurrently, and a replica that dies mid-batch releases its rows immediately.
+Details in [Architecture §3](docs/architecture-overview.md#3-the-claim-protocol).
+
+## API
+
+```
+GET /v1/compliance/intelligence-events?protocolInstanceId=&actionDefinitionId=&published=
+GET /v1/compliance/intelligence-events/{id}
+```
+
+Read-only. Everything this service writes is driven by its scheduler, never by a request.
 
 ## Testing
 
 ```bash
-# Unit tests (374 tests)
-./gradlew test
-
-# Integration tests (39 tests)
-./gradlew integrationTest
-
-# Full build with unit tests
-./gradlew build
-
-# Coverage report
-./gradlew test jacocoTestReport
+./gradlew test              # 44 unit tests
+./gradlew build             # tests + coverage gate (0.98 instruction coverage)
+./gradlew jacocoTestReport  # build/reports/jacoco/test/html/index.html
 ```
+
+Concurrent-claim behaviour depends on real `FOR UPDATE SKIP LOCKED` semantics and must be verified
+against PostgreSQL, not H2.

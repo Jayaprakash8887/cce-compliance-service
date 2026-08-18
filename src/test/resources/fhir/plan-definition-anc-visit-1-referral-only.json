@@ -33,7 +33,7 @@
               "kind": "applicability",
               "expression": {
                 "language": "text/jsonlogic",
-                "expression": "{\"==\": [{\"var\": \"event.stepState\"}, \"completed\"]}"
+                "expression": "{\"==\": [{\"var\": \"event.stepStatus\"}, \"completed\"]}"
               }
             }
           ],

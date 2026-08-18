@@ -1,389 +1,116 @@
-# Developer Setup & Configuration
+# Developer Setup — Compliance Service
 
-## 1. Prerequisites
+## Prerequisites
 
-| Tool | Version | Required | Purpose |
-|---|---|---|---|
-| **Java JDK** | 21 LTS | Yes | Build and runtime |
-| **Gradle** | 8.x | Yes | Build tool (via wrapper) |
-| **Docker** | 24+ | Recommended | Run PostgreSQL, Kafka locally |
-| **Docker Compose** | 2.x | Recommended | Orchestrate infrastructure |
-| **PostgreSQL** | 16+ | Yes | Primary database |
-| **Apache Kafka** | 3.x | Yes | Message broker |
-| **Git** | 2.x | Yes | Version control |
-
-## 2. Quick Start
-
-### 2.1 Clone & Build
-
-```bash
-# Clone the repository
-git clone <repository-url>
-cd cce-compliance-service
-
-# Build (skip tests for fast iteration)
-./gradlew build -x test
-
-# Build with tests
-./gradlew build
-```
-
-### 2.2 Start Infrastructure
-
-PostgreSQL, Kafka, and the shared database (`ccedb`) are deployed by the **CCE Collector Service**. All CCE services share the same database.
-
-```bash
-# Start shared infrastructure (PostgreSQL on port 5433 + Kafka on port 9092)
-cd /path/to/cce-collector-service
-docker compose up -d
-
-# Verify shared services are running
-docker compose ps
-```
-
-### 2.3 Run the Application
-
-```bash
-# Using Gradle
-./gradlew bootRun
-
-# Or using the JAR
-java -jar build/libs/cce-compliance-service-1.0.0.jar
-
-# With custom configuration
-DB_HOST=localhost DB_PORT=5433 java -jar build/libs/cce-compliance-service-1.0.0.jar
-```
-
-### 2.4 Verify Health
-
-```bash
-# Health check (default local port is 8091 unless SERVER_PORT is overridden)
-curl http://localhost:8091/actuator/health
-
-# Expected response
-# {"status":"UP","components":{"db":{"status":"UP"},"kafka":{"status":"UP"},"diskSpace":{"status":"UP"}}}
-```
-
-## 3. Configuration Reference
-
-### 3.1 Environment Variables
-
-All configuration can be overridden via environment variables:
-
-#### Database
-
-| Variable | Default | Description |
-|---|---|---|
-| `DB_HOST` | `localhost` | PostgreSQL hostname |
-| `DB_PORT` | `5432` | PostgreSQL port. The collector service exposes Postgres on `5433`, so set `DB_PORT=5433` for local dev against shared infrastructure |
-| `DB_NAME` | `ccedb` | Shared database name (all CCE services) |
-| `DB_USERNAME` | `cce_user` | Database username (shared with collector service) |
-| `DB_PASSWORD` | `cce_pass` | Database password (shared with collector service) |
-| `DB_POOL_SIZE` | `20` | HikariCP max pool size |
-| `DB_POOL_MIN_IDLE` | `5` | HikariCP minimum idle connections |
-| `DB_CONNECTION_TIMEOUT` | `30000` | HikariCP connection timeout (ms) |
-| `DB_IDLE_TIMEOUT` | `600000` | HikariCP idle timeout (ms) |
-| `DB_MAX_LIFETIME` | `1800000` | HikariCP max connection lifetime (ms) |
-
-#### Kafka
-
-| Variable | Default | Description |
-|---|---|---|
-| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Kafka broker addresses |
-
-#### Server
-
-| Variable | Default | Description |
-|---|---|---|
-| `SERVER_PORT` | `8091` | Application port |
-
-### 3.2 Kafka Topic Configuration
-
-Configured via `cce.kafka.topics.*` in `application.yml`:
-
-| Property | Default Value | Description |
-|---|---|---|
-| `cce.kafka.topics.inbound-events` | `cce.events.inbound` | Inbound clinical events |
-| `cce.kafka.topics.scheduler-triggers` | `cce.scheduler.triggers` | Scheduler timer triggers |
-| `cce.kafka.topics.intelligence-triggers` | `cce.intelligence.triggers` | Outbound intelligence trigger events |
-
-### 3.3 JPA & Hibernate
-
-| Property | Value | Description |
-|---|---|---|
-| `spring.jpa.hibernate.ddl-auto` | `none` | Schema managed entirely by Flyway; Hibernate performs no DDL or validation |
-| `spring.jpa.open-in-view` | `false` | Prevents lazy loading in controllers (best practice) |
-| `hibernate.dialect` | `PostgreSQLDialect` | Not set explicitly in `application.yml` — auto-detected by Spring Boot from the PostgreSQL driver |
-| `hibernate.jdbc.time_zone` | `UTC` | All timestamps in UTC |
-
-### 3.4 Flyway
-
-| Property | Value | Description |
-|---|---|---|
-| `spring.flyway.enabled` | `true` | Auto-apply migrations on startup |
-| `spring.flyway.locations` | `classpath:db/migration` | Migration file location |
-| `spring.flyway.baseline-on-migrate` | `true` | Baseline existing DBs on first run |
-| `spring.flyway.table` | `flyway_schema_history_compliance` | Namespaced history table so each CCE service tracks its own migrations in the shared database |
-
-### 3.5 Observability
-
-| Property | Value | Description |
-|---|---|---|
-| `management.endpoints.web.exposure.include` | `health,info,prometheus,metrics` | Exposed actuator endpoints |
-| `management.tracing.sampling.probability` | `1.0` | 100% trace sampling |
-| `management.metrics.tags.application` | `cce-compliance-service` | Common metric tag |
-
-## 4. Project Structure
-
-```
-cce-compliance-service/
-├── artifacts/                          # Design documents
-│   └── CCE Solution Design v0.3 Draft.pdf
-├── docs/                               # Documentation (this folder)
-│   ├── architecture-overview.md
-│   ├── flow-diagrams.md
-│   ├── api-reference.md
-│   ├── data-dictionary.md
-│   ├── kafka-events.md
-│   ├── deployment-guide.md
-│   ├── sample-plan-definition.md
-│   └── developer-setup.md
-├── src/
-│   └── main/
-│       ├── java/org/openphc/cce/compliance/
-│       │   ├── ComplianceServiceApplication.java
-│       │   ├── config/          # Spring configuration
-│       │   ├── domain/          # Entities, enums, repositories
-│       │   ├── fhir/            # FHIR parsing, JSONLogic & FHIRPath expression evaluation
-│       │   ├── kafka/           # Kafka consumers, models, config
-│       │   │   ├── config/      # Consumer/Producer factories, topic bindings
-│       │   │   ├── consumer/    # InboundEventConsumer, SchedulerTriggerConsumer
-│       │   │   ├── model/       # CloudEventMessage, SchedulerTriggerMessage, IntelligenceTriggerEvent
-│       │   │   └── producer/    # IntelligenceTriggerProducer
-│       │   ├── service/         # Business logic (ComplianceEngine + supporting services)
-│       │   └── web/             # REST controllers, DTOs, exception handler
-│       └── resources/
-│           ├── application.yml
-│           └── db/migration/
-│               ├── V1__initial_schema.sql
-│               ├── V2__intelligence_tables.sql
-│               ├── V3__facility.sql
-│               ├── V4__state_history.sql
-│               ├── V5__deviation_unique_constraint.sql
-│               ├── V6__drop_uuid_defaults_for_v7.sql
-│               └── V7__facility_district.sql
-├── Dockerfile                          # Multi-stage Docker build
-├── .gitignore
-├── build.gradle                        # Gradle build configuration
-└── settings.gradle                     # Gradle settings
-```
-
-## 5. Database Setup
-
-All CCE services share the same database (`ccedb`) on the PostgreSQL instance deployed by the CCE Collector Service (port `5433`, user `cce_user`). Each service owns its own tables — Flyway migrations are namespaced to avoid conflicts.
-
-### 5.1 No Separate Database Creation Needed
-
-The database is created by the collector service's Docker Compose. The compliance service only runs its Flyway migrations on startup.
-
-### 5.2 Flyway Migrations
-
-Migrations are applied automatically on application startup via Spring Boot's Flyway autoconfiguration. There is no Flyway Gradle plugin in `build.gradle` (only the `flyway-core` and `flyway-database-postgresql` libraries used at runtime), so `flywayMigrate` / `flywayInfo` Gradle tasks are **not** available. To inspect or run migrations manually, use the Flyway CLI or psql directly against the `flyway_schema_history_compliance` table:
-
-```bash
-# Inspect applied migrations directly
-psql -h localhost -p 5433 -U cce_user -d ccedb \
-     -c "SELECT * FROM flyway_schema_history_compliance ORDER BY installed_rank"
-```
-
-### 5.3 Current Migrations
-
-| Version | Description | Script |
-|---|---|---|
-| V1 | Initial schema (7 tables, indexes, constraints) | `V1__initial_schema.sql` |
-| V2 | Intelligence tables (action_definition, intelligence_event_log) | `V2__intelligence_tables.sql` |
-| V3 | Facility table | `V3__facility.sql` |
-| V4 | Append-only state-transition history for protocol_instance and step_instance | `V4__state_history.sql` |
-| V5 | Deduplicate deviations and enforce one deviation per (step, type) | `V5__deviation_unique_constraint.sql` |
-| V6 | Drop DB-side UUID (v4) defaults now that ids are generated application-side as UUID v7 | `V6__drop_uuid_defaults_for_v7.sql` |
-| V7 | Add `district_name` column to facility | `V7__facility_district.sql` |
-
-## 6. Docker Build
-
-### 6.1 Build Image
-
-```bash
-# Build the Docker image
-docker build -t cce-compliance-service:latest .
-
-# Run the container
-# SERVER_PORT must be set to 8080 to match the image's EXPOSE/healthcheck port
-# (the application's own default, when unset, is 8091)
-docker run -d \
-  --name compliance-service \
-  -p 8080:8080 \
-  -e SERVER_PORT=8080 \
-  -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5433 \
-  -e DB_NAME=ccedb \
-  -e DB_USERNAME=cce_user \
-  -e DB_PASSWORD=cce_pass \
-  -e KAFKA_BOOTSTRAP_SERVERS=host.docker.internal:9092 \
-  cce-compliance-service:latest
-```
-
-### 6.2 Dockerfile Overview
-
-```
-Stage 1: Build (eclipse-temurin:21-jdk-alpine)
-  → Copy build.gradle, settings.gradle, download dependencies
-  → Copy source, run ./gradlew build -x test
-
-Stage 2: Runtime (eclipse-temurin:21-jre-alpine)
-  → Create non-root user 'cce' (UID 1001)
-  → Copy JAR from build stage
-  → JVM flags: none baked in — entrypoint runs `java $JAVA_OPTS -jar app.jar`, so flags are supplied via the JAVA_OPTS env var at runtime
-  → Healthcheck: wget to /actuator/health every 30s
-  → Expose port 8080
-```
-
-## 7. Key Build Commands
-
-| Command | Purpose |
+| Requirement | Notes |
 |---|---|
-| `./gradlew build -x test` | Build without tests |
-| `./gradlew build` | Build + run unit tests |
-| `./gradlew test` | Run unit tests only |
-| `./gradlew integrationTest` | Run integration tests (EmbeddedKafka + H2) |
-| `./gradlew test jacocoTestReport` | Unit tests + coverage report |
-| `./gradlew dependencies` | Show dependency tree |
-| `./gradlew bootRun` | Run application via Gradle |
+| JDK 21 | Gradle toolchain |
+| PostgreSQL 16 | shared `ccedb` — **must already contain the schema** (see below) |
+| Kafka | producer only |
+| `cce-common-util` | checked out as a sibling directory — wired in as a composite build |
 
-## 8. Testing
+This service **owns no tables and runs no migrations**, so it cannot bring up its own schema. Start
+the Protocol Service and then the Matcher Service against an empty `ccedb` first; both apply their
+migrations on startup. Starting this service against a schema-less database fails at boot on
+`ddl-auto: validate`, which is the intended behaviour.
 
-### 8.1 Test Dependencies
-
-| Dependency | Purpose |
-|---|---|
-| `spring-boot-starter-test` | JUnit 5, Mockito, AssertJ |
-| `spring-kafka-test` | Kafka test utilities |
-| `awaitility` | Async assertions (integration tests only) |
-
-### 8.2 Test Categories
-
-| Category | Location | Infrastructure |
-|---|---|---|
-| Unit tests | `src/test/java` | Mocked dependencies |
-| Integration tests | `src/integrationTest/java` | EmbeddedKafka + H2 in-memory (PostgreSQL mode) |
-| API tests | `src/test/java` | MockMvc |
-
-### 8.3 Running Tests
+## Quick start
 
 ```bash
-# Unit tests (416 tests)
-./gradlew test
+# 1. Shared infrastructure
+cd ../cce-collector-service && docker compose up -d postgres kafka
 
-# Integration tests (33 tests — EmbeddedKafka + H2)
-./gradlew integrationTest
+# 2. Schema — from the two services that own it, in this order
+cd ../cce-protocol-service && ./gradlew bootRun   # creates 4 tables
+cd ../cce-matcher-service  && ./gradlew bootRun   # creates 9 tables
 
-# Specific test class
-./gradlew test --tests ComplianceEngineTest
+# 3. This service
+./gradlew build && ./gradlew bootRun
 
-# Full build + unit tests
-./gradlew build
-
-# With test coverage
-./gradlew test jacocoTestReport
+# 4. Verify
+curl -s localhost:8092/actuator/health
 ```
 
-## 9. IDE Setup
+## Configuration
 
-### 9.1 IntelliJ IDEA
-
-1. Import as Gradle project
-2. Set JDK to 21
-3. Enable annotation processing (required for Lombok, used throughout the domain/DTO/service layers)
-4. Configure Spring Boot run configuration:
-   - Main class: `org.openphc.cce.compliance.ComplianceServiceApplication`
-   - Active profiles: `local` (if needed)
-   - Environment variables: as listed in Section 3.1
-
-### 9.2 VS Code
-
-1. Install "Extension Pack for Java" and "Spring Boot Extension Pack"
-2. Open the project folder
-3. VS Code auto-detects the Gradle project
-4. Use the Spring Boot Dashboard to run/debug
-
-## 10. Logging
-
-### 10.1 Log Format
-
-```
-2026-03-15 10:30:00.123 [kafka-consumer-1] [corr-abc123] INFO ComplianceEngine - Processing inbound event...
-```
-
-Format: `timestamp [thread] [correlationId] level logger - message`
-
-### 10.2 Log Levels
-
-| Logger | Default Level | Description |
+| Variable | Default | Notes |
 |---|---|---|
-| `org.openphc.cce.compliance` | `INFO` | Application logs |
-| `org.springframework.kafka` | `WARN` | Kafka framework logs |
-| `org.hibernate.SQL` | `WARN` | SQL statement logs |
+| `SERVER_PORT` | `8092` | |
+| `DB_HOST` / `DB_PORT` | `localhost` / `5432` | `5433` for the collector's shared instance |
+| `DB_NAME` | `ccedb` | |
+| `DB_USERNAME` / `DB_PASSWORD` | `cce_user` / `cce_pass` | needs **no** DDL rights |
+| `KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | |
+| `CCE_SLA_POLL_INTERVAL_MS` | `5000` | how often to look for due transitions |
+| `CCE_SLA_BATCH_SIZE` | `100` | rows claimed per transaction |
+| `CCE_SLA_INSTANCE_ID` | `$HOSTNAME` | recorded in `processed_by` |
+| `CCE_SLA_MAX_BACKOFF_SECONDS` | `3600` | cap on the `2^attempts` retry backoff |
+| `CCE_PARSED_PROTOCOL_CACHE_SIZE` | `256` | shared parsed-protocol cache |
+| `CCE_PUBLISH_CONFIRM_TIMEOUT_MS` | `5000` | how long to wait for a broker ack before recording the trigger unpublished |
 
-### 10.3 Adjusting Log Levels
+### Tuning the sweep
+
+`poll-interval-ms` is the steady-state cost, not the drain rate — a backlog is cleared within a single
+cycle because batches are drained until one comes back short
+([Architecture §3](architecture-overview.md#3-the-claim-protocol)). Lowering it shortens the *detection*
+delay for a newly-due transition; it does not make a backlog clear faster.
+
+`batch-size` trades transaction length against round trips. Larger batches hold row locks longer, which
+only matters when the Matcher Service is inserting into `step_sla_state_transition` heavily at the same
+time.
+
+## Project layout
+
+```
+org.openphc.cce.compliance
+├── service/SlaTransitionEvaluator   @Scheduled driver — polls, loops, holds no transaction
+├── service/SlaTransitionApplier     the @Transactional boundary — claim and apply
+├── service/IntelligenceEventLogService
+├── domain/repository/SlaTransitionClaimRepository   the SKIP LOCKED claim query
+├── web/controller/IntelligenceEventLogController
+├── web/DtoMapper, web/dto/
+└── config/  KafkaConfig (produce-only), ObservabilityConfig
+```
+
+Entities, repositories, `DeviationService` and `IntelligenceActionEvaluator` come from
+`cce-common-util`. What this service adds is the claim query, the transaction boundary and the
+scheduler.
+
+The driver/applier split is not stylistic — see
+[Architecture §3](architecture-overview.md#why-a-driver-and-an-applier). If you merge them, the
+`@Transactional` annotation silently stops taking effect.
+
+## Testing
 
 ```bash
-# Via environment variable
-LOGGING_LEVEL_ORG_OPENPHC_CCE_COMPLIANCE=DEBUG java -jar build/libs/cce-compliance-service-1.0.0.jar
-
-# Via application.yml override
-# logging.level.org.openphc.cce.compliance: DEBUG
+./gradlew test              # 44 unit tests
+./gradlew build             # tests + coverage gate
+./gradlew jacocoTestReport
 ```
 
-## 11. Troubleshooting
+The coverage gate is **0.98** instruction coverage, excluding `ComplianceServiceApplication`.
 
-### 11.1 Common Issues
+There is no integration-test source set. The behaviour that would justify one — concurrent claims
+across replicas — cannot be reproduced against H2, because `FOR UPDATE SKIP LOCKED` semantics are the
+thing under test. Verify that against real PostgreSQL.
 
-| Issue | Cause | Solution |
-|---|---|---|
-| `Connection refused: localhost:5433` | PostgreSQL not running | Start collector service infrastructure: `cd cce-collector-service && docker compose up -d` |
-| `Connection refused: localhost:9092` | Kafka not running | Start Kafka or Docker container |
-| `401 Unauthorized` on API calls | Authentication handled by gateway | Ensure requests come through the API gateway |
-| `Flyway migration failed` | Schema conflicts | Check migration scripts; there is no Flyway Gradle plugin in this project, so reset manually (dev only) by dropping the affected tables and `flyway_schema_history_compliance` rows via psql |
-| `Deserialization error` | Message format mismatch | Check producer serialization, trusted packages |
-| Build fails with `javac not found` | JDK not installed (JRE only) | Install JDK 21 or use Docker build |
+Controller tests build MockMvc with `MockMvcBuilders.standaloneSetup` rather than `@WebMvcTest`,
+because the application class carries `@EnableJpaRepositories` and a web slice would fail looking for
+an `entityManagerFactory`. They register a `PageableHandlerMethodArgumentResolver` explicitly, since
+standalone setup does not supply one.
 
-### 11.2 Useful Diagnostic Commands
+## Working on the applier
 
-```bash
-# Check application health (default local port is 8091 unless SERVER_PORT is overridden)
-curl -s http://localhost:8091/actuator/health | jq .
+Two invariants to preserve:
 
-# View application metrics
-curl -s http://localhost:8091/actuator/metrics | jq .
+1. **Never write `step_status`.** It belongs to the Matcher Service. Column ownership is what keeps the
+   two services from overwriting each other —
+   [Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
+2. **Never overwrite `sla_status` on a step already completed.** The Matcher Service settled it from
+   the clinical occurrence time, which is better evidence than the clock. Record the deviation instead.
 
-# Check specific metric
-curl -s http://localhost:8091/actuator/metrics/cce.events.processed | jq .
+Both are asserted by the existing tests; a change that breaks either will fail rather than silently
+corrupt a step.
 
-# View Prometheus metrics
-curl http://localhost:8091/actuator/prometheus
-
-# Check database connectivity
-psql -h localhost -p 5433 -U cce_user -d ccedb -c "SELECT 1"
-
-# Check Kafka topics
-kafka-topics.sh --bootstrap-server localhost:9092 --list
-
-# Check consumer group lag
-kafka-consumer-groups.sh --bootstrap-server localhost:9092 \
-  --group cce-compliance-service --describe
-```
-
-## 12. Security Notes for Development
-
-Authentication and authorization are handled by the **CCE API Gateway**. This service does not implement security directly — all requests are expected to arrive pre-authenticated through the gateway.
-
-For local development, requests can be made directly to the service without authentication.
+When adding a case to the behaviour table, add it to
+[Architecture §4](architecture-overview.md#4-what-the-applier-does) as well — that table is the spec,
+and a case that exists in code but not there is undiscoverable.

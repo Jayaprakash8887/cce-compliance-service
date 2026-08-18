@@ -1,8 +1,8 @@
 package org.openphc.cce.compliance.service;
 
 import jakarta.persistence.EntityNotFoundException;
-import org.openphc.cce.compliance.domain.entity.IntelligenceEventLog;
-import org.openphc.cce.compliance.domain.repository.IntelligenceEventLogRepository;
+import org.openphc.cce.common.entity.IntelligenceEventLog;
+import org.openphc.cce.common.repository.IntelligenceEventLogRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;

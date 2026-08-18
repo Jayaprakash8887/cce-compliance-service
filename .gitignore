@@ -52,8 +52,6 @@ test-output/
 hs_err_pid*
 replay_pid*
 
-.github/
-.github/workflows/
 artifacts/
 bin/
 target/
