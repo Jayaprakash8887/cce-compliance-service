@@ -101,7 +101,7 @@ spec:
 election, no lease, no partition assignment — so an added replica adds claim throughput directly. This
 is unlike the Matcher Service, whose parallelism is bounded by Kafka partitions.
 
-Scale on the `cce.sla.transitions.unprocessed` gauge rather than on CPU: this service is
+Scale on the `cce.sla.transitions.due` gauge rather than on CPU: this service is
 database-bound, and a backlog is visible in that gauge long before it shows up as CPU pressure.
 
 ## Kafka
@@ -125,7 +125,7 @@ the broker, it is a leftover from the pre-split monolith and can be deleted.
 
 Note what readiness does **not** cover: the scheduler. A pod can be ready and serving the read API
 while its SLA sweep is stalled. The metric to alert on is
-`cce.sla.transitions.unprocessed` — see
+`cce.sla.transitions.due` — see
 [Architecture §6](architecture-overview.md#6-observability) for how to read it alongside
 `evaluator.cycles` and `batches.failed`.
 
@@ -133,7 +133,7 @@ Suggested alerts:
 
 | Condition | Meaning |
 |---|---|
-| `cce.sla.transitions.unprocessed` rising for > 15 min | the sweep is not keeping up |
+| `cce.sla.transitions.due` rising for > 15 min | the sweep is not keeping up |
 | `cce.sla.evaluator.batches.failed` increasing | rows are failing and backing off |
 | `cce.sla.evaluator.cycles` flat | the scheduler thread has stopped — liveness will not catch this |
 
@@ -147,8 +147,8 @@ This service owns no tables, so there is nothing here to back up. `step_sla_stat
 | Symptom | Likely cause |
 |---|---|
 | Startup fails: schema validation error | Deployed out of order — the Protocol and Matcher services must migrate `ccedb` first |
-| `unprocessed` gauge rising, `cycles` incrementing | Sweep running but not keeping up — add replicas or raise `batch-size` |
-| `unprocessed` rising, `batches.failed` rising | Rows failing and backing off; check the logs for the rolled-back batch |
+| `due` gauge rising, `cycles` incrementing | Sweep running but not keeping up — add replicas or raise `batch-size` |
+| `due` rising, `batches.failed` rising | Rows failing and backing off; check the logs for the rolled-back batch |
 | `cycles` not incrementing | Scheduler stopped; restart the pod. Liveness will not detect this |
 | Deviations recorded but no intelligence delivered | Check `?published=false` on the [read API](api-reference.md#get-v1complianceintelligence-events) — the trigger may be built but unconfirmed |
 | The same alert delivered repeatedly | A transition retrying against an already-recorded deviation should be de-duplicated ([Architecture §5](architecture-overview.md#5-intelligence-on-deviation)); check `attempts` on the row |

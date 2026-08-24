@@ -59,9 +59,7 @@ cce:
     topics:
       intelligence-triggers: cce.intelligence.triggers
       default-partitions: 25
-    retry:
-      max-attempts: 3
-      backoff-interval-ms: 1000
+    # No cce.kafka.retry.* here: retry and DLQ settings govern a consumer, and this service has none.
   protocol:
     # Read by the shared ParsedProtocolCache, which intelligence evaluation uses to resolve a step's
     # metadata from its protocol definition.

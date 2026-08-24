@@ -50,7 +50,18 @@ public interface SlaTransitionClaimRepository extends JpaRepository<StepSlaState
             """)
     List<StepSlaStateTransition> claimDue(@Param("now") OffsetDateTime now, Limit limit);
 
-    /** Backs the cce.sla.transitions.unprocessed gauge — the evaluator's backlog. */
-    @Query("SELECT COUNT(t) FROM StepSlaStateTransition t WHERE t.processed = false")
-    long countUnprocessed();
+    /**
+     * Backs the {@code cce.sla.transitions.due} gauge — the evaluator's backlog.
+     *
+     * <p>Carries the same predicate as {@link #claimDue}, deliberately: a gauge counting every
+     * unprocessed row would include the whole future schedule, so it would track enrolment volume
+     * rather than lateness and could never sit near zero. What is wanted is the rows that are due
+     * <em>now</em> and still unapplied.
+     */
+    @Query("""
+            SELECT COUNT(t) FROM StepSlaStateTransition t
+            WHERE t.processed = false
+              AND t.nextAttemptAt <= :now
+            """)
+    long countDue(@Param("now") OffsetDateTime now);
 }

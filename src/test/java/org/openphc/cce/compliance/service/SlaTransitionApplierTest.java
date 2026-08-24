@@ -1,6 +1,5 @@
 package org.openphc.cce.compliance.service;
 
-import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
 import org.openphc.cce.common.service.DeviationService;
 import org.openphc.cce.common.service.IntelligenceActionEvaluator;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -153,6 +152,37 @@ class SlaTransitionApplierTest {
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             verify(stepInstanceRepository, never()).save(any());
             verify(deviationService).createDeviation(step, DeviationType.MISSED);
+        }
+
+        @Test
+        void completedAfterThreshold_optional_recordsNoMissedDeviation() {
+            // A MISSED deviation is must-only, on this path as much as on the outstanding one. Were the
+            // exemption applied only when the event never arrives, an optional step done late would be
+            // penalised while one never done at all was not.
+            StepInstance step = step(StepStatus.COMPLETED, SlaStatus.MISSED, "could", now.minusMinutes(5));
+            StepSlaStateTransition row = row(step, SlaTransitionType.OVERDUE_TO_MISSED,
+                    SlaStatus.OVERDUE, SlaStatus.MISSED, now.minusHours(1));
+            claim(row, step);
+
+            applier.claimAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.MISSED, step.getSlaStatus(), "Matcher settled it; it stands");
+            verify(deviationService, never()).createDeviation(any(), any());
+            assertTrue(row.isProcessed());
+        }
+
+        @Test
+        void completedAfterThreshold_optional_stillRecordsAnOverdueDeviation() {
+            // The exemption is MISSED-only: an optional step can still be reported as having run late.
+            StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "could", now.minusMinutes(5));
+            StepSlaStateTransition row = row(step, SlaTransitionType.PENDING_TO_OVERDUE,
+                    SlaStatus.PENDING, SlaStatus.OVERDUE, now.minusHours(1));
+            claim(row, step);
+            freshDeviation();
+
+            applier.claimAndApply(new ArrayList<>());
+
+            verify(deviationService).createDeviation(step, DeviationType.OVERDUE);
         }
 
         @Test

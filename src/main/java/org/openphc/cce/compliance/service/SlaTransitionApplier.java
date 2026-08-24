@@ -52,7 +52,8 @@ import java.util.UUID;
  *   <tr><th>Step state</th><th>Action</th></tr>
  *   <tr><td>{@code NOT_STARTED}</td><td>advance {@code sla_status}, record the deviation</td></tr>
  *   <tr><td>{@code COMPLETED}, {@code completed_at >= process_by}</td>
- *       <td>SLA already settled at completion — leave it, record the deviation</td></tr>
+ *       <td>SLA already settled at completion — leave it, record the deviation ({@code must} only for
+ *       {@code MISSED})</td></tr>
  *   <tr><td>{@code COMPLETED}, {@code completed_at < process_by}</td>
  *       <td>consume the row; nothing was breached</td></tr>
  * </table>
@@ -99,7 +100,7 @@ public class SlaTransitionApplier {
                 .description("SLA transitions that advanced a step's sla_status")
                 .register(meterRegistry);
         this.consumedCounter = Counter.builder("cce.sla.transitions.consumed")
-                .description("SLA transitions closed without firing, the step having met the deadline")
+                .description("SLA transitions closed without recording a deviation")
                 .register(meterRegistry);
     }
 
@@ -159,6 +160,15 @@ public class SlaTransitionApplier {
             return;
         }
 
+        if (isOptionalMiss(row, step)) {
+            // An optional step breaches nothing by being late either. Matcher settled sla_status as
+            // MISSED from the completion time and that stands, but the MISSED deviation is must-only.
+            consumedCounter.increment();
+            log.debug("Step {} is optional — no MISSED deviation for transition {}",
+                    step.getId(), row.getId());
+            return;
+        }
+
         // Recorded late. Raising the deviation here, rather than at completion, is what lets a late
         // arrival still be reported as the breach it was.
         raiseDeviationFor(row, step);
@@ -180,7 +190,7 @@ public class SlaTransitionApplier {
 
         // An optional step breaches nothing by never arriving: its missed threshold settles the SLA as
         // met, with no deviation, while step_status stays NOT_STARTED to show the event never came.
-        boolean optionalMiss = to == SlaStatus.MISSED && "could".equals(step.getRequiredBehavior());
+        boolean optionalMiss = isOptionalMiss(row, step);
         SlaStatus resolved = optionalMiss ? SlaStatus.MET : to;
 
         step.setSlaStatus(resolved);
@@ -193,6 +203,19 @@ public class SlaTransitionApplier {
         if (!optionalMiss) {
             raiseDeviationFor(row, step);
         }
+    }
+
+    /**
+     * Whether this row is an optional step's missed threshold.
+     *
+     * <p>A {@code MISSED} deviation is {@code must}-only. Applied on both paths — a {@code could} step
+     * that never arrives and one recorded after the threshold are equally unbreached — so that doing the
+     * work late is never penalised more heavily than not doing it at all. An {@code OVERDUE} deviation
+     * carries no such exemption: an optional step can still be reported as running late.
+     */
+    private boolean isOptionalMiss(StepSlaStateTransition row, StepInstance step) {
+        return row.getTransitionType() == SlaTransitionType.OVERDUE_TO_MISSED
+                && "could".equals(step.getRequiredBehavior());
     }
 
     /**

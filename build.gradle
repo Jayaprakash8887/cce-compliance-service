@@ -24,11 +24,6 @@ repositories {
     mavenCentral()
 }
 
-ext {
-    johnzonVersion = '2.0.2'
-    hapiVersion = '7.6.0'
-}
-
 dependencies {
     // Shared vocabulary, Kafka contracts and FHIR parsing/evaluation.
     implementation 'org.openphc.cce:cce-common-util'
@@ -41,24 +36,14 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.kafka:spring-kafka'
 
-    // Database
+    // Database. No Flyway: this service owns no tables and runs with flyway.enabled=false, so a
+    // migration dependency here would only invite it to start writing DDL it does not own.
     runtimeOnly 'org.postgresql:postgresql'
-    implementation 'org.flywaydb:flyway-core'
-    implementation 'org.flywaydb:flyway-database-postgresql'
 
-    // FHIR
-    implementation "ca.uhn.hapi.fhir:hapi-fhir-base:${hapiVersion}"
-    implementation "ca.uhn.hapi.fhir:hapi-fhir-structures-r4:${hapiVersion}"
-    // Neither of the next two is referenced from source, but both are required at runtime — do not
-    // remove as "unused". FhirContext needs a hapi-fhir-caching-* module for its internal caches,
-    // and HAPI's FHIRPath engine loads org.fhir.ucum classes eagerly (NoClassDefFoundError without).
-    implementation "ca.uhn.hapi.fhir:hapi-fhir-caching-caffeine:${hapiVersion}"
-    implementation 'org.fhir:ucum:1.0.8'
-
-    // Expression evaluation
-    implementation "org.apache.johnzon:johnzon-jsonlogic:${johnzonVersion}"
-    implementation "org.apache.johnzon:johnzon-core:${johnzonVersion}"
-    implementation 'jakarta.json:jakarta.json-api:2.1.3'
+    // No FHIR or JSONLogic declarations. This service parses no PlanDefinitions and evaluates no
+    // expressions of its own — it reaches FHIR only through cce-common-util's cache and evaluator, and
+    // that library brings hapi-fhir, johnzon, jakarta.json, hapi-fhir-caching-caffeine and org.fhir:ucum
+    // with it. Redeclaring them here would only be a second version to keep in step.
 
     // Observability
     implementation 'io.micrometer:micrometer-registry-prometheus'
@@ -73,6 +58,8 @@ dependencies {
     testCompileOnly 'org.projectlombok:lombok'
     testAnnotationProcessor 'org.projectlombok:lombok'
 
+    // Lets ApplicationContextTest start the whole context without a live PostgreSQL.
+    testRuntimeOnly 'com.h2database:h2'
 }
 
 tasks.named('test') {

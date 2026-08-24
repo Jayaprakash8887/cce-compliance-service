@@ -79,7 +79,7 @@ Read-only. Everything this service writes is driven by its scheduler, never by a
 ## Testing
 
 ```bash
-./gradlew test              # 44 unit tests
+./gradlew test              # 48 tests (47 unit + a context-boot test)
 ./gradlew build             # tests + coverage gate (0.98 instruction coverage)
 ./gradlew jacocoTestReport  # build/reports/jacoco/test/html/index.html
 ```

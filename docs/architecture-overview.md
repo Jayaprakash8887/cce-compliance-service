@@ -90,17 +90,30 @@ action depends on the step as found:
 | `COMPLETED` | `>= process_by` | leave `sla_status`, record the deviation — the work was late |
 | `COMPLETED` | `< process_by` | consume the row, do nothing — the event beat the deadline |
 
+A step whose row no longer exists is consumed rather than retried: there is no schedule left to honour.
+
 In the second case the Matcher Service already settled `sla_status` at completion, from the clinical
 occurrence time. Overwriting it here would replace a judgement made from the event with one made from
 the clock. The deviation is still recorded, because the deadline was genuinely breached.
 
-| Transition | Deviation |
-|---|---|
-| `PENDING_TO_OVERDUE` | `DeviationType.OVERDUE` |
-| `OVERDUE_TO_MISSED` | `DeviationType.MISSED` |
+| Transition | `required_behavior` | `sla_status` result | Deviation |
+|---|---|---|---|
+| `PENDING_TO_OVERDUE` | any | `OVERDUE` | `OVERDUE` |
+| `OVERDUE_TO_MISSED` | `must` | `MISSED` | `MISSED` |
+| `OVERDUE_TO_MISSED` | `could` | `MET` | *none* |
 
-An **optional** step (`could`) that misses resolves to `SlaStatus.MET` with no deviation: nothing was
-required, so nothing was breached.
+A `MISSED` deviation is **`must`-only** — the rule the shared
+[Data Dictionary](../../cce-common-util/docs/data-dictionary.md#deviationtype) states. Nothing was
+required of an optional step, so nothing was breached by its not happening.
+
+That exemption applies on **both** rows of the behaviour table above, which is the part worth being
+deliberate about. An optional step recorded *after* its missed threshold gets no `MISSED` deviation
+either — `sla_status` still reads `MISSED`, because the Matcher Service settled it from the completion
+time and a completed step's SLA is final, but no deviation is raised. Exempting only the step that never
+arrived would penalise doing optional work late more heavily than not doing it at all.
+
+The exemption is `MISSED`-only. An optional step still takes an `OVERDUE` deviation when it passes its
+due date: "running late" is a reportable fact about optional work, "breached" is not.
 
 The applier **never writes `step_status`**. That column belongs to the Matcher Service, and the whole
 point of splitting the two columns was that neither service writes the other's — see
@@ -136,11 +149,15 @@ consumed.
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `cce.sla.transitions.unprocessed` | gauge | rows due but not yet applied — the primary health signal |
+| `cce.sla.transitions.due` | gauge | rows past their deadline and not yet applied — the primary health signal |
 | `cce.sla.transitions.applied` | counter | transitions that advanced a step's SLA |
-| `cce.sla.transitions.consumed` | counter | rows resolved without a deviation (the event beat the deadline) |
+| `cce.sla.transitions.consumed` | counter | rows closed without recording a deviation — the event beat the deadline, the step was an exempt optional miss, or the SLA had already advanced |
 | `cce.sla.evaluator.cycles` | counter | polling cycles run |
 | `cce.sla.evaluator.batches.failed` | counter | batches that rolled back and were backed off |
+
+The gauge counts only what is **due** — it carries the same `next_attempt_at <= now` predicate as the
+claim query. A gauge over every unprocessed row would fold in the entire future schedule, so it would
+track enrolment volume rather than lateness and could never sit near zero.
 
 The gauge is the one to alert on. It sits near zero in a steady state and rises when transitions fall
 due faster than they are applied — which is the failure this service can actually have. A sustained

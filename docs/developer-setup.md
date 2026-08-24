@@ -75,6 +75,10 @@ Entities, repositories, `DeviationService` and `IntelligenceActionEvaluator` com
 `cce-common-util`. What this service adds is the claim query, the transaction boundary and the
 scheduler.
 
+`build.gradle` reflects that: it declares no FHIR, JSONLogic or Flyway dependency of its own. The FHIR
+layer arrives transitively through `cce-common-util`, and Flyway would be dead weight in a service that
+owns no tables. Redeclaring any of them here would only be a second version to keep in step.
+
 The driver/applier split is not stylistic — see
 [Architecture §3](architecture-overview.md#why-a-driver-and-an-applier). If you merge them, the
 `@Transactional` annotation silently stops taking effect.
@@ -82,12 +86,20 @@ The driver/applier split is not stylistic — see
 ## Testing
 
 ```bash
-./gradlew test              # 44 unit tests
+./gradlew test              # 48 tests — 47 unit plus one context-boot test
 ./gradlew build             # tests + coverage gate
 ./gradlew jacocoTestReport
 ```
 
 The coverage gate is **0.98** instruction coverage, excluding `ComplianceServiceApplication`.
+
+`ApplicationContextTest` boots the real context on H2 with Flyway disabled and the poll interval widened so the sweep does not repeat. It is
+the only test that exercises the wiring: everything else constructs its subject directly, which leaves a
+bean this service needs at runtime but never names in source invisible behind the coverage figure. It
+also validates the claim query — Spring Data parses every `@Query` at bootstrap, so a typo in the claim
+JPQL fails there rather than on the first poll in production. That matters more here than in the sibling
+services, because this one runs `ddl-auto: validate` against a schema it does not own: a mapping it gets
+wrong is a failure to start.
 
 There is no integration-test source set. The behaviour that would justify one — concurrent claims
 across replicas — cannot be reproduced against H2, because `FOR UPDATE SKIP LOCKED` semantics are the
@@ -107,6 +119,9 @@ Two invariants to preserve:
    [Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
 2. **Never overwrite `sla_status` on a step already completed.** The Matcher Service settled it from
    the clinical occurrence time, which is better evidence than the clock. Record the deviation instead.
+3. **Keep the `MISSED` deviation `must`-only on every path.** `isOptionalMiss` is deliberately shared by
+   the completed and outstanding paths. Applying the exemption to only one of them would make an optional
+   step recorded late worse off than one never recorded at all.
 
 Both are asserted by the existing tests; a change that breaks either will fail rather than silently
 corrupt a step.
