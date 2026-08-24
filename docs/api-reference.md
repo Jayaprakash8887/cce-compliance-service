@@ -81,7 +81,7 @@ Notes on reading a row:
 
 `intelligence_event_log` is deliberately flat, with no foreign keys — the ids are recorded as values so
 a row survives the deletion of anything it references. Column detail:
-[Data Dictionary §12](../../cce-common-util/docs/data-dictionary.md#12-intelligence_event_log).
+[Data Dictionary §11](../../cce-common-util/docs/data-dictionary.md#11-intelligence_event_log).
 
 ---
 

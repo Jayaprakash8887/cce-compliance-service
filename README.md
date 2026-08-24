@@ -1,7 +1,8 @@
 # CCE Compliance Service
 
 The time plane of the CCE system. Claims the SLA transitions the Matcher Service scheduled as their
-deadlines pass, advances `step_instance.sla_status`, records the resulting `OVERDUE` / `MISSED`
+deadlines pass, writes `step_instance.sla_status` (it is the column's only writer), records the
+resulting `OVERDUE` / `MISSED`
 deviations, and publishes the intelligence actions they trigger.
 
 It matches no events, enrols no patients and manages no definitions. It **owns no tables** and runs no
@@ -79,7 +80,7 @@ Read-only. Everything this service writes is driven by its scheduler, never by a
 ## Testing
 
 ```bash
-./gradlew test              # 48 tests (47 unit + a context-boot test)
+./gradlew test              # 54 tests (53 unit + a context-boot test)
 ./gradlew build             # tests + coverage gate (0.98 instruction coverage)
 ./gradlew jacocoTestReport  # build/reports/jacoco/test/html/index.html
 ```

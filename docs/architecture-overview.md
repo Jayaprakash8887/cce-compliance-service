@@ -14,7 +14,7 @@ only what is specific to this service.
 Everything driven by **time passing**:
 
 1. Claim the `step_sla_state_transition` rows the Matcher Service scheduled, once they fall due.
-2. Advance `step_instance.sla_status`.
+2. Write `step_instance.sla_status` — this service is its only writer.
 3. Record the resulting `OVERDUE` / `MISSED` deviations.
 4. Evaluate the intelligence actions those deviations trigger, and publish them.
 
@@ -81,43 +81,65 @@ The evaluator's `poll()` never propagates: a failed cycle must not kill the sche
 
 ## 4. What the applier does
 
-The event may have arrived between the transition being scheduled and its deadline falling due, so the
-action depends on the step as found:
+This service is the **only writer of `step_instance.sla_status`**. The Matcher Service records that a
+step completed and when — it never judges whether that was timely — so there is no question here of
+overwriting what another service decided. A step's `sla_status` is null until a threshold falls due and
+this service judges it.
 
-| `step_status` | `completed_at` vs `process_by` | Action |
-|---|---|---|
-| `NOT_STARTED` | — | advance `sla_status`, record the deviation |
-| `COMPLETED` | `>= process_by` | leave `sla_status`, record the deviation — the work was late |
-| `COMPLETED` | `< process_by` | consume the row, do nothing — the event beat the deadline |
+The judgement compares `step_instance.completed_at`, the clinical occurrence time of the completing
+event, against the row's `process_by`. The wall clock is not consulted: the row was claimed *because*
+its deadline passed, so all that remains to ask is whether the work had happened by then.
+
+| Row | Step when applied | `sla_status` | Deviation |
+|---|---|---|---|
+| `DUE_DATE_REACHED` | not completed | `OVERDUE` | `OVERDUE` |
+| `DUE_DATE_REACHED` | `completed_at >= process_by` | `OVERDUE` | `OVERDUE` |
+| `DUE_DATE_REACHED` | `completed_at < process_by` | `MET` | — |
+| `MISSED_DATE_REACHED` | not completed | `MISSED` | `MISSED` |
+| `MISSED_DATE_REACHED` | `completed_at >= process_by` | `MISSED` | `MISSED` |
+| `MISSED_DATE_REACHED` | `completed_at < process_by` | *unchanged* | — |
 
 A step whose row no longer exists is consumed rather than retried: there is no schedule left to honour.
+A step marked `COMPLETED` with no `completed_at` is treated as a breach — the row is better evidence
+than a missing timestamp, and letting it pass would hide the gap instead of surfacing it.
 
-In the second case the Matcher Service already settled `sla_status` at completion, from the clinical
-occurrence time. Overwriting it here would replace a judgement made from the event with one made from
-the clock. The deviation is still recorded, because the deadline was genuinely breached.
+### Only the due date settles an SLA as MET
 
-| Transition | `required_behavior` | `sla_status` result | Deviation |
-|---|---|---|---|
-| `PENDING_TO_OVERDUE` | any | `OVERDUE` | `OVERDUE` |
-| `OVERDUE_TO_MISSED` | `must` | `MISSED` | `MISSED` |
-| `OVERDUE_TO_MISSED` | `could` | `MET` | *none* |
+The last table row is the one worth being careful about. A step completed *between* its two thresholds
+did not breach the missed date — but it is not `MET` either. It is the `OVERDUE` that the due-date row
+made it.
 
-A `MISSED` deviation is **`must`-only** — the rule the shared
+"Did not breach this threshold" and "met its SLA" coincide only at the due date. Reading the missed-date
+row as `MET` would relabel a late completion as on time, so `MET` is written on the `DUE_DATE_REACHED`
+row alone, and only over a null.
+
+Writes are **forward-only** for the same reason. `MET` and `MISSED` are settled outcomes, and `OVERDUE`
+must never replace `MISSED` — which is exactly what a retry applying a step's two rows out of order
+would otherwise do.
+
+### Optional steps
+
+A `MISSED` status and a `MISSED` deviation are both **`must`-only** — the rule the shared
 [Data Dictionary](../../cce-common-util/docs/data-dictionary.md#deviationtype) states. Nothing was
-required of an optional step, so nothing was breached by its not happening.
+required of an optional (`could`) step, so nothing was breached by its not happening.
 
-That exemption applies on **both** rows of the behaviour table above, which is the part worth being
-deliberate about. An optional step recorded *after* its missed threshold gets no `MISSED` deviation
-either — `sla_status` still reads `MISSED`, because the Matcher Service settled it from the completion
-time and a completed step's SLA is final, but no deviation is raised. Exempting only the step that never
-arrived would penalise doing optional work late more heavily than not doing it at all.
+The exemption applies on **both** the completed and the outstanding path, which is the part worth being
+deliberate about: an optional step recorded *after* its missed threshold gets no `MISSED` deviation
+either. Exempting only the step that never arrived would penalise doing optional work late more heavily
+than not doing it at all.
 
-The exemption is `MISSED`-only. An optional step still takes an `OVERDUE` deviation when it passes its
-due date: "running late" is a reportable fact about optional work, "breached" is not.
+The exemption is `MISSED`-only. An optional step still takes an `OVERDUE` when it passes its due date:
+"running late" is a reportable fact about optional work, "breached" is not.
 
-The applier **never writes `step_status`**. That column belongs to the Matcher Service, and the whole
-point of splitting the two columns was that neither service writes the other's — see
+### What it does not write
+
+The applier **never writes `step_status`**. That column belongs to the Matcher Service — see
 [Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
+
+Every `sla_status` write is mirrored into `step_instance_history` through the shared
+`StateTransitionHistoryService`, in the same transaction. Without it the time-driven half of a step's
+timeline would be missing from that table and from the CDC stream downstream of it: a step that went
+overdue and was never completed would show only its creation.
 
 ### Retry
 

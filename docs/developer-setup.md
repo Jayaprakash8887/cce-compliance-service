@@ -86,7 +86,7 @@ The driver/applier split is not stylistic — see
 ## Testing
 
 ```bash
-./gradlew test              # 48 tests — 47 unit plus one context-boot test
+./gradlew test              # 54 tests — 53 unit plus one context-boot test
 ./gradlew build             # tests + coverage gate
 ./gradlew jacocoTestReport
 ```
@@ -112,19 +112,24 @@ standalone setup does not supply one.
 
 ## Working on the applier
 
-Two invariants to preserve:
+Four invariants to preserve:
 
 1. **Never write `step_status`.** It belongs to the Matcher Service. Column ownership is what keeps the
    two services from overwriting each other —
    [Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
-2. **Never overwrite `sla_status` on a step already completed.** The Matcher Service settled it from
-   the clinical occurrence time, which is better evidence than the clock. Record the deviation instead.
-3. **Keep the `MISSED` deviation `must`-only on every path.** `isOptionalMiss` is deliberately shared by
-   the completed and outstanding paths. Applying the exemption to only one of them would make an optional
-   step recorded late worse off than one never recorded at all.
+2. **Judge against `completed_at`, never the wall clock.** The row was claimed because its deadline
+   passed; the only remaining question is whether the work had happened by then, and the clinical
+   occurrence time is the evidence for that.
+3. **Write `MET` only on the `DUE_DATE_REACHED` row, and only over a null.** Beating the missed date
+   means the step was not written off, not that it was on time — a step completed between its two
+   thresholds is `OVERDUE`, and `writeSlaStatus`'s forward-only rule is what keeps a retry applying
+   rows out of order from walking that back.
+4. **Keep the `MISSED` status and deviation `must`-only on every path.** `isOptionalMiss` is
+   deliberately shared by the completed and outstanding paths. Applying the exemption to only one would
+   make an optional step recorded late worse off than one never recorded at all.
 
-Both are asserted by the existing tests; a change that breaks either will fail rather than silently
-corrupt a step.
+All four are asserted by the existing tests; a change that breaks any of them will fail rather than
+silently corrupt a step.
 
 When adding a case to the behaviour table, add it to
 [Architecture §4](architecture-overview.md#4-what-the-applier-does) as well — that table is the spec,
