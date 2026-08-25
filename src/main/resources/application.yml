@@ -36,7 +36,7 @@ spring:
   # --- Flyway ---
   # This service owns no tables. The Matcher Service's migration creates step_instance,
   # step_sla_state_transition, deviation and intelligence_event_log; the Protocol Service's creates
-  # protocol_definition, action_definition, trigger_index and audit_log. Enabling Flyway here would
+  # protocol_definition, action_definition and trigger_index. Enabling Flyway here would
   # only add an empty ledger and invite a second service to start writing DDL for tables it does not own.
   flyway:
     enabled: false
