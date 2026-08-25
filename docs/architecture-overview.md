@@ -40,8 +40,9 @@ Deploy **last**. Table ownership and the full ordering rationale:
 
 ```mermaid
 flowchart TD
-    S["@Scheduled poll<br/>every cce.sla.poll-interval-ms"] --> D["claimDue(now, batchSize)<br/>FOR UPDATE SKIP LOCKED<br/>ORDER BY process_by ASC"]
-    D --> E{"rows returned?"}
+    S["@Scheduled poll<br/>every cce.sla.poll-interval-ms"] --> D["claimDue(now, batchSize)<br/>deadline has passed"]
+    D --> C["claimForCompletedSteps(now, room left)<br/>step already COMPLETED"]
+    C --> E{"rows returned?"}
     E -->|"none"| Z["cycle ends — one empty query"]
     E -->|"some"| A["apply each row<br/>same transaction as the claim"]
     A --> F{"batch full?"}
@@ -69,6 +70,23 @@ interval. `MAX_BATCHES_PER_CYCLE` (100) stops a pathological backlog from monopo
 
 `ORDER BY process_by ASC` means the oldest deadline is always handled first, so a backlog degrades by
 latency rather than by dropping the most overdue work.
+
+### Two reasons a row is claimable
+
+A row's deadline passing is one. The other is its step already being `COMPLETED` with a `completed_at`:
+the judgement compares that timestamp against `process_by` and never consults the clock, so once the
+completion is recorded the outcome is fixed and the deadline arriving later would only confirm it.
+Applying it now is the same verdict, sooner — which is what keeps an on-time completion from reading as
+a null `sla_status` until its due date, weeks away for a step recorded early.
+
+The two claims are disjoint (`next_attempt_at > now` on the second), so no row is applied twice, and
+they share the batch: deadline-driven rows first, the second claim asking only for the room left. A full
+first batch skips the second query entirely — fallen deadlines are the pressing work, and the evaluator
+comes back for the rest in the next cycle.
+
+The second claim is cheap because `idx_step_instance_completed_unjudged` covers exactly the
+completed-but-unsettled set, which a sweep empties. Driving it the other way — scanning pending
+transitions and checking each step — would mean walking the entire future schedule every few seconds.
 
 ### Why a driver and an applier
 
@@ -171,15 +189,17 @@ consumed.
 
 | Metric | Type | Meaning |
 |---|---|---|
-| `cce.sla.transitions.due` | gauge | rows past their deadline and not yet applied — the primary health signal |
+| `cce.sla.transitions.due` | gauge | rows the next cycle would claim: past their deadline, or belonging to an already-completed step — the primary health signal |
 | `cce.sla.transitions.applied` | counter | transitions that advanced a step's SLA |
 | `cce.sla.transitions.consumed` | counter | rows closed without recording a deviation — the event beat the deadline, the step was an exempt optional miss, or the SLA had already advanced |
 | `cce.sla.evaluator.cycles` | counter | polling cycles run |
 | `cce.sla.evaluator.batches.failed` | counter | batches that rolled back and were backed off |
 
-The gauge counts only what is **due** — it carries the same `next_attempt_at <= now` predicate as the
-claim query. A gauge over every unprocessed row would fold in the entire future schedule, so it would
-track enrolment volume rather than lateness and could never sit near zero.
+The gauge counts only what is **claimable** — it carries both claim predicates, counted by two queries
+and added. A gauge over every unprocessed row would fold in the entire future schedule, so it would
+track enrolment volume rather than lateness and could never sit near zero. Two queries rather than one
+`OR`: the branches read different indexes, and an `OR` across them plans as a sequential scan of the
+whole pending schedule on every scrape.
 
 The gauge is the one to alert on. It sits near zero in a steady state and rises when transitions fall
 due faster than they are applied — which is the failure this service can actually have. A sustained

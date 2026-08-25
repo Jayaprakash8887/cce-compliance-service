@@ -5,6 +5,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.openphc.cce.common.entity.Deviation;
@@ -19,6 +20,7 @@ import org.openphc.cce.common.service.DeviationService;
 import org.openphc.cce.common.service.IntelligenceActionEvaluator;
 import org.openphc.cce.common.service.StateTransitionHistoryService;
 import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
+import org.springframework.data.domain.Limit;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
@@ -241,6 +243,116 @@ class SlaTransitionApplierTest {
         }
     }
 
+    // ── the work arrived, and its deadlines have not ──
+
+    @Nested
+    class CompletedStepClaimedBeforeItsDeadline {
+
+        @Test
+        void earlyCompletion_isSettledMetWithoutWaitingForItsDueDate() {
+            // The reason the second claim path exists. Nothing about this step can change any more, so
+            // holding the verdict back until the due date would only delay recording what is decided.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
+            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
+            claimForCompletedStep(row, step);
+
+            applier.claimAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            verify(deviationService, never()).createDeviation(any(), any());
+            assertTrue(row.isProcessed());
+        }
+
+        @Test
+        void bothOfAnEarlyCompletionsRowsAreSettledInOneBatch() {
+            // Otherwise the missed-date row would sit pending until its own date and show up as backlog
+            // on a step whose SLA was settled weeks earlier.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
+            StepSlaStateTransition dueRow = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
+            StepSlaStateTransition missedRow =
+                    row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(14));
+            when(transitionRepository.claimForCompletedSteps(any(), any()))
+                    .thenReturn(List.of(dueRow, missedRow));
+            when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
+
+            int count = applier.claimAndApply(new ArrayList<>());
+
+            assertEquals(2, count);
+            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            assertTrue(dueRow.isProcessed());
+            assertTrue(missedRow.isProcessed());
+            verify(deviationService, never()).createDeviation(any(), any());
+        }
+
+        @Test
+        void aLateCompletionsFutureMissedRowIsConsumedRatherThanBecomingMissed() {
+            // The early claim must not invent a breach: this step was recorded late, but before its
+            // missed date, so it keeps the OVERDUE the due-date row gave it and takes no deviation.
+            StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusHours(1));
+            StepSlaStateTransition row =
+                    row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(5));
+            claimForCompletedStep(row, step);
+
+            applier.claimAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
+            verify(deviationService, never()).createDeviation(any(), any());
+            assertTrue(row.isProcessed());
+        }
+
+        @Test
+        void theEarlyClaimIsReportedForBackoffLikeAnyOther() {
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
+            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
+            claimForCompletedStep(row, step);
+            List<UUID> claimed = new ArrayList<>();
+
+            applier.claimAndApply(claimed);
+
+            assertEquals(List.of(row.getId()), claimed);
+        }
+    }
+
+    // ── the two claims share one batch ──
+
+    @Nested
+    class BatchCapacity {
+
+        @Test
+        void theSecondClaimOnlyAsksForWhatTheFirstLeftRoomFor() {
+            SlaTransitionApplier smallBatch = applierWithBatchSize(3);
+            StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
+            claim(row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)), step);
+            freshDeviation();
+
+            smallBatch.claimAndApply(new ArrayList<>());
+
+            ArgumentCaptor<Limit> limit = ArgumentCaptor.forClass(Limit.class);
+            verify(transitionRepository).claimForCompletedSteps(any(), limit.capture());
+            assertEquals(2, limit.getValue().max());
+        }
+
+        @Test
+        void aFullDeadlineDrivenBatchSkipsTheSecondClaimEntirely() {
+            // A backlog of fallen deadlines is the pressing work; the evaluator drains in further
+            // cycles rather than widening one batch past its size.
+            SlaTransitionApplier singleRowBatch = applierWithBatchSize(1);
+            StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
+            claim(row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)), step);
+            freshDeviation();
+
+            singleRowBatch.claimAndApply(new ArrayList<>());
+
+            verify(transitionRepository, never()).claimForCompletedSteps(any(), any());
+        }
+
+        private SlaTransitionApplier applierWithBatchSize(int batchSize) {
+            return new SlaTransitionApplier(transitionRepository, stepInstanceRepository,
+                    deviationService, intelligenceActionEvaluator, stateTransitionHistoryService,
+                    "test-instance", batchSize, 3600, new SimpleMeterRegistry());
+        }
+    }
+
     // ── the forward-only rule ──
 
     @Nested
@@ -391,6 +503,12 @@ class SlaTransitionApplierTest {
 
     private void claim(StepSlaStateTransition row, StepInstance step) {
         when(transitionRepository.claimDue(any(), any())).thenReturn(List.of(row));
+        when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
+    }
+
+    /** Claimed because its step is already completed, not because its deadline has passed. */
+    private void claimForCompletedStep(StepSlaStateTransition row, StepInstance step) {
+        when(transitionRepository.claimForCompletedSteps(any(), any())).thenReturn(List.of(row));
         when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
     }
 

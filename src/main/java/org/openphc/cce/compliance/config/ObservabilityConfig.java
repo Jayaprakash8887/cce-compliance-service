@@ -18,7 +18,8 @@ import java.time.ZoneOffset;
  *
  * <p>{@code cce.sla.transitions.due} is the service's primary health signal. In a steady state it hovers
  * near zero; a rising value means transitions are falling due faster than they are being applied, or that
- * rows are failing and backing off. It counts only rows whose deadline has passed — counting every
+ * rows are failing and backing off. It counts what the next cycle would claim — rows whose deadline has
+ * passed, plus rows of steps already completed and so already judgeable — and nothing else: counting every
  * unprocessed row would fold in the whole future schedule and track enrolment volume instead.
  */
 @Configuration
@@ -28,8 +29,19 @@ public class ObservabilityConfig {
     public MeterBinder complianceMetrics(SlaTransitionClaimRepository transitionRepository) {
         return registry -> Gauge.builder("cce.sla.transitions.due",
                         transitionRepository,
-                        repository -> repository.countDue(OffsetDateTime.now(ZoneOffset.UTC)))
-                .description("SLA transition rows past their deadline and not yet applied")
+                        ObservabilityConfig::claimableNow)
+                .description("SLA transition rows the next cycle would claim: past their deadline, "
+                        + "or belonging to an already-completed step")
                 .register(registry);
+    }
+
+    /**
+     * What the next cycle would claim: the two claim predicates counted separately and added. Separate
+     * queries because an {@code OR} across them plans as a sequential scan of the entire pending
+     * schedule; they are disjoint, so the sum is exact.
+     */
+    private static double claimableNow(SlaTransitionClaimRepository repository) {
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        return repository.countDue(now) + repository.countClaimableForCompletedSteps(now);
     }
 }

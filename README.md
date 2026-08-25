@@ -54,7 +54,7 @@ Gradle composite build assumes.
                           ▼
                     SlaTransitionApplier         one transaction per batch
                           │
-      claimDue(now, batchSize) ── FOR UPDATE SKIP LOCKED, ORDER BY process_by
+   claim: deadline passed, or step already COMPLETED ── FOR UPDATE SKIP LOCKED
                           │
           ┌───────────────┼────────────────┐
           ▼               ▼                ▼
@@ -66,7 +66,11 @@ Gradle composite build assumes.
 
 The row lock **is** the claim — no lease table, no heartbeat, no leader election. Every replica can
 poll the same table concurrently, and a replica that dies mid-batch releases its rows immediately.
-Details in [Architecture §3](docs/architecture-overview.md#3-the-claim-protocol).
+
+A row is claimed either because its deadline passed or because its step is already completed: the
+verdict reads `completed_at` against `process_by` and never the wall clock, so a completion settles its
+SLA on the next sweep instead of waiting for a threshold that would only confirm it. Details in
+[Architecture §3](docs/architecture-overview.md#3-the-claim-protocol).
 
 ## API
 

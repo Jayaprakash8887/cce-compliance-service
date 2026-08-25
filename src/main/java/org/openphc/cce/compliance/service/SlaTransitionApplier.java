@@ -24,6 +24,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -50,9 +51,15 @@ import java.util.UUID;
  * {@code sla_status} is null until a threshold falls due and this service judges it.
  *
  * <p>The judgement compares {@code step_instance.completed_at} — the clinical occurrence time of the
- * completing event — against the row's {@code process_by}. The wall clock is not consulted: a row is
- * claimed because its deadline has passed, but what that deadline <em>means</em> depends only on whether
- * the work had happened by then.
+ * completing event — against the row's {@code process_by}. The wall clock never enters into it: what a
+ * deadline <em>means</em> depends only on whether the work had happened by then.
+ *
+ * <p>Which is why a row is claimed for either of two reasons. Its deadline has passed and the work must
+ * be judged against it ({@code claimDue}); or its step is already {@code COMPLETED}, in which case
+ * {@code completed_at} is fixed, both thresholds are known, and the outcome can be settled immediately
+ * rather than at a deadline that would only confirm it ({@code claimForCompletedSteps}). The verdict is
+ * the same either way — the second path only decides it sooner, so an on-time completion does not read as
+ * null until its due date arrives.
  *
  * <table border="1">
  *   <caption>Behaviour by threshold and step state</caption>
@@ -78,6 +85,10 @@ import java.util.UUID;
  *
  * <p>{@code step_status} is never written here. Crossing a deadline says nothing about whether the event
  * arrived.
+ *
+ * <p>Nothing in the table turns on <em>when</em> a row is applied, which is what makes claiming a
+ * completed step's rows early safe: the same three columns decide the outcome whether the row is applied
+ * at its deadline or the moment the completion is seen.
  */
 @Service
 public class SlaTransitionApplier {
@@ -133,9 +144,19 @@ public class SlaTransitionApplier {
     @Transactional
     public int claimAndApply(List<UUID> claimed) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        List<StepSlaStateTransition> due = transitionRepository.claimDue(now, Limit.of(batchSize));
+        List<StepSlaStateTransition> batch =
+                new ArrayList<>(transitionRepository.claimDue(now, Limit.of(batchSize)));
 
-        for (StepSlaStateTransition row : due) {
+        // Rows of steps that have already been completed, claimed ahead of their deadline. Nothing about
+        // such a step can change any more — completed_at is fixed and its thresholds were written at
+        // creation — so its outcome is knowable now, and waiting for the wall clock would only delay
+        // recording what is already decided.
+        int room = batchSize - batch.size();
+        if (room > 0) {
+            batch.addAll(transitionRepository.claimForCompletedSteps(now, Limit.of(room)));
+        }
+
+        for (StepSlaStateTransition row : batch) {
             claimed.add(row.getId());
             row.setAttempts(row.getAttempts() + 1);
             if (row.getAttempts() > ATTEMPTS_BEFORE_ALERT) {
@@ -144,7 +165,7 @@ public class SlaTransitionApplier {
             }
             applyRow(row);
         }
-        return due.size();
+        return batch.size();
     }
 
     private void applyRow(StepSlaStateTransition row) {
