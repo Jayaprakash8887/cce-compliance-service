@@ -19,7 +19,7 @@ Three sibling repositories share the work. Do not implement their concerns here:
 |---|---|
 | `cce-protocol-service` | Loading/retiring definitions, building `trigger_index` |
 | `cce-matcher-service` | Event matching, enrolment, step creation/completion, `ORDER_VIOLATION` |
-| `cce-common-util` | Shared entities, repositories, `DeviationService`, `IntelligenceActionEvaluator`, exception handler |
+| `cce-common-util` | Shared entities, repositories, `DeviationRecorder`, `IntelligenceActionEvaluator`, exception handler |
 
 `cce-common-util` is a Gradle **composite build** (`includeBuild '../cce-common-util'`), so it must be
 checked out as a sibling directory.

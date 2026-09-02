@@ -16,9 +16,9 @@ import org.openphc.cce.common.enums.SlaStatus;
 import org.openphc.cce.common.enums.SlaTransitionType;
 import org.openphc.cce.common.enums.StepStatus;
 import org.openphc.cce.common.repository.StepInstanceRepository;
-import org.openphc.cce.common.service.DeviationService;
-import org.openphc.cce.common.service.IntelligenceActionEvaluator;
-import org.openphc.cce.common.service.StateTransitionHistoryService;
+import org.openphc.cce.common.deviation.DeviationRecorder;
+import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
+import org.openphc.cce.common.history.StateTransitionHistoryWriter;
 import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
 import org.springframework.data.domain.Limit;
 
@@ -43,9 +43,9 @@ class SlaTransitionApplierTest {
 
     @Mock private SlaTransitionClaimRepository transitionRepository;
     @Mock private StepInstanceRepository stepInstanceRepository;
-    @Mock private DeviationService deviationService;
+    @Mock private DeviationRecorder deviationRecorder;
     @Mock private IntelligenceActionEvaluator intelligenceActionEvaluator;
-    @Mock private StateTransitionHistoryService stateTransitionHistoryService;
+    @Mock private StateTransitionHistoryWriter stateTransitionHistoryWriter;
 
     private SlaTransitionApplier applier;
     private final OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
@@ -53,7 +53,7 @@ class SlaTransitionApplierTest {
     @BeforeEach
     void setUp() {
         applier = new SlaTransitionApplier(transitionRepository, stepInstanceRepository,
-                deviationService, intelligenceActionEvaluator, stateTransitionHistoryService,
+                deviationRecorder, intelligenceActionEvaluator, stateTransitionHistoryWriter,
                 "test-instance", 100, 3600, new SimpleMeterRegistry());
     }
 
@@ -74,7 +74,7 @@ class SlaTransitionApplierTest {
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             // crossing a deadline says nothing about whether the event arrived
             assertEquals(StepStatus.NOT_STARTED, step.getStepStatus());
-            verify(deviationService).createDeviation(step, DeviationType.OVERDUE);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
             assertTrue(row.isProcessed());
             assertEquals("test-instance", row.getProcessedBy());
         }
@@ -89,7 +89,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
-            verify(deviationService).createDeviation(step, DeviationType.MISSED);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.MISSED);
         }
 
         @Test
@@ -103,7 +103,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
 
@@ -118,7 +118,7 @@ class SlaTransitionApplierTest {
 
             applier.claimAndApply(new ArrayList<>());
 
-            verify(stateTransitionHistoryService)
+            verify(stateTransitionHistoryWriter)
                     .recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
         }
     }
@@ -139,7 +139,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MET, step.getSlaStatus());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
 
@@ -153,7 +153,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService).createDeviation(step, DeviationType.OVERDUE);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
         }
 
         @Test
@@ -168,7 +168,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
 
@@ -182,7 +182,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
-            verify(deviationService).createDeviation(step, DeviationType.MISSED);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.MISSED);
         }
 
         @Test
@@ -196,7 +196,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
         }
 
         @Test
@@ -210,7 +210,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService).createDeviation(step, DeviationType.OVERDUE);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
         }
 
         @Test
@@ -224,7 +224,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService).createDeviation(step, DeviationType.OVERDUE);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
         }
 
         @Test
@@ -239,7 +239,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService).createDeviation(step, DeviationType.OVERDUE);
+            verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
         }
     }
 
@@ -259,7 +259,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MET, step.getSlaStatus());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
 
@@ -281,7 +281,7 @@ class SlaTransitionApplierTest {
             assertEquals(SlaStatus.MET, step.getSlaStatus());
             assertTrue(dueRow.isProcessed());
             assertTrue(missedRow.isProcessed());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
         }
 
         @Test
@@ -296,7 +296,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
 
@@ -348,7 +348,7 @@ class SlaTransitionApplierTest {
 
         private SlaTransitionApplier applierWithBatchSize(int batchSize) {
             return new SlaTransitionApplier(transitionRepository, stepInstanceRepository,
-                    deviationService, intelligenceActionEvaluator, stateTransitionHistoryService,
+                    deviationRecorder, intelligenceActionEvaluator, stateTransitionHistoryWriter,
                     "test-instance", batchSize, 3600, new SimpleMeterRegistry());
         }
     }
@@ -395,7 +395,7 @@ class SlaTransitionApplierTest {
 
             applier.claimAndApply(new ArrayList<>());
 
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
         }
     }
 
@@ -451,8 +451,8 @@ class SlaTransitionApplierTest {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
             claim(row, step);
-            when(deviationService.createDeviation(any(), any())).thenReturn(
-                    new DeviationService.DeviationResult(
+            when(deviationRecorder.recordDeviation(any(), any())).thenReturn(
+                    new DeviationRecorder.DeviationResult(
                             Deviation.builder().id(UUID.randomUUID()).build(), false));
 
             applier.claimAndApply(new ArrayList<>());
@@ -470,7 +470,7 @@ class SlaTransitionApplierTest {
             applier.claimAndApply(new ArrayList<>());
 
             assertTrue(row.isProcessed());
-            verify(deviationService, never()).createDeviation(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
         }
 
         @Test
@@ -513,8 +513,8 @@ class SlaTransitionApplierTest {
     }
 
     private void freshDeviation() {
-        when(deviationService.createDeviation(any(), any())).thenReturn(
-                new DeviationService.DeviationResult(
+        when(deviationRecorder.recordDeviation(any(), any())).thenReturn(
+                new DeviationRecorder.DeviationResult(
                         Deviation.builder().id(UUID.randomUUID()).build(), true));
     }
 

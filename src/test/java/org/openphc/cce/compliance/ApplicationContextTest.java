@@ -12,7 +12,7 @@ import org.springframework.test.context.ActiveProfiles;
  * figure: a bean this service never names in source but needs at runtime. {@code scanBasePackages},
  * {@code @EntityScan} and {@code @EnableJpaRepositories} are all widened to {@code org.openphc.cce}, so
  * the context also instantiates what cce-common-util contributes — including
- * {@code ExpressionEvaluationService}, whose constructor needs JSONLogic on the classpath even though
+ * {@code FhirExpressionEvaluator}, whose constructor needs JSONLogic on the classpath even though
  * this service declares no JSONLogic dependency of its own.
  *
  * <p>It also validates {@code SlaTransitionClaimRepository}: Spring Data parses every {@code @Query} at

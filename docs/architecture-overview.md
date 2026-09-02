@@ -155,7 +155,7 @@ The applier **never writes `step_status`**. That column belongs to the Matcher S
 [Architecture Overview §4](../../cce-common-util/docs/architecture-overview.md#4-step-status-and-sla-status).
 
 Every `sla_status` write is mirrored into `step_instance_history` through the shared
-`StateTransitionHistoryService`, in the same transaction. Without it the time-driven half of a step's
+`StateTransitionHistoryWriter`, in the same transaction. Without it the time-driven half of a step's
 timeline would be missing from that table and from the CDC stream downstream of it: a step that went
 overdue and was never completed would show only its creation.
 
@@ -173,12 +173,12 @@ the data.
 ## 5. Intelligence on deviation
 
 When a deviation is newly recorded — not when it already existed — the shared
-[`IntelligenceActionEvaluator`](../../cce-common-util/docs/library-reference.md#intelligenceactionevaluator)
+[`IntelligenceActionEvaluator`](../../cce-common-util/docs/library-reference.md#intelligence--intelligenceactionevaluator)
 evaluates the step's intelligence actions and publishes any that fire to
 `cce.intelligence.triggers`.
 
 The de-duplication matters: without it, a transition retried after a failure would re-trigger an alert
-a clinician has already received. `DeviationService` reports whether the row was new, and the
+a clinician has already received. `DeviationRecorder` reports whether the row was new, and the
 evaluation is gated on that.
 
 This service is **produce-only** on Kafka. Its `KafkaConfig` declares a producer factory, a template

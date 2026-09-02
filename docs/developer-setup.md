@@ -71,7 +71,7 @@ org.openphc.cce.compliance
 └── config/  KafkaConfig (produce-only), ObservabilityConfig
 ```
 
-Entities, repositories, `DeviationService` and `IntelligenceActionEvaluator` come from
+Entities, repositories, `DeviationRecorder` and `IntelligenceActionEvaluator` come from
 `cce-common-util`. What this service adds is the claim query, the transaction boundary and the
 scheduler.
 

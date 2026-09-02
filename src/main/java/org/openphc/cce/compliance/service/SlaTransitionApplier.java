@@ -9,9 +9,9 @@ import org.openphc.cce.common.enums.SlaStatus;
 import org.openphc.cce.common.enums.SlaTransitionType;
 import org.openphc.cce.common.enums.StepStatus;
 import org.openphc.cce.common.repository.StepInstanceRepository;
-import org.openphc.cce.common.service.DeviationService;
-import org.openphc.cce.common.service.IntelligenceActionEvaluator;
-import org.openphc.cce.common.service.StateTransitionHistoryService;
+import org.openphc.cce.common.deviation.DeviationRecorder;
+import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
+import org.openphc.cce.common.history.StateTransitionHistoryWriter;
 import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -100,9 +100,9 @@ public class SlaTransitionApplier {
 
     private final SlaTransitionClaimRepository transitionRepository;
     private final StepInstanceRepository stepInstanceRepository;
-    private final DeviationService deviationService;
+    private final DeviationRecorder deviationRecorder;
     private final IntelligenceActionEvaluator intelligenceActionEvaluator;
-    private final StateTransitionHistoryService stateTransitionHistoryService;
+    private final StateTransitionHistoryWriter stateTransitionHistoryWriter;
     private final String instanceId;
     private final int batchSize;
     private final Duration maxBackoff;
@@ -111,18 +111,18 @@ public class SlaTransitionApplier {
 
     public SlaTransitionApplier(SlaTransitionClaimRepository transitionRepository,
                                 StepInstanceRepository stepInstanceRepository,
-                                DeviationService deviationService,
+                                DeviationRecorder deviationRecorder,
                                 IntelligenceActionEvaluator intelligenceActionEvaluator,
-                                StateTransitionHistoryService stateTransitionHistoryService,
+                                StateTransitionHistoryWriter stateTransitionHistoryWriter,
                                 @Value("${cce.sla.instance-id:${HOSTNAME:local}}") String instanceId,
                                 @Value("${cce.sla.batch-size:100}") int batchSize,
                                 @Value("${cce.sla.max-backoff-seconds:3600}") long maxBackoffSeconds,
                                 MeterRegistry meterRegistry) {
         this.transitionRepository = transitionRepository;
         this.stepInstanceRepository = stepInstanceRepository;
-        this.deviationService = deviationService;
+        this.deviationRecorder = deviationRecorder;
         this.intelligenceActionEvaluator = intelligenceActionEvaluator;
-        this.stateTransitionHistoryService = stateTransitionHistoryService;
+        this.stateTransitionHistoryWriter = stateTransitionHistoryWriter;
         this.instanceId = instanceId;
         this.batchSize = batchSize;
         this.maxBackoff = Duration.ofSeconds(maxBackoffSeconds);
@@ -261,7 +261,7 @@ public class SlaTransitionApplier {
 
         step.setSlaStatus(target);
         stepInstanceRepository.save(step);
-        stateTransitionHistoryService.recordStepInstanceTransition(
+        stateTransitionHistoryWriter.recordStepInstanceTransition(
                 step, OffsetDateTime.now(ZoneOffset.UTC));
         appliedCounter.increment();
 
@@ -303,7 +303,7 @@ public class SlaTransitionApplier {
                 ? DeviationType.OVERDUE
                 : DeviationType.MISSED;
 
-        DeviationService.DeviationResult result = deviationService.createDeviation(step, type);
+        DeviationRecorder.DeviationResult result = deviationRecorder.recordDeviation(step, type);
         if (result.created()) {
             intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
         }
