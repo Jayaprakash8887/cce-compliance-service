@@ -316,6 +316,89 @@ class SlaTransitionApplierTest {
     // ── the two fetches share one batch ──
 
     @Nested
+    class DueDateIsTheYardstick {
+
+        @Test
+        void metIsMeasuredAgainstTheStepsDueDate() {
+            // Beating process_by is not enough on its own: MET asks whether the work beat the step's
+            // own due date. Here it did, so the step is on time.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
+            step.setDueDate(now.minusHours(2));
+            fetch(row, step);
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
+        }
+
+        @Test
+        void overdueIsMeasuredAgainstTheRowsProcessBy() {
+            // A breach is the schedule's question. completed_at is past process_by, so the row records
+            // OVERDUE — even though the step's own due date, later here, was beaten.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(4));
+            step.setDueDate(now.minusHours(1));
+            fetch(row, step);
+            freshDeviation();
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
+            verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
+        }
+
+        @Test
+        void aKeptScheduleThatMissedTheDueDateIsConsumedWithoutAStatus() {
+            // The gap the two yardsticks open: no breach of the schedule, but the due date was not
+            // beaten either. Neither verdict holds, so the row is consumed and sla_status is left as it
+            // stands — the same treatment a kept missed-date row gets.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(2));
+            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
+            step.setDueDate(now.minusHours(4));
+            fetch(row, step);
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            assertNull(step.getSlaStatus());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
+            assertTrue(row.isProcessed());
+        }
+
+        @Test
+        void withoutADueDateTheRowsScheduleIsUsedInstead() {
+            // A step created before the column existed, until its backfill lands. process_by held the
+            // deadline then, so it is the only evidence left and reaches the same verdict.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
+            step.setDueDate(null);
+            fetch(row, step);
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            assertTrue(row.isProcessed());
+        }
+
+        @Test
+        void theMissedDateRowIsStillJudgedByItsOwnSchedule() {
+            // The missed date is not stored on the step, so that row's process_by is the threshold. A
+            // due_date far in the past must not drag the missed-date verdict with it.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            StepSlaStateTransition row = row(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusHours(1));
+            step.setDueDate(now.minusDays(30));
+            fetch(row, step);
+
+            applier.fetchAndApply(new ArrayList<>());
+
+            // Completed before the missed date: not written off, and the due-date row already had its say.
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
+            assertTrue(row.isProcessed());
+        }
+    }
+
+    @Nested
     class BatchCapacity {
 
         @Test
@@ -533,6 +616,11 @@ class SlaTransitionApplierTest {
 
     private StepSlaStateTransition row(StepInstance step, SlaTransitionType type,
                                        OffsetDateTime processBy) {
+        if (type == SlaTransitionType.DUE_DATE_REACHED) {
+            // What the Matcher does: the deadline is written on the step and scheduled on the row from
+            // the same value, in one transaction. Tests that need them to differ set the step's own.
+            step.setDueDate(processBy);
+        }
         return StepSlaStateTransition.builder()
                 .id(UUID.randomUUID())
                 .stepInstanceId(step.getId())
