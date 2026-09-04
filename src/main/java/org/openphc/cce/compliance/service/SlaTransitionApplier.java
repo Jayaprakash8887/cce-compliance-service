@@ -12,7 +12,7 @@ import org.openphc.cce.common.repository.StepInstanceRepository;
 import org.openphc.cce.common.deviation.DeviationRecorder;
 import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
 import org.openphc.cce.common.history.StateTransitionHistoryWriter;
-import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
+import org.openphc.cce.compliance.domain.repository.SlaTransitionFetchRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -29,7 +29,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Claims due {@code step_sla_state_transition} rows and applies them.
+ * Fetches due {@code step_sla_state_transition} rows and applies them.
  *
  * <p>The Matcher Service writes one row per threshold a step can cross and never touches it again.
  * Everything after that is owned here: deciding which rows are due, writing
@@ -37,8 +37,8 @@ import java.util.UUID;
  * the transition in {@code step_instance_history}, and marking the row processed. There is no Kafka hop
  * and no HTTP call between the two services — they meet on this one table.
  *
- * <p>Claim and apply share a transaction. The row lock taken by {@code FOR UPDATE SKIP LOCKED} is the
- * claim, so concurrent instances drain disjoint sets with no lease table and no leader election, and a
+ * <p>Fetch and apply share a transaction. The row lock taken by {@code FOR UPDATE SKIP LOCKED} is what
+ * reserves the row, so concurrent instances drain disjoint sets with no lease table and no leader election, and a
  * deviation can never be recorded without the row being marked processed in the same commit.
  *
  * <p>Separate bean from {@link SlaTransitionEvaluator}, which drives the polling loop. Not cosmetic:
@@ -54,10 +54,10 @@ import java.util.UUID;
  * completing event — against the row's {@code process_by}. The wall clock never enters into it: what a
  * deadline <em>means</em> depends only on whether the work had happened by then.
  *
- * <p>Which is why a row is claimed for either of two reasons. Its deadline has passed and the work must
- * be judged against it ({@code claimDue}); or its step is already {@code COMPLETED}, in which case
+ * <p>Which is why a row is fetched for either of two reasons. Its deadline has passed and the work must
+ * be judged against it ({@code fetchDueTransitions}); or its step is already {@code COMPLETED}, in which case
  * {@code completed_at} is fixed, both thresholds are known, and the outcome can be settled immediately
- * rather than at a deadline that would only confirm it ({@code claimForCompletedSteps}). The verdict is
+ * rather than at a deadline that would only confirm it ({@code fetchCompletedStepTransitions}). The verdict is
  * the same either way — the second path only decides it sooner, so an on-time completion does not read as
  * null until its due date arrives.
  *
@@ -86,7 +86,7 @@ import java.util.UUID;
  * <p>{@code step_status} is never written here. Crossing a deadline says nothing about whether the event
  * arrived.
  *
- * <p>Nothing in the table turns on <em>when</em> a row is applied, which is what makes claiming a
+ * <p>Nothing in the table turns on <em>when</em> a row is applied, which is what makes fetching a
  * completed step's rows early safe: the same three columns decide the outcome whether the row is applied
  * at its deadline or the moment the completion is seen.
  */
@@ -98,7 +98,7 @@ public class SlaTransitionApplier {
     /** Past this many attempts a row is logged as an error every cycle rather than failing quietly. */
     private static final int ATTEMPTS_BEFORE_ALERT = 5;
 
-    private final SlaTransitionClaimRepository transitionRepository;
+    private final SlaTransitionFetchRepository transitionRepository;
     private final StepInstanceRepository stepInstanceRepository;
     private final DeviationRecorder deviationRecorder;
     private final IntelligenceActionEvaluator intelligenceActionEvaluator;
@@ -109,7 +109,7 @@ public class SlaTransitionApplier {
     private final Counter appliedCounter;
     private final Counter consumedCounter;
 
-    public SlaTransitionApplier(SlaTransitionClaimRepository transitionRepository,
+    public SlaTransitionApplier(SlaTransitionFetchRepository transitionRepository,
                                 StepInstanceRepository stepInstanceRepository,
                                 DeviationRecorder deviationRecorder,
                                 IntelligenceActionEvaluator intelligenceActionEvaluator,
@@ -135,29 +135,29 @@ public class SlaTransitionApplier {
     }
 
     /**
-     * Claim and apply one batch of due transitions.
+     * Fetch and apply one batch of due transitions.
      *
-     * @param claimed populated with the id of every row claimed, so the caller can back them off if the
+     * @param fetched populated with the id of every row fetched, so the caller can back them off if the
      *                transaction rolls back — the list is plain memory and survives the rollback
-     * @return how many rows were claimed
+     * @return how many rows were fetched
      */
     @Transactional
-    public int claimAndApply(List<UUID> claimed) {
+    public int fetchAndApply(List<UUID> fetched) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         List<StepSlaStateTransition> batch =
-                new ArrayList<>(transitionRepository.claimDue(now, Limit.of(batchSize)));
+                new ArrayList<>(transitionRepository.fetchDueTransitions(now, Limit.of(batchSize)));
 
-        // Rows of steps that have already been completed, claimed ahead of their deadline. Nothing about
+        // Rows of steps that have already been completed, fetched ahead of their deadline. Nothing about
         // such a step can change any more — completed_at is fixed and its thresholds were written at
         // creation — so its outcome is knowable now, and waiting for the wall clock would only delay
         // recording what is already decided.
         int room = batchSize - batch.size();
         if (room > 0) {
-            batch.addAll(transitionRepository.claimForCompletedSteps(now, Limit.of(room)));
+            batch.addAll(transitionRepository.fetchCompletedStepTransitions(now, Limit.of(room)));
         }
 
         for (StepSlaStateTransition row : batch) {
-            claimed.add(row.getId());
+            fetched.add(row.getId());
             row.setAttempts(row.getAttempts() + 1);
             if (row.getAttempts() > ATTEMPTS_BEFORE_ALERT) {
                 log.error("SLA transition {} for step {} has now been attempted {} times",
@@ -215,7 +215,7 @@ public class SlaTransitionApplier {
         }
 
         if (!writeSlaStatus(step, row.getTransitionType().breachStatus())) {
-            // Already at or past this outcome: a redelivered claim, or rows applied out of order.
+            // Already at or past this outcome: a re-fetched row, or rows applied out of order.
             consumedCounter.increment();
             return;
         }
@@ -295,7 +295,7 @@ public class SlaTransitionApplier {
 
     /**
      * The deviation a breach produces: the due date an {@code OVERDUE}, the missed date a
-     * {@code MISSED}. Intelligence is evaluated only for a freshly created deviation, so a re-claimed
+     * {@code MISSED}. Intelligence is evaluated only for a freshly created deviation, so a re-fetched
      * row cannot publish the same intelligence event twice.
      */
     private void raiseDeviationFor(StepSlaStateTransition row, StepInstance step) {

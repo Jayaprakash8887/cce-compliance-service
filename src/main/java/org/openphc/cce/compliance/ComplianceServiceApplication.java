@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 /**
  * CCE Compliance Service — the SLA transition evaluator and compliance plane.
  *
- * <p>Owns everything driven by <em>time passing</em>: it claims the
+ * <p>Owns everything driven by <em>time passing</em>: it picks up the
  * {@code step_sla_state_transition} rows the Matcher Service scheduled, advances
  * {@code step_instance.sla_status}, records the resulting {@code OVERDUE} / {@code MISSED} deviations,
  * and evaluates the intelligence actions those deviations trigger.

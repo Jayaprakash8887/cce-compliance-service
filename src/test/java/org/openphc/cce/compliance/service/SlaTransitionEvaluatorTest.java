@@ -25,32 +25,32 @@ class SlaTransitionEvaluatorTest {
     @Test
     void drainsUntilABatchComesBackShort() {
         // A backlog is cleared within one cycle rather than one batch per poll interval.
-        when(applier.claimAndApply(any())).thenReturn(10, 10, 3);
+        when(applier.fetchAndApply(any())).thenReturn(10, 10, 3);
 
         assertEquals(23, evaluator(10).evaluateDue());
-        verify(applier, times(3)).claimAndApply(any());
+        verify(applier, times(3)).fetchAndApply(any());
     }
 
     @Test
-    void emptyBacklogCostsASingleClaim() {
-        when(applier.claimAndApply(any())).thenReturn(0);
+    void emptyBacklogCostsASingleFetch() {
+        when(applier.fetchAndApply(any())).thenReturn(0);
 
         assertEquals(0, evaluator(10).evaluateDue());
-        verify(applier, times(1)).claimAndApply(any());
+        verify(applier, times(1)).fetchAndApply(any());
     }
 
     @Test
-    void failedBatch_backsOffTheRowsItHadClaimed() {
+    void failedBatch_backsOffTheRowsItHadFetched() {
         // The batch rolled back, so nothing was marked processed. The ids it collected before failing
         // are still in the caller's list, which is what lets them be deferred.
         UUID a = UUID.randomUUID();
         UUID b = UUID.randomUUID();
         doAnswer(inv -> {
-            List<UUID> claimed = inv.getArgument(0);
-            claimed.add(a);
-            claimed.add(b);
+            List<UUID> fetched = inv.getArgument(0);
+            fetched.add(a);
+            fetched.add(b);
             throw new IllegalStateException("boom");
-        }).when(applier).claimAndApply(any());
+        }).when(applier).fetchAndApply(any());
 
         assertEquals(0, evaluator(10).evaluateDue());
         verify(applier).backOff(List.of(a, b));
@@ -58,33 +58,33 @@ class SlaTransitionEvaluatorTest {
 
     @Test
     void failedBatch_stopsTheCycleRatherThanRetryingImmediately() {
-        doThrow(new IllegalStateException("boom")).when(applier).claimAndApply(any());
+        doThrow(new IllegalStateException("boom")).when(applier).fetchAndApply(any());
 
         evaluator(10).evaluateDue();
 
-        verify(applier, times(1)).claimAndApply(any());
+        verify(applier, times(1)).fetchAndApply(any());
     }
 
     @Test
     void poll_logsAndReturnsWhenWorkWasApplied() {
-        when(applier.claimAndApply(any())).thenReturn(1);
+        when(applier.fetchAndApply(any())).thenReturn(1);
 
         assertDoesNotThrow(() -> evaluator(10).poll());
-        verify(applier).claimAndApply(any());
+        verify(applier).fetchAndApply(any());
     }
 
     @Test
     void stopsAtTheCycleLimitRatherThanMonopolisingTheThread() {
-        // A claim that never drains must not spin forever inside one cycle.
-        when(applier.claimAndApply(any())).thenReturn(5);
+        // A fetch that never drains must not spin forever inside one cycle.
+        when(applier.fetchAndApply(any())).thenReturn(5);
 
         assertEquals(500, evaluator(5).evaluateDue());
-        verify(applier, times(100)).claimAndApply(any());
+        verify(applier, times(100)).fetchAndApply(any());
     }
 
     @Test
     void pollNeverPropagates_soTheSchedulerThreadSurvives() {
-        doThrow(new IllegalStateException("boom")).when(applier).claimAndApply(any());
+        doThrow(new IllegalStateException("boom")).when(applier).fetchAndApply(any());
 
         assertDoesNotThrow(() -> evaluator(10).poll());
     }

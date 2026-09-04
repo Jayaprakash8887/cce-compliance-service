@@ -15,8 +15,8 @@ import org.springframework.test.context.ActiveProfiles;
  * {@code FhirExpressionEvaluator}, whose constructor needs JSONLogic on the classpath even though
  * this service declares no JSONLogic dependency of its own.
  *
- * <p>It also validates {@code SlaTransitionClaimRepository}: Spring Data parses every {@code @Query} at
- * bootstrap, so a typo in the claim JPQL fails here rather than on the first poll in production. That
+ * <p>It also validates {@code SlaTransitionFetchRepository}: Spring Data parses every {@code @Query} at
+ * bootstrap, so a typo in the fetch JPQL fails here rather than on the first poll in production. That
  * matters more for this service than for its siblings, because it runs {@code ddl-auto: validate}
  * against a schema two other services own — a mapping it gets wrong is a failure to start, not a
  * failure to serve.

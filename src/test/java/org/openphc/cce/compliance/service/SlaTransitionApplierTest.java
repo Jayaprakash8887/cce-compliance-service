@@ -19,7 +19,7 @@ import org.openphc.cce.common.repository.StepInstanceRepository;
 import org.openphc.cce.common.deviation.DeviationRecorder;
 import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
 import org.openphc.cce.common.history.StateTransitionHistoryWriter;
-import org.openphc.cce.compliance.domain.repository.SlaTransitionClaimRepository;
+import org.openphc.cce.compliance.domain.repository.SlaTransitionFetchRepository;
 import org.springframework.data.domain.Limit;
 
 import java.time.OffsetDateTime;
@@ -41,7 +41,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class SlaTransitionApplierTest {
 
-    @Mock private SlaTransitionClaimRepository transitionRepository;
+    @Mock private SlaTransitionFetchRepository transitionRepository;
     @Mock private StepInstanceRepository stepInstanceRepository;
     @Mock private DeviationRecorder deviationRecorder;
     @Mock private IntelligenceActionEvaluator intelligenceActionEvaluator;
@@ -66,10 +66,10 @@ class SlaTransitionApplierTest {
         void dueDateReached_becomesOverdueWithAnOverdueDeviation() {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             // crossing a deadline says nothing about whether the event arrived
@@ -83,10 +83,10 @@ class SlaTransitionApplierTest {
         void missedDateReached_mandatory_becomesMissedWithAMissedDeviation() {
             StepInstance step = step(StepStatus.NOT_STARTED, SlaStatus.OVERDUE, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             verify(deviationRecorder).recordDeviation(step, DeviationType.MISSED);
@@ -98,9 +98,9 @@ class SlaTransitionApplierTest {
             // It keeps the OVERDUE the due date gave it — being late is still a fact about it.
             StepInstance step = step(StepStatus.NOT_STARTED, SlaStatus.OVERDUE, "could", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -113,10 +113,10 @@ class SlaTransitionApplierTest {
             // a step that went overdue and was never completed would show only its creation.
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             verify(stateTransitionHistoryWriter)
                     .recordStepInstanceTransition(eq(step), any(OffsetDateTime.class));
@@ -134,9 +134,9 @@ class SlaTransitionApplierTest {
             // completion, comparing the clinical completion time against the deadline.
             StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MET, step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -147,10 +147,10 @@ class SlaTransitionApplierTest {
         void completedAfterItsDueDate_isOverdueWithADeviation() {
             StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusMinutes(5));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
@@ -163,9 +163,9 @@ class SlaTransitionApplierTest {
             // completion as on time.
             StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusHours(2));
             StepSlaStateTransition row = row(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -176,10 +176,10 @@ class SlaTransitionApplierTest {
         void completedAfterItsMissedDate_isMissedWithADeviation() {
             StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusMinutes(5));
             StepSlaStateTransition row = row(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             verify(deviationRecorder).recordDeviation(step, DeviationType.MISSED);
@@ -191,9 +191,9 @@ class SlaTransitionApplierTest {
             // late would be penalised while the same work never done at all was not.
             StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "could", now.minusMinutes(5));
             StepSlaStateTransition row = row(step, SlaTransitionType.MISSED_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -204,10 +204,10 @@ class SlaTransitionApplierTest {
             // The exemption is MISSED-only: optional work can still be reported as running late.
             StepInstance step = step(StepStatus.COMPLETED, null, "could", now.minusMinutes(5));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
@@ -218,10 +218,10 @@ class SlaTransitionApplierTest {
             OffsetDateTime threshold = now.minusHours(1);
             StepInstance step = step(StepStatus.COMPLETED, null, "must", threshold);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, threshold);
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
@@ -233,10 +233,10 @@ class SlaTransitionApplierTest {
             // the gap rather than surface it.
             StepInstance step = step(StepStatus.COMPLETED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder).recordDeviation(step, DeviationType.OVERDUE);
@@ -246,17 +246,17 @@ class SlaTransitionApplierTest {
     // ── the work arrived, and its deadlines have not ──
 
     @Nested
-    class CompletedStepClaimedBeforeItsDeadline {
+    class CompletedStepFetchedBeforeItsDeadline {
 
         @Test
         void earlyCompletion_isSettledMetWithoutWaitingForItsDueDate() {
-            // The reason the second claim path exists. Nothing about this step can change any more, so
+            // The reason the second fetch path exists. Nothing about this step can change any more, so
             // holding the verdict back until the due date would only delay recording what is decided.
             StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
-            claimForCompletedStep(row, step);
+            fetchCompletedStep(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MET, step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -271,11 +271,11 @@ class SlaTransitionApplierTest {
             StepSlaStateTransition dueRow = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
             StepSlaStateTransition missedRow =
                     row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(14));
-            when(transitionRepository.claimForCompletedSteps(any(), any()))
+            when(transitionRepository.fetchCompletedStepTransitions(any(), any()))
                     .thenReturn(List.of(dueRow, missedRow));
             when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
 
-            int count = applier.claimAndApply(new ArrayList<>());
+            int count = applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(2, count);
             assertEquals(SlaStatus.MET, step.getSlaStatus());
@@ -286,14 +286,14 @@ class SlaTransitionApplierTest {
 
         @Test
         void aLateCompletionsFutureMissedRowIsConsumedRatherThanBecomingMissed() {
-            // The early claim must not invent a breach: this step was recorded late, but before its
+            // The early fetch must not invent a breach: this step was recorded late, but before its
             // missed date, so it keeps the OVERDUE the due-date row gave it and takes no deviation.
             StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusHours(1));
             StepSlaStateTransition row =
                     row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(5));
-            claimForCompletedStep(row, step);
+            fetchCompletedStep(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -301,49 +301,49 @@ class SlaTransitionApplierTest {
         }
 
         @Test
-        void theEarlyClaimIsReportedForBackoffLikeAnyOther() {
+        void theEarlyFetchIsReportedForBackoffLikeAnyOther() {
             StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
-            claimForCompletedStep(row, step);
-            List<UUID> claimed = new ArrayList<>();
+            fetchCompletedStep(row, step);
+            List<UUID> fetched = new ArrayList<>();
 
-            applier.claimAndApply(claimed);
+            applier.fetchAndApply(fetched);
 
-            assertEquals(List.of(row.getId()), claimed);
+            assertEquals(List.of(row.getId()), fetched);
         }
     }
 
-    // ── the two claims share one batch ──
+    // ── the two fetches share one batch ──
 
     @Nested
     class BatchCapacity {
 
         @Test
-        void theSecondClaimOnlyAsksForWhatTheFirstLeftRoomFor() {
+        void theSecondFetchOnlyAsksForWhatTheFirstLeftRoomFor() {
             SlaTransitionApplier smallBatch = applierWithBatchSize(3);
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
-            claim(row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)), step);
+            fetch(row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)), step);
             freshDeviation();
 
-            smallBatch.claimAndApply(new ArrayList<>());
+            smallBatch.fetchAndApply(new ArrayList<>());
 
             ArgumentCaptor<Limit> limit = ArgumentCaptor.forClass(Limit.class);
-            verify(transitionRepository).claimForCompletedSteps(any(), limit.capture());
+            verify(transitionRepository).fetchCompletedStepTransitions(any(), limit.capture());
             assertEquals(2, limit.getValue().max());
         }
 
         @Test
-        void aFullDeadlineDrivenBatchSkipsTheSecondClaimEntirely() {
+        void aFullDeadlineDrivenBatchSkipsTheSecondFetchEntirely() {
             // A backlog of fallen deadlines is the pressing work; the evaluator drains in further
             // cycles rather than widening one batch past its size.
             SlaTransitionApplier singleRowBatch = applierWithBatchSize(1);
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
-            claim(row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)), step);
+            fetch(row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1)), step);
             freshDeviation();
 
-            singleRowBatch.claimAndApply(new ArrayList<>());
+            singleRowBatch.fetchAndApply(new ArrayList<>());
 
-            verify(transitionRepository, never()).claimForCompletedSteps(any(), any());
+            verify(transitionRepository, never()).fetchCompletedStepTransitions(any(), any());
         }
 
         private SlaTransitionApplier applierWithBatchSize(int batchSize) {
@@ -360,13 +360,13 @@ class SlaTransitionApplierTest {
 
         @Test
         void overdueDoesNotOverwriteMissed() {
-            // Rows are claimed oldest-deadline-first, but a retried batch can still land out of
+            // Rows are fetched oldest-deadline-first, but a retried batch can still land out of
             // order. Re-applying the due date must not walk a written-off step back to OVERDUE.
             StepInstance step = step(StepStatus.NOT_STARTED, SlaStatus.MISSED, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(2));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.MISSED, step.getSlaStatus());
             verify(stepInstanceRepository, never()).save(any());
@@ -379,9 +379,9 @@ class SlaTransitionApplierTest {
             // having been on time, however its rows are ordered.
             StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusDays(5));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
             verify(stepInstanceRepository, never()).save(any());
@@ -391,9 +391,9 @@ class SlaTransitionApplierTest {
         void reappliedBreachDoesNotRaiseASecondDeviation() {
             StepInstance step = step(StepStatus.NOT_STARTED, SlaStatus.OVERDUE, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(2));
-            claim(row, step);
+            fetch(row, step);
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             verify(deviationRecorder, never()).recordDeviation(any(), any());
         }
@@ -450,12 +450,12 @@ class SlaTransitionApplierTest {
         void duplicateDeviation_doesNotRepublishIntelligence() {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
             when(deviationRecorder.recordDeviation(any(), any())).thenReturn(
                     new DeviationRecorder.DeviationResult(
                             Deviation.builder().id(UUID.randomUUID()).build(), false));
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
         }
@@ -464,51 +464,51 @@ class SlaTransitionApplierTest {
         void missingStep_consumesTheRowRatherThanRetryingForever() {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            when(transitionRepository.claimDue(any(), any())).thenReturn(List.of(row));
+            when(transitionRepository.fetchDueTransitions(any(), any())).thenReturn(List.of(row));
             when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.empty());
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertTrue(row.isProcessed());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
         }
 
         @Test
-        void claimReportsEveryRowItTook_soAFailedBatchCanBeBackedOff() {
+        void fetchReportsEveryRowItTook_soAFailedBatchCanBeBackedOff() {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
-            List<UUID> claimed = new ArrayList<>();
+            List<UUID> fetched = new ArrayList<>();
 
-            int count = applier.claimAndApply(claimed);
+            int count = applier.fetchAndApply(fetched);
 
             assertEquals(1, count);
-            assertEquals(List.of(row.getId()), claimed);
+            assertEquals(List.of(row.getId()), fetched);
         }
 
         @Test
-        void repeatedFailuresAreEscalatedOnClaim() {
+        void repeatedFailuresAreEscalatedOnFetch() {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
             row.setAttempts(9);
-            claim(row, step);
+            fetch(row, step);
             freshDeviation();
 
-            applier.claimAndApply(new ArrayList<>());
+            applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(10, row.getAttempts());
         }
     }
 
-    private void claim(StepSlaStateTransition row, StepInstance step) {
-        when(transitionRepository.claimDue(any(), any())).thenReturn(List.of(row));
+    private void fetch(StepSlaStateTransition row, StepInstance step) {
+        when(transitionRepository.fetchDueTransitions(any(), any())).thenReturn(List.of(row));
         when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
     }
 
-    /** Claimed because its step is already completed, not because its deadline has passed. */
-    private void claimForCompletedStep(StepSlaStateTransition row, StepInstance step) {
-        when(transitionRepository.claimForCompletedSteps(any(), any())).thenReturn(List.of(row));
+    /** Fetched because its step is already completed, not because its deadline has passed. */
+    private void fetchCompletedStep(StepSlaStateTransition row, StepInstance step) {
+        when(transitionRepository.fetchCompletedStepTransitions(any(), any())).thenReturn(List.of(row));
         when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
     }
 

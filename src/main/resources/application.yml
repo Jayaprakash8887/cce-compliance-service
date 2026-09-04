@@ -68,8 +68,8 @@ cce:
     # How long to wait for Kafka to acknowledge an intelligence trigger before recording it unpublished
     publish-confirm-timeout-ms: ${CCE_PUBLISH_CONFIRM_TIMEOUT_MS:5000}
   sla:
-    # The evaluator claims step_sla_state_transition rows with FOR UPDATE SKIP LOCKED, so every replica
-    # can poll concurrently. This interval is the steady-state cost — one empty claim query per tick; a
+    # The evaluator fetches step_sla_state_transition rows with FOR UPDATE SKIP LOCKED, so every replica
+    # can poll concurrently. This interval is the steady-state cost — one empty fetch query per tick; a
     # backlog is drained within a single cycle rather than one batch per tick.
     poll-interval-ms: ${CCE_SLA_POLL_INTERVAL_MS:5000}
     batch-size: ${CCE_SLA_BATCH_SIZE:100}

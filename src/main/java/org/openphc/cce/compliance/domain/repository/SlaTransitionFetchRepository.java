@@ -16,22 +16,22 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * The evaluator's claim path over {@code step_sla_state_transition}.
+ * The evaluator's fetch path over {@code step_sla_state_transition}.
  *
  * <p>Deliberately separate from cce-common-util's {@code StepSlaStateTransitionRepository}, which is the
- * shared read side (a step's thresholds, needed by both services). Claiming rows for processing is this
+ * shared read side (a step's thresholds, needed by both services). Fetching rows for processing is this
  * service's alone, so the query that does it — and the pessimistic lock it takes — lives here rather than
  * somewhere the Matcher Service could reach for it.
  */
 @Repository
-public interface SlaTransitionClaimRepository extends JpaRepository<StepSlaStateTransition, UUID> {
+public interface SlaTransitionFetchRepository extends JpaRepository<StepSlaStateTransition, UUID> {
 
     /**
-     * Claim a batch of transitions whose deadline has passed.
+     * Fetch a batch of transitions whose deadline has passed.
      *
      * <p>{@code FOR UPDATE SKIP LOCKED} — expressed by the {@code -2} lock timeout — is what makes this
      * safe to run on every instance at once: each caller takes rows no one else holds and steps over the
-     * rest instead of blocking. The row lock <em>is</em> the claim, so no lease table and no leader
+     * rest instead of blocking. The row lock <em>is</em> what reserves the row, so no lease table and no leader
      * election are needed.
      *
      * <p>Selects on {@code next_attempt_at}, equal to {@code process_by} initially and pushed out by a
@@ -48,10 +48,10 @@ public interface SlaTransitionClaimRepository extends JpaRepository<StepSlaState
               AND t.nextAttemptAt <= :now
             ORDER BY t.processBy ASC
             """)
-    List<StepSlaStateTransition> claimDue(@Param("now") OffsetDateTime now, Limit limit);
+    List<StepSlaStateTransition> fetchDueTransitions(@Param("now") OffsetDateTime now, Limit limit);
 
     /**
-     * Claim a batch of transitions whose step has already been completed, whatever their deadline.
+     * Fetch a batch of transitions whose step has already been completed, whatever their deadline.
      *
      * <p>A completed step's timeliness no longer depends on the clock. Its {@code completed_at} is fixed
      * and both of its thresholds were written at creation, so every row it still has can be judged now —
@@ -59,18 +59,18 @@ public interface SlaTransitionClaimRepository extends JpaRepository<StepSlaState
      * would leave an already-known outcome unrecorded: an on-time completion reading as null until its
      * due date passed, weeks later for an early one.
      *
-     * <p>Complements {@link #claimDue} rather than overlapping it: {@code next_attempt_at > :now}
-     * excludes the rows that query already takes, so one row cannot be claimed twice in a batch and
+     * <p>Complements {@link #fetchDueTransitions} rather than overlapping it: {@code next_attempt_at > :now}
+     * excludes the rows that query already takes, so one row cannot be fetched twice in a batch and
      * applied twice.
      *
      * <p>Restricted to steps whose {@code sla_status} is null or {@code OVERDUE} — the two unsettled
-     * states — which is also what makes the claim cheap: it drives off
+     * states — which is also what makes the fetch cheap: it drives off
      * {@code idx_step_instance_completed_unjudged}, a partial index over exactly that transient set,
      * instead of scanning the pending schedule of every step. {@code MET} and {@code MISSED} are settled
      * outcomes, so a row left behind by one of those steps would apply as a no-op; it keeps its own
      * deadline and is consumed then.
      *
-     * <p>A completed step with no {@code completed_at} is left to {@link #claimDue}: there is no
+     * <p>A completed step with no {@code completed_at} is left to {@link #fetchDueTransitions}: there is no
      * timestamp to judge it early by, so the deadline is the only evidence left.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
@@ -87,34 +87,34 @@ public interface SlaTransitionClaimRepository extends JpaRepository<StepSlaState
                          OR s.slaStatus = org.openphc.cce.common.enums.SlaStatus.OVERDUE))
             ORDER BY t.processBy ASC
             """)
-    List<StepSlaStateTransition> claimForCompletedSteps(@Param("now") OffsetDateTime now, Limit limit);
+    List<StepSlaStateTransition> fetchCompletedStepTransitions(@Param("now") OffsetDateTime now, Limit limit);
 
     /**
      * Half of the {@code cce.sla.transitions.due} gauge: rows whose deadline has passed.
      *
-     * <p>Carries {@link #claimDue}'s predicate, deliberately — the gauge has to count what the next cycle
-     * will claim, or it stops being a backlog. Counting every unprocessed row would instead fold in the
+     * <p>Carries {@link #fetchDueTransitions}'s predicate, deliberately — the gauge has to count what the next cycle
+     * will fetch, or it stops being a backlog. Counting every unprocessed row would instead fold in the
      * whole future schedule, so it would track enrolment volume rather than lateness and could never sit
      * near zero.
      *
-     * <p>Kept as a separate query from {@link #countClaimableForCompletedSteps} rather than one predicate
+     * <p>Kept as a separate query from {@link #countCompletedStepTransitions} rather than one predicate
      * with an {@code OR}: the two branches take their rows from different indexes, and an {@code OR}
      * across them plans as a sequential scan of the whole pending schedule — 100k rows filtered to find
      * ten, on every metrics scrape. Two indexed counts summed by the caller cost microseconds. The
-     * {@code claimDue} predicate and this one are disjoint, so the sum never double-counts.
+     * {@code fetchDueTransitions} predicate and this one are disjoint, so the sum never double-counts.
      */
     @Query("""
             SELECT COUNT(t) FROM StepSlaStateTransition t
             WHERE t.processed = false
               AND t.nextAttemptAt <= :now
             """)
-    long countDue(@Param("now") OffsetDateTime now);
+    long countDueTransitions(@Param("now") OffsetDateTime now);
 
     /**
-     * The other half of the gauge: rows of already-completed steps, claimable ahead of their deadline.
+     * The other half of the gauge: rows of already-completed steps, ready ahead of their deadline.
      *
-     * <p>Mirrors {@link #claimForCompletedSteps}, including the {@code next_attempt_at > :now} clause that
-     * keeps it disjoint from {@link #countDue}.
+     * <p>Mirrors {@link #fetchCompletedStepTransitions}, including the {@code next_attempt_at > :now} clause that
+     * keeps it disjoint from {@link #countDueTransitions}.
      */
     @Query("""
             SELECT COUNT(t) FROM StepSlaStateTransition t
@@ -127,5 +127,5 @@ public interface SlaTransitionClaimRepository extends JpaRepository<StepSlaState
                     AND (s.slaStatus IS NULL
                          OR s.slaStatus = org.openphc.cce.common.enums.SlaStatus.OVERDUE))
             """)
-    long countClaimableForCompletedSteps(@Param("now") OffsetDateTime now);
+    long countCompletedStepTransitions(@Param("now") OffsetDateTime now);
 }

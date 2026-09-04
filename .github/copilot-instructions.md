@@ -28,7 +28,7 @@ checked out as a sibling directory.
 
 Documentation is not duplicated between repositories. Start here:
 
-- `docs/architecture-overview.md` — the claim protocol, the applier's behaviour table, retry, observability
+- `docs/architecture-overview.md` — the fetch-and-apply cycle, the applier's behaviour table, retry, observability
 - `docs/developer-setup.md` — configuration, tuning, and the invariants to preserve
 - `docs/api-reference.md` — the read-only intelligence-event API
 - `../cce-common-util/docs/architecture-overview.md#5-sla-transition-contract` — the contract this service implements

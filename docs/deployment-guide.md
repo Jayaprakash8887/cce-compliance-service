@@ -97,8 +97,8 @@ spec:
             limits:   { memory: 2Gi, cpu: "2" }
 ```
 
-**Multiple replicas are safe and useful.** The claim protocol needs no coordination — no leader
-election, no lease, no partition assignment — so an added replica adds claim throughput directly. This
+**Multiple replicas are safe and useful.** The fetch-and-apply cycle needs no coordination — no leader
+election, no lease, no partition assignment — so an added replica adds throughput directly. This
 is unlike the Matcher Service, whose parallelism is bounded by Kafka partitions.
 
 Scale on the `cce.sla.transitions.due` gauge rather than on CPU: this service is

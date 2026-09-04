@@ -18,9 +18,9 @@ import java.util.UUID;
  *
  * <p>Holds no transaction of its own. Batches are drained until one comes back short, so a backlog that
  * built up while the service was down is cleared in one cycle rather than one batch per interval, while a
- * steady state costs a single empty claim query per interval.
+ * steady state costs a single empty fetch query per interval.
  *
- * <p>Safe to run on every instance concurrently — the applier's {@code FOR UPDATE SKIP LOCKED} claim is
+ * <p>Safe to run on every instance concurrently — the applier's {@code FOR UPDATE SKIP LOCKED} fetch is
  * what keeps them off each other's rows.
  */
 @Service
@@ -28,7 +28,7 @@ public class SlaTransitionEvaluator {
 
     private static final Logger log = LoggerFactory.getLogger(SlaTransitionEvaluator.class);
 
-    /** Stops a pathological backlog or a claim that never drains from monopolising a cycle. */
+    /** Stops a pathological backlog or a fetch that never drains from monopolising a cycle. */
     private static final int MAX_BATCHES_PER_CYCLE = 100;
 
     private final SlaTransitionApplier applier;
@@ -65,26 +65,26 @@ public class SlaTransitionEvaluator {
     /**
      * Drain the due backlog.
      *
-     * @return how many rows were claimed across all batches
+     * @return how many rows were fetched across all batches
      */
     public int evaluateDue() {
         cycleCounter.increment();
         int total = 0;
 
         for (int batch = 0; batch < MAX_BATCHES_PER_CYCLE; batch++) {
-            List<UUID> claimed = new ArrayList<>();
+            List<UUID> fetched = new ArrayList<>();
             int count;
             try {
-                count = applier.claimAndApply(claimed);
+                count = applier.fetchAndApply(fetched);
             } catch (RuntimeException e) {
                 // The batch rolled back, so nothing was marked processed and no deviation was written.
-                // Back the claimed rows off in a fresh transaction so they are retried later rather than
+                // Back the fetched rows off in a fresh transaction so they are retried later rather than
                 // on every cycle, then stop: whatever broke is likely to break the next batch too.
                 failedBatchCounter.increment();
                 log.error("SLA batch of {} row(s) failed and was rolled back — backing off",
-                        claimed.size(), e);
-                if (!claimed.isEmpty()) {
-                    applier.backOff(claimed);
+                        fetched.size(), e);
+                if (!fetched.isEmpty()) {
+                    applier.backOff(fetched);
                 }
                 return total;
             }

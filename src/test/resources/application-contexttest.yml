@@ -13,6 +13,6 @@ spring:
 cce:
   sla:
     # Stops the poller repeating during the test. It still runs once — a fixedDelay schedule's first
-    # execution is immediate — but against an empty table that claims nothing, and poll() never lets a
+    # execution is immediate — but against an empty table that fetches nothing, and poll() never lets a
     # failure escape. The interval keeps H2 out of a SKIP LOCKED loop it cannot faithfully reproduce.
     poll-interval-ms: 3600000
