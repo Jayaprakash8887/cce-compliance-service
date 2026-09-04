@@ -12,6 +12,7 @@ import org.openphc.cce.common.repository.StepInstanceRepository;
 import org.openphc.cce.common.deviation.DeviationRecorder;
 import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
 import org.openphc.cce.common.history.StateTransitionHistoryWriter;
+import org.openphc.cce.compliance.domain.repository.OnTimeStepFetchRepository;
 import org.openphc.cce.compliance.domain.repository.SlaTransitionFetchRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,21 +55,14 @@ import java.util.UUID;
  * completing event — against the threshold the row stands for. The wall clock never enters into it:
  * what a deadline <em>means</em> depends only on whether the work had happened by then.
  *
- * <p>Which column supplies that threshold depends on the verdict, and the split is deliberate:
+ * <p>A breach is all a transition row decides. {@code OVERDUE} and {@code MISSED} are measured against
+ * its {@code process_by}, which is what a schedule exists to detect and what the row carries.
  *
- * <ul>
- *   <li>{@code MET} is measured against {@code step_instance.due_date} — the deadline the work was
- *       expected by, a fact about the step, written once at creation and never updated. Whether the
- *       work was <em>on time</em> is a question about the step, so it is asked of the step.</li>
- *   <li>{@code OVERDUE} and {@code MISSED} are measured against the row's {@code process_by}. A breach
- *       is what the schedule exists to detect, and the row is what carries it.</li>
- * </ul>
- *
- * <p>The two normally hold the same instant: the Matcher Service writes {@code due_date} and the
- * {@code DUE_DATE_REACHED} row's {@code process_by} from one value in one transaction, and nothing
- * rewrites either afterwards — a retry defers {@code next_attempt_at}, never {@code process_by}. Where
- * they could diverge, a kept schedule that did not beat the step's own due date is consumed without a
- * status rather than being called on time; see {@link #recordedBeforeDueDate}.
+ * <p>{@code MET} is not decided here at all. Whether work was recorded <em>on time</em> is a question
+ * about the step, answerable from {@code step_instance.completed_at} against
+ * {@code step_instance.due_date} with no schedule to consult, so {@link #fetchAndSettleOnTime} sweeps
+ * {@code step_instance} for it directly. A row whose threshold was kept therefore records nothing and is
+ * simply consumed.
  *
  * <p>Which is why a row is fetched for either of two reasons. Its schedule has come round and the work
  * must be judged against its threshold ({@code fetchDueTransitions}); or its step is already {@code COMPLETED}, in which case
@@ -84,12 +78,8 @@ import java.util.UUID;
  *       <td>{@code OVERDUE} + {@code OVERDUE} deviation</td></tr>
  *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at >= process_by}</td>
  *       <td>{@code OVERDUE} + {@code OVERDUE} deviation — recorded, but late</td></tr>
- *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at < process_by} and
- *       {@code < due_date}</td>
- *       <td>{@code MET} — the work beat its deadline</td></tr>
- *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at < process_by} but
- *       {@code >= due_date}</td>
- *       <td>consume — no breach of the schedule, but the due date was not beaten either</td></tr>
+ *   <tr><td>{@code DUE_DATE_REACHED}</td><td>{@code completed_at < process_by}</td>
+ *       <td>consume — no breach; {@code MET} is settled from the step, not from this row</td></tr>
  *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>not completed</td>
  *       <td>{@code MISSED} + {@code MISSED} deviation ({@code must} only)</td></tr>
  *   <tr><td>{@code MISSED_DATE_REACHED}</td><td>{@code completed_at >= process_by}</td>
@@ -120,6 +110,7 @@ public class SlaTransitionApplier {
     private static final int ATTEMPTS_BEFORE_ALERT = 5;
 
     private final SlaTransitionFetchRepository transitionRepository;
+    private final OnTimeStepFetchRepository onTimeStepRepository;
     private final StepInstanceRepository stepInstanceRepository;
     private final DeviationRecorder deviationRecorder;
     private final IntelligenceActionEvaluator intelligenceActionEvaluator;
@@ -131,6 +122,7 @@ public class SlaTransitionApplier {
     private final Counter consumedCounter;
 
     public SlaTransitionApplier(SlaTransitionFetchRepository transitionRepository,
+                                OnTimeStepFetchRepository onTimeStepRepository,
                                 StepInstanceRepository stepInstanceRepository,
                                 DeviationRecorder deviationRecorder,
                                 IntelligenceActionEvaluator intelligenceActionEvaluator,
@@ -140,6 +132,7 @@ public class SlaTransitionApplier {
                                 @Value("${cce.sla.max-backoff-seconds:3600}") long maxBackoffSeconds,
                                 MeterRegistry meterRegistry) {
         this.transitionRepository = transitionRepository;
+        this.onTimeStepRepository = onTimeStepRepository;
         this.stepInstanceRepository = stepInstanceRepository;
         this.deviationRecorder = deviationRecorder;
         this.intelligenceActionEvaluator = intelligenceActionEvaluator;
@@ -224,46 +217,6 @@ public class SlaTransitionApplier {
         return completedAt == null || !completedAt.isBefore(row.getProcessBy());
     }
 
-    /**
-     * Was the work recorded before the step's own due date?
-     *
-     * <p>The {@code MET} question, and the only one asked of {@code step_instance.due_date}: the
-     * deadline the work was expected by, fixed when the step was created. {@code OVERDUE} is not asked
-     * of it — a breach is decided by the row's {@code process_by}, in {@link #breachedThreshold} — so
-     * the two verdicts cite different columns deliberately.
-     *
-     * <p>They normally agree, because the Matcher Service writes {@code due_date} and the
-     * {@code DUE_DATE_REACHED} row's {@code process_by} from one value in one transaction, and nothing
-     * afterwards rewrites either: a retry defers {@code next_attempt_at}, never {@code process_by}. So
-     * the two open cases below are unreachable while that holds, and defined rather than left implicit
-     * in case it stops holding.
-     *
-     * <ul>
-     *   <li>Recorded before {@code process_by} but not before {@code due_date} — no breach, and not
-     *       {@code MET} either. The row is consumed and {@code sla_status} is left as it stands, which
-     *       is the same treatment a missed-date row gets for keeping its threshold.</li>
-     *   <li>Recorded before {@code due_date} but not before {@code process_by} — a breach, so
-     *       {@code OVERDUE}, and this method is never reached.</li>
-     * </ul>
-     *
-     * <p>Falls back to {@code process_by} when the step has no due date, which one created before the
-     * column existed can lack. That was where the deadline lived, so it is the only evidence left; it
-     * is logged because a step created since should always carry one.
-     */
-    private boolean recordedBeforeDueDate(StepSlaStateTransition row, StepInstance step) {
-        OffsetDateTime completedAt = step.getCompletedAt();
-        if (completedAt == null) {
-            return false;
-        }
-        OffsetDateTime dueDate = step.getDueDate();
-        if (dueDate == null) {
-            log.warn("Step {} has no due_date — settling transition {} against its process_by instead",
-                    step.getId(), row.getId());
-            dueDate = row.getProcessBy();
-        }
-        return completedAt.isBefore(dueDate);
-    }
-
     /** The deadline was not met: advance the SLA and record the deviation. */
     private void applyBreach(StepSlaStateTransition row, StepInstance step) {
         if (isOptionalMiss(row, step)) {
@@ -285,24 +238,57 @@ public class SlaTransitionApplier {
     }
 
     /**
-     * The threshold was kept. Only the due date settles an SLA as {@code MET}: beating the missed date
-     * says nothing more than that the step was not written off, and the due-date row has already
-     * recorded whether it was on time.
+     * The threshold was kept, so this row has nothing to record. Keeping a threshold is not a verdict
+     * on timeliness: {@code MET} is a statement about the step, settled from {@code step_instance.due_date}
+     * by {@link #fetchAndSettleOnTime}, and beating the missed date says nothing more than that the step
+     * was not written off.
      *
-     * <p>{@code MET} is measured against {@code step_instance.due_date} rather than the row that
-     * brought us here — see {@link #recordedBeforeDueDate}. A due-date row whose threshold was kept but
-     * whose step's own due date was not beaten is consumed without a status, the same as a missed-date
-     * row that was kept.
+     * <p>So the row is consumed either way. A step that was on time has been recorded as such already,
+     * or will be on the next sweep.
      */
     private void applyKeptDeadline(StepSlaStateTransition row, StepInstance step) {
-        if (row.getTransitionType() == SlaTransitionType.DUE_DATE_REACHED
-                && recordedBeforeDueDate(row, step)
-                && writeSlaStatus(step, SlaStatus.MET)) {
-            return;
-        }
         consumedCounter.increment();
         log.debug("Step {} kept its {} threshold of {} — transition consumed",
                 step.getId(), row.getTransitionType(), row.getProcessBy());
+    }
+
+    /**
+     * Settle a batch of steps that beat their due date as {@code MET}.
+     *
+     * <p>Reads {@code step_instance} rather than the schedule. Whether work was recorded on time is a
+     * question about the step, answerable from {@code completed_at} against {@code due_date}, so no
+     * transition row is fetched and none is needed: a {@code DUE_DATE_REACHED} row exists to detect a
+     * breach, and there is no breach here to detect.
+     *
+     * <p>The step's own {@code sla_status} is the idempotency record. A step is fetched only while that
+     * is null, and writing {@code MET} takes it out of the set for good — so there is nothing to mark
+     * processed and no attempt count to keep. A step already {@code OVERDUE} was never in the set, and
+     * {@link #writeSlaStatus} would refuse the write regardless: timeliness is settled once decided.
+     *
+     * <p>Per row rather than one bulk {@code UPDATE}, because {@link #writeSlaStatus} also appends to
+     * {@code step_instance_history}, which has to hold every {@code sla_status} transition. A set update
+     * would leave a gap in the history exactly where a step went on time.
+     *
+     * <p>The step's pending {@code DUE_DATE_REACHED} row is left alone: it is fetched when its schedule
+     * comes round and consumed then, finding the step already settled. That is also what keeps it out of
+     * the backlog gauge.
+     *
+     * @param fetched receives the ids fetched, so a caller can report them after a rollback
+     * @return how many steps were fetched
+     */
+    @Transactional
+    public int fetchAndSettleOnTime(List<UUID> fetched) {
+        List<StepInstance> batch = onTimeStepRepository.fetchOnTimeSteps(Limit.of(batchSize));
+        for (StepInstance step : batch) {
+            fetched.add(step.getId());
+            if (writeSlaStatus(step, SlaStatus.MET)) {
+                log.debug("Step {} beat its due date of {} — recorded MET",
+                        step.getId(), step.getDueDate());
+            } else {
+                consumedCounter.increment();
+            }
+        }
+        return batch.size();
     }
 
     /**

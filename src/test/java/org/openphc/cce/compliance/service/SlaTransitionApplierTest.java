@@ -19,6 +19,7 @@ import org.openphc.cce.common.repository.StepInstanceRepository;
 import org.openphc.cce.common.deviation.DeviationRecorder;
 import org.openphc.cce.common.intelligence.IntelligenceActionEvaluator;
 import org.openphc.cce.common.history.StateTransitionHistoryWriter;
+import org.openphc.cce.compliance.domain.repository.OnTimeStepFetchRepository;
 import org.openphc.cce.compliance.domain.repository.SlaTransitionFetchRepository;
 import org.springframework.data.domain.Limit;
 
@@ -42,6 +43,7 @@ import static org.mockito.Mockito.*;
 class SlaTransitionApplierTest {
 
     @Mock private SlaTransitionFetchRepository transitionRepository;
+    @Mock private OnTimeStepFetchRepository onTimeStepRepository;
     @Mock private StepInstanceRepository stepInstanceRepository;
     @Mock private DeviationRecorder deviationRecorder;
     @Mock private IntelligenceActionEvaluator intelligenceActionEvaluator;
@@ -52,7 +54,7 @@ class SlaTransitionApplierTest {
 
     @BeforeEach
     void setUp() {
-        applier = new SlaTransitionApplier(transitionRepository, stepInstanceRepository,
+        applier = new SlaTransitionApplier(transitionRepository, onTimeStepRepository, stepInstanceRepository,
                 deviationRecorder, intelligenceActionEvaluator, stateTransitionHistoryWriter,
                 "test-instance", 100, 3600, new SimpleMeterRegistry());
     }
@@ -129,16 +131,16 @@ class SlaTransitionApplierTest {
     class CompletedStep {
 
         @Test
-        void completedBeforeItsDueDate_isMet() {
-            // The judgement the whole design turns on: the due-date row is what settles an on-time
-            // completion, comparing the clinical completion time against the deadline.
+        void completedBeforeItsDueDate_recordsNoBreachAndLeavesMetToTheSweep() {
+            // A kept threshold is not a verdict. The row had no breach to detect, so it is consumed
+            // without a status; MET is settled from the step by fetchAndSettleOnTime.
             StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
             fetch(row, step);
 
             applier.fetchAndApply(new ArrayList<>());
 
-            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            assertNull(step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
@@ -249,16 +251,17 @@ class SlaTransitionApplierTest {
     class CompletedStepFetchedBeforeItsDeadline {
 
         @Test
-        void earlyCompletion_isSettledMetWithoutWaitingForItsDueDate() {
-            // The reason the second fetch path exists. Nothing about this step can change any more, so
-            // holding the verdict back until the due date would only delay recording what is decided.
+        void anEarlyCompletionsDueRowIsDrainedWithoutAVerdict() {
+            // Nothing about this step can change any more, so its rows are taken ahead of their dates
+            // rather than left as backlog. There is no breach to record — the step beat its deadline —
+            // and MET is not this row's to write.
             StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
             fetchCompletedStep(row, step);
 
             applier.fetchAndApply(new ArrayList<>());
 
-            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            assertNull(step.getSlaStatus());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
         }
@@ -278,7 +281,7 @@ class SlaTransitionApplierTest {
             int count = applier.fetchAndApply(new ArrayList<>());
 
             assertEquals(2, count);
-            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            assertNull(step.getSlaStatus());
             assertTrue(dueRow.isProcessed());
             assertTrue(missedRow.isProcessed());
             verify(deviationRecorder, never()).recordDeviation(any(), any());
@@ -316,22 +319,7 @@ class SlaTransitionApplierTest {
     // ── the two fetches share one batch ──
 
     @Nested
-    class DueDateIsTheYardstick {
-
-        @Test
-        void metIsMeasuredAgainstTheStepsDueDate() {
-            // Beating process_by is not enough on its own: MET asks whether the work beat the step's
-            // own due date. Here it did, so the step is on time.
-            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
-            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            step.setDueDate(now.minusHours(2));
-            fetch(row, step);
-
-            applier.fetchAndApply(new ArrayList<>());
-
-            assertEquals(SlaStatus.MET, step.getSlaStatus());
-            verify(deviationRecorder, never()).recordDeviation(any(), any());
-        }
+    class WhichSideDecidesWhat {
 
         @Test
         void overdueIsMeasuredAgainstTheRowsProcessBy() {
@@ -350,38 +338,6 @@ class SlaTransitionApplierTest {
         }
 
         @Test
-        void aKeptScheduleThatMissedTheDueDateIsConsumedWithoutAStatus() {
-            // The gap the two yardsticks open: no breach of the schedule, but the due date was not
-            // beaten either. Neither verdict holds, so the row is consumed and sla_status is left as it
-            // stands — the same treatment a kept missed-date row gets.
-            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(2));
-            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            step.setDueDate(now.minusHours(4));
-            fetch(row, step);
-
-            applier.fetchAndApply(new ArrayList<>());
-
-            assertNull(step.getSlaStatus());
-            verify(deviationRecorder, never()).recordDeviation(any(), any());
-            assertTrue(row.isProcessed());
-        }
-
-        @Test
-        void withoutADueDateTheRowsScheduleIsUsedInstead() {
-            // A step created before the column existed, until its backfill lands. process_by held the
-            // deadline then, so it is the only evidence left and reaches the same verdict.
-            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
-            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusHours(1));
-            step.setDueDate(null);
-            fetch(row, step);
-
-            applier.fetchAndApply(new ArrayList<>());
-
-            assertEquals(SlaStatus.MET, step.getSlaStatus());
-            assertTrue(row.isProcessed());
-        }
-
-        @Test
         void theMissedDateRowIsStillJudgedByItsOwnSchedule() {
             // The missed date is not stored on the step, so that row's process_by is the threshold. A
             // due_date far in the past must not drag the missed-date verdict with it.
@@ -392,9 +348,67 @@ class SlaTransitionApplierTest {
 
             applier.fetchAndApply(new ArrayList<>());
 
-            // Completed before the missed date: not written off, and the due-date row already had its say.
+            // Completed before the missed date: not written off, and no verdict of its own to give.
             verify(deviationRecorder, never()).recordDeviation(any(), any());
             assertTrue(row.isProcessed());
+        }
+    }
+
+    @Nested
+    class OnTimeSweep {
+
+        @Test
+        void aStepThatBeatItsDueDateIsRecordedMet() {
+            // Driven off step_instance: no transition row is fetched, and none is needed.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            step.setDueDate(now.minusHours(1));
+            when(onTimeStepRepository.fetchOnTimeSteps(any())).thenReturn(List.of(step));
+
+            int count = applier.fetchAndSettleOnTime(new ArrayList<>());
+
+            assertEquals(1, count);
+            assertEquals(SlaStatus.MET, step.getSlaStatus());
+            verify(transitionRepository, never()).fetchDueTransitions(any(), any());
+            verify(deviationRecorder, never()).recordDeviation(any(), any());
+        }
+
+        @Test
+        void theTransitionIsRecordedInHistory() {
+            // Why this is a row-at-a-time sweep rather than one bulk UPDATE: step_instance_history has
+            // to carry every sla_status transition, and a set update would skip it.
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            step.setDueDate(now.minusHours(1));
+            when(onTimeStepRepository.fetchOnTimeSteps(any())).thenReturn(List.of(step));
+
+            applier.fetchAndSettleOnTime(new ArrayList<>());
+
+            verify(stateTransitionHistoryWriter).recordStepInstanceTransition(eq(step), any());
+        }
+
+        @Test
+        void anAlreadySettledStepIsRefusedRatherThanRelabelled() {
+            // The query excludes these; this is the belt to that braces. Timeliness is settled once
+            // decided, and a late completion must not be turned into an on-time one.
+            StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusHours(3));
+            step.setDueDate(now.minusHours(1));
+            when(onTimeStepRepository.fetchOnTimeSteps(any())).thenReturn(List.of(step));
+
+            applier.fetchAndSettleOnTime(new ArrayList<>());
+
+            assertEquals(SlaStatus.OVERDUE, step.getSlaStatus());
+            verify(stateTransitionHistoryWriter, never()).recordStepInstanceTransition(any(), any());
+        }
+
+        @Test
+        void theFetchedIdsAreReportedToTheCaller() {
+            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(3));
+            step.setDueDate(now.minusHours(1));
+            when(onTimeStepRepository.fetchOnTimeSteps(any())).thenReturn(List.of(step));
+            List<UUID> fetched = new ArrayList<>();
+
+            applier.fetchAndSettleOnTime(fetched);
+
+            assertEquals(List.of(step.getId()), fetched);
         }
     }
 
@@ -430,7 +444,7 @@ class SlaTransitionApplierTest {
         }
 
         private SlaTransitionApplier applierWithBatchSize(int batchSize) {
-            return new SlaTransitionApplier(transitionRepository, stepInstanceRepository,
+            return new SlaTransitionApplier(transitionRepository, onTimeStepRepository, stepInstanceRepository,
                     deviationRecorder, intelligenceActionEvaluator, stateTransitionHistoryWriter,
                     "test-instance", batchSize, 3600, new SimpleMeterRegistry());
         }

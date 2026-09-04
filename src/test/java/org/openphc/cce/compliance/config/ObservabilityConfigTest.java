@@ -4,6 +4,7 @@ import io.micrometer.core.instrument.binder.MeterBinder;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.openphc.cce.compliance.domain.repository.OnTimeStepFetchRepository;
 import org.openphc.cce.compliance.domain.repository.SlaTransitionFetchRepository;
 
 import java.time.Duration;
@@ -21,10 +22,11 @@ class ObservabilityConfigTest {
         // The service's primary health signal: near zero in a steady state, rising when transitions
         // fall due faster than they are applied.
         SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
+        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
         when(repository.countDueTransitions(any())).thenReturn(7L);
 
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        MeterBinder binder = new ObservabilityConfig().complianceMetrics(repository);
+        MeterBinder binder = new ObservabilityConfig().complianceMetrics(repository, onTimeRepository);
         binder.bindTo(registry);
 
         assertEquals(7.0, registry.get("cce.sla.transitions.due").gauge().value());
@@ -33,10 +35,11 @@ class ObservabilityConfigTest {
     @Test
     void gaugeTracksTheRepositoryRatherThanASnapshot() {
         SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
+        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
         when(repository.countDueTransitions(any())).thenReturn(2L, 5L);
 
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        new ObservabilityConfig().complianceMetrics(repository).bindTo(registry);
+        new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
 
         assertEquals(2.0, registry.get("cce.sla.transitions.due").gauge().value());
         assertEquals(5.0, registry.get("cce.sla.transitions.due").gauge().value());
@@ -47,11 +50,12 @@ class ObservabilityConfigTest {
         // The backlog is everything the next cycle would take: fallen deadlines plus the rows of steps
         // already completed. Reporting only the first would hide half the work the evaluator does.
         SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
+        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
         when(repository.countDueTransitions(any())).thenReturn(7L);
         when(repository.countCompletedStepTransitions(any())).thenReturn(3L);
 
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        new ObservabilityConfig().complianceMetrics(repository).bindTo(registry);
+        new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
 
         assertEquals(10.0, registry.get("cce.sla.transitions.due").gauge().value());
     }
@@ -61,8 +65,9 @@ class ObservabilityConfigTest {
         // Otherwise a row could fall between the two queries and be counted twice, or not at all: the
         // predicates are disjoint only when they share one `now`.
         SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
+        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        new ObservabilityConfig().complianceMetrics(repository).bindTo(registry);
+        new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
 
         registry.get("cce.sla.transitions.due").gauge().value();
 
@@ -79,11 +84,12 @@ class ObservabilityConfigTest {
         // in the entire future schedule, so the gauge would track enrolment volume and could never sit
         // near zero — making it useless as the thing the deployment guide says to alert on.
         SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
+        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
         when(repository.countDueTransitions(any())).thenReturn(0L);
         OffsetDateTime before = OffsetDateTime.now(ZoneOffset.UTC);
 
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        new ObservabilityConfig().complianceMetrics(repository).bindTo(registry);
+        new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
         registry.get("cce.sla.transitions.due").gauge().value();
 
         ArgumentCaptor<OffsetDateTime> asOf = ArgumentCaptor.forClass(OffsetDateTime.class);
