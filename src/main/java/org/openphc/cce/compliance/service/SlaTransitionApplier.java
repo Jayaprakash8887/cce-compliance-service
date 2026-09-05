@@ -64,12 +64,11 @@ import java.util.UUID;
  * {@code step_instance} for it directly. A row whose threshold was kept therefore records nothing and is
  * simply consumed.
  *
- * <p>Which is why a row is fetched for either of two reasons. Its schedule has come round and the work
- * must be judged against its threshold ({@code fetchDueTransitions}); or its step is already {@code COMPLETED}, in which case
- * {@code completed_at} is fixed, both thresholds are known, and the outcome can be settled immediately
- * rather than at a deadline that would only confirm it ({@code fetchCompletedStepTransitions}). The verdict is
- * the same either way — the second path only decides it sooner, so an on-time completion does not read as
- * null until its due date arrives.
+ * <p>A row is fetched for either of two reasons. Its schedule has come round, and the work must be
+ * judged against its threshold ({@code fetchDueTransitions}); or its step is already {@code OVERDUE},
+ * whose remaining missed-date row can be taken ahead of that date rather than left pending against one
+ * that can only confirm what is known ({@code fetchLateStepTransitions}). The second path settles the
+ * step's SLA lifecycle sooner; it does not reach a different verdict.
  *
  * <table border="1">
  *   <caption>Behaviour by threshold and step state</caption>
@@ -161,13 +160,14 @@ public class SlaTransitionApplier {
         List<StepSlaStateTransition> batch =
                 new ArrayList<>(transitionRepository.fetchDueTransitions(now, Limit.of(batchSize)));
 
-        // Rows of steps that have already been completed, fetched ahead of their deadline. Nothing about
-        // such a step can change any more — completed_at is fixed and its thresholds were written at
-        // creation — so its outcome is knowable now, and waiting for the wall clock would only delay
-        // recording what is already decided.
+        // Rows of steps already judged late, fetched ahead of their deadline. Nothing about such a step
+        // can change any more — completed_at is fixed — so its last row can be taken now rather than
+        // left pending against a date that can only confirm what is known. A step still at null needs
+        // nothing from here: on time, the on-time sweep records MET and takes it out of the set; late,
+        // its due-date row is already past and the first query has it.
         int room = batchSize - batch.size();
         if (room > 0) {
-            batch.addAll(transitionRepository.fetchCompletedStepTransitions(now, Limit.of(room)));
+            batch.addAll(transitionRepository.fetchLateStepTransitions(now, Limit.of(room)));
         }
 
         for (StepSlaStateTransition row : batch) {

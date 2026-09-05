@@ -58,6 +58,6 @@ public class ObservabilityConfig {
      */
     private static double readyNow(SlaTransitionFetchRepository repository) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        return repository.countDueTransitions(now) + repository.countCompletedStepTransitions(now);
+        return repository.countDueTransitions(now) + repository.countLateStepTransitions(now);
     }
 }

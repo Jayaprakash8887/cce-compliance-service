@@ -52,7 +52,7 @@ class ObservabilityConfigTest {
         SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
         OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
         when(repository.countDueTransitions(any())).thenReturn(7L);
-        when(repository.countCompletedStepTransitions(any())).thenReturn(3L);
+        when(repository.countLateStepTransitions(any())).thenReturn(3L);
 
         SimpleMeterRegistry registry = new SimpleMeterRegistry();
         new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
@@ -74,7 +74,7 @@ class ObservabilityConfigTest {
         ArgumentCaptor<OffsetDateTime> dueAsOf = ArgumentCaptor.forClass(OffsetDateTime.class);
         ArgumentCaptor<OffsetDateTime> completedAsOf = ArgumentCaptor.forClass(OffsetDateTime.class);
         verify(repository).countDueTransitions(dueAsOf.capture());
-        verify(repository).countCompletedStepTransitions(completedAsOf.capture());
+        verify(repository).countLateStepTransitions(completedAsOf.capture());
         assertEquals(dueAsOf.getValue(), completedAsOf.getValue());
     }
 

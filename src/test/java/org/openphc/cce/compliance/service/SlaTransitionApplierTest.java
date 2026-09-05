@@ -248,43 +248,20 @@ class SlaTransitionApplierTest {
     // ── the work arrived, and its deadlines have not ──
 
     @Nested
-    class CompletedStepFetchedBeforeItsDeadline {
+    class LateStepFetchedBeforeItsMissedDate {
 
         @Test
-        void anEarlyCompletionsDueRowIsDrainedWithoutAVerdict() {
-            // Nothing about this step can change any more, so its rows are taken ahead of their dates
-            // rather than left as backlog. There is no breach to record — the step beat its deadline —
-            // and MET is not this row's to write.
-            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
-            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
-            fetchCompletedStep(row, step);
+        void aStepStillAtNullIsNotThisQuerysToTake() {
+            // The narrowing. On time, the on-time sweep records MET and takes the step out of the set;
+            // late, its due-date row is already past and the first query has it. Either way this one has
+            // nothing to add, so it asks only for steps already judged OVERDUE.
+            when(transitionRepository.fetchDueTransitions(any(), any())).thenReturn(List.of());
+            when(transitionRepository.fetchLateStepTransitions(any(), any())).thenReturn(List.of());
 
             applier.fetchAndApply(new ArrayList<>());
 
-            assertNull(step.getSlaStatus());
-            verify(deviationRecorder, never()).recordDeviation(any(), any());
-            assertTrue(row.isProcessed());
-        }
-
-        @Test
-        void bothOfAnEarlyCompletionsRowsAreSettledInOneBatch() {
-            // Otherwise the missed-date row would sit pending until its own date and show up as backlog
-            // on a step whose SLA was settled weeks earlier.
-            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
-            StepSlaStateTransition dueRow = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
-            StepSlaStateTransition missedRow =
-                    row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(14));
-            when(transitionRepository.fetchCompletedStepTransitions(any(), any()))
-                    .thenReturn(List.of(dueRow, missedRow));
-            when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
-
-            int count = applier.fetchAndApply(new ArrayList<>());
-
-            assertEquals(2, count);
-            assertNull(step.getSlaStatus());
-            assertTrue(dueRow.isProcessed());
-            assertTrue(missedRow.isProcessed());
-            verify(deviationRecorder, never()).recordDeviation(any(), any());
+            verify(transitionRepository).fetchLateStepTransitions(any(), any());
+            verifyNoInteractions(deviationRecorder);
         }
 
         @Test
@@ -294,7 +271,7 @@ class SlaTransitionApplierTest {
             StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusHours(1));
             StepSlaStateTransition row =
                     row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(5));
-            fetchCompletedStep(row, step);
+            fetchLateStep(row, step);
 
             applier.fetchAndApply(new ArrayList<>());
 
@@ -305,9 +282,10 @@ class SlaTransitionApplierTest {
 
         @Test
         void theEarlyFetchIsReportedForBackoffLikeAnyOther() {
-            StepInstance step = step(StepStatus.COMPLETED, null, "must", now.minusHours(1));
-            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.plusDays(7));
-            fetchCompletedStep(row, step);
+            StepInstance step = step(StepStatus.COMPLETED, SlaStatus.OVERDUE, "must", now.minusHours(1));
+            StepSlaStateTransition row =
+                    row(step, SlaTransitionType.MISSED_DATE_REACHED, now.plusDays(7));
+            fetchLateStep(row, step);
             List<UUID> fetched = new ArrayList<>();
 
             applier.fetchAndApply(fetched);
@@ -425,7 +403,7 @@ class SlaTransitionApplierTest {
             smallBatch.fetchAndApply(new ArrayList<>());
 
             ArgumentCaptor<Limit> limit = ArgumentCaptor.forClass(Limit.class);
-            verify(transitionRepository).fetchCompletedStepTransitions(any(), limit.capture());
+            verify(transitionRepository).fetchLateStepTransitions(any(), limit.capture());
             assertEquals(2, limit.getValue().max());
         }
 
@@ -440,7 +418,7 @@ class SlaTransitionApplierTest {
 
             singleRowBatch.fetchAndApply(new ArrayList<>());
 
-            verify(transitionRepository, never()).fetchCompletedStepTransitions(any(), any());
+            verify(transitionRepository, never()).fetchLateStepTransitions(any(), any());
         }
 
         private SlaTransitionApplier applierWithBatchSize(int batchSize) {
@@ -603,9 +581,9 @@ class SlaTransitionApplierTest {
         when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
     }
 
-    /** Fetched because its step is already completed, not because its deadline has passed. */
-    private void fetchCompletedStep(StepSlaStateTransition row, StepInstance step) {
-        when(transitionRepository.fetchCompletedStepTransitions(any(), any())).thenReturn(List.of(row));
+    /** Fetched because its step is already OVERDUE, not because this row's deadline has passed. */
+    private void fetchLateStep(StepSlaStateTransition row, StepInstance step) {
+        when(transitionRepository.fetchLateStepTransitions(any(), any())).thenReturn(List.of(row));
         when(stepInstanceRepository.findById(step.getId())).thenReturn(Optional.of(step));
     }
 
