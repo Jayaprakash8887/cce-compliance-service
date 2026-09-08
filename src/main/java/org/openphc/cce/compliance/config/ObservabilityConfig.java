@@ -38,8 +38,8 @@ public class ObservabilityConfig {
             Gauge.builder("cce.sla.transitions.due",
                             transitionRepository,
                             ObservabilityConfig::readyNow)
-                    .description("SLA transition rows the next cycle would fetch: past their deadline, "
-                            + "or belonging to an already-completed step")
+                    .description("SLA transition rows the next cycle would fetch: unprocessed, with "
+                            + "next_attempt_at already passed")
                     .register(registry);
 
             Gauge.builder("cce.sla.steps.on-time-unsettled",
@@ -52,12 +52,11 @@ public class ObservabilityConfig {
     }
 
     /**
-     * What the next cycle would fetch: the two fetch predicates counted separately and added. Separate
-     * queries because an {@code OR} across them plans as a sequential scan of the entire pending
-     * schedule; they are disjoint, so the sum is exact.
+     * What the next cycle would fetch, carrying {@code fetchDueTransitions}'s predicate exactly. A gauge
+     * over every unprocessed row would fold in the whole future schedule, so it would track enrolment
+     * volume rather than lateness and could never sit near zero.
      */
     private static double readyNow(SlaTransitionFetchRepository repository) {
-        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        return repository.countDueTransitions(now) + repository.countLateStepTransitions(now);
+        return repository.countDueTransitions(OffsetDateTime.now(ZoneOffset.UTC));
     }
 }

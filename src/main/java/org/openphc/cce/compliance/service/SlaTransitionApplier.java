@@ -25,7 +25,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -64,11 +63,10 @@ import java.util.UUID;
  * {@code step_instance} for it directly. A row whose threshold was kept therefore records nothing and is
  * simply consumed.
  *
- * <p>A row is fetched for either of two reasons. Its schedule has come round, and the work must be
- * judged against its threshold ({@code fetchDueTransitions}); or its step is already {@code OVERDUE},
- * whose remaining missed-date row can be taken ahead of that date rather than left pending against one
- * that can only confirm what is known ({@code fetchLateStepTransitions}). The second path settles the
- * step's SLA lifecycle sooner; it does not reach a different verdict.
+ * <p>A row is fetched for exactly one reason: its schedule has come round, and the work must be judged
+ * against its threshold ({@code fetchDueTransitions}). Nothing pulls a step's remaining rows forward
+ * because the step completed or was judged — a settled step keeps its unspent schedule until those
+ * dates arrive, and each row is consumed then, recording nothing.
  *
  * <table border="1">
  *   <caption>Behaviour by threshold and step state</caption>
@@ -150,6 +148,12 @@ public class SlaTransitionApplier {
     /**
      * Fetch and apply one batch of due transitions.
      *
+     * <p>One query, one gate. {@code next_attempt_at} decides eligibility and nothing else does; it then
+     * plays no part in the judgement, which reads {@code transition_type} and {@code process_by} from the
+     * row — both immutable — and {@code step_status}, {@code completed_at}, {@code sla_status} and
+     * {@code required_behavior} from the step. So <em>when</em> a row is applied cannot change what it
+     * decides.
+     *
      * @param fetched populated with the id of every row fetched, so the caller can back them off if the
      *                transaction rolls back — the list is plain memory and survives the rollback
      * @return how many rows were fetched
@@ -157,18 +161,7 @@ public class SlaTransitionApplier {
     @Transactional
     public int fetchAndApply(List<UUID> fetched) {
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        List<StepSlaStateTransition> batch =
-                new ArrayList<>(transitionRepository.fetchDueTransitions(now, Limit.of(batchSize)));
-
-        // Rows of steps already judged late, fetched ahead of their deadline. Nothing about such a step
-        // can change any more — completed_at is fixed — so its last row can be taken now rather than
-        // left pending against a date that can only confirm what is known. A step still at null needs
-        // nothing from here: on time, the on-time sweep records MET and takes it out of the set; late,
-        // its due-date row is already past and the first query has it.
-        int room = batchSize - batch.size();
-        if (room > 0) {
-            batch.addAll(transitionRepository.fetchLateStepTransitions(now, Limit.of(room)));
-        }
+        List<StepSlaStateTransition> batch = transitionRepository.fetchDueTransitions(now, Limit.of(batchSize));
 
         for (StepSlaStateTransition row : batch) {
             fetched.add(row.getId());

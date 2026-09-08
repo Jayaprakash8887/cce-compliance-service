@@ -46,39 +46,6 @@ class ObservabilityConfigTest {
     }
 
     @Test
-    void gaugeSumsBothFetchPaths() {
-        // The backlog is everything the next cycle would take: fallen deadlines plus the rows of steps
-        // already completed. Reporting only the first would hide half the work the evaluator does.
-        SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
-        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
-        when(repository.countDueTransitions(any())).thenReturn(7L);
-        when(repository.countLateStepTransitions(any())).thenReturn(3L);
-
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
-
-        assertEquals(10.0, registry.get("cce.sla.transitions.due").gauge().value());
-    }
-
-    @Test
-    void bothHalvesAreCountedAsOfTheSameInstant() {
-        // Otherwise a row could fall between the two queries and be counted twice, or not at all: the
-        // predicates are disjoint only when they share one `now`.
-        SlaTransitionFetchRepository repository = mock(SlaTransitionFetchRepository.class);
-        OnTimeStepFetchRepository onTimeRepository = mock(OnTimeStepFetchRepository.class);
-        SimpleMeterRegistry registry = new SimpleMeterRegistry();
-        new ObservabilityConfig().complianceMetrics(repository, onTimeRepository).bindTo(registry);
-
-        registry.get("cce.sla.transitions.due").gauge().value();
-
-        ArgumentCaptor<OffsetDateTime> dueAsOf = ArgumentCaptor.forClass(OffsetDateTime.class);
-        ArgumentCaptor<OffsetDateTime> completedAsOf = ArgumentCaptor.forClass(OffsetDateTime.class);
-        verify(repository).countDueTransitions(dueAsOf.capture());
-        verify(repository).countLateStepTransitions(completedAsOf.capture());
-        assertEquals(dueAsOf.getValue(), completedAsOf.getValue());
-    }
-
-    @Test
     void gaugeCountsWhatIsDueNowRatherThanEveryUnprocessedRow() {
         // The distinction is the whole point of the metric. Counting every unprocessed row would fold
         // in the entire future schedule, so the gauge would track enrolment volume and could never sit
