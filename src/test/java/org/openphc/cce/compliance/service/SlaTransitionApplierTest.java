@@ -457,20 +457,6 @@ class SlaTransitionApplierTest {
     class Bookkeeping {
 
         @Test
-        void duplicateDeviation_doesNotRepublishIntelligence() {
-            StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
-            StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
-            fetch(row);
-            when(deviationRecorder.recordDeviation(any(), any())).thenReturn(
-                    new DeviationRecorder.DeviationResult(
-                            Deviation.builder().id(UUID.randomUUID()).build(), false));
-
-            applier.fetchAndApply(new ArrayList<>());
-
-            verify(intelligenceActionEvaluator, never()).evaluateOnDeviation(any(), any());
-        }
-
-        @Test
         void fetchReportsEveryRowItTook_soAFailedBatchCanBeBackedOff() {
             StepInstance step = step(StepStatus.NOT_STARTED, null, "must", null);
             StepSlaStateTransition row = row(step, SlaTransitionType.DUE_DATE_REACHED, now.minusMinutes(1));
@@ -504,8 +490,7 @@ class SlaTransitionApplierTest {
 
     private void freshDeviation() {
         when(deviationRecorder.recordDeviation(any(), any())).thenReturn(
-                new DeviationRecorder.DeviationResult(
-                        Deviation.builder().id(UUID.randomUUID()).build(), true));
+                Deviation.builder().id(UUID.randomUUID()).build());
     }
 
     private StepInstance step(StepStatus stepStatus, SlaStatus slaStatus,

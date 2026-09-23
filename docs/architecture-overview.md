@@ -45,7 +45,8 @@ During an Event Replay the two do not merely race occasionally; they collide by 
    - `sla_status` writes are forward-only, and `MET` is written only over a null, so a step recorded
      `OVERDUE` can never become `MET`.
    - The on-time sweep considers only steps with `sla_status IS NULL`, so it never revisits this one.
-   - The deviation row already exists and is de-duplicated, so it is not reconsidered.
+   - The deviation row stays: nothing withdraws it, and the step's status cannot be written again to
+     raise it a second time.
    - The intelligence actions already fired and were published to `cce.intelligence.triggers`. **A
      clinician has already been alerted.**
 
@@ -393,14 +394,17 @@ the data.
 
 ## 5. Intelligence on deviation
 
-When a deviation is newly recorded — not when it already existed — the shared
+When a deviation is recorded, the shared
 [`IntelligenceActionEvaluator`](../../cce-common-util/docs/library-reference.md#intelligence--intelligenceactionevaluator)
 evaluates the step's intelligence actions and publishes any that fire to
 `cce.intelligence.triggers`.
 
-The de-duplication matters: without it, a transition retried after a failure would re-trigger an alert
-a clinician has already received. `DeviationRecorder` reports whether the row was new, and the
-evaluation is gated on that.
+A deviation is recorded at most once per step and type, so an alert is never re-sent. That comes from
+upstream of the recorder: a breach is raised only when its `sla_status` write succeeds, and
+`SlaStatus.canReplace` allows each once, so a transition retried after a failure finds the status
+already written and records nothing. A retry after a rollback is safe because the rollback took the
+deviation with it. The `deviation_step_type_key` constraint turns a broken rule into a failed batch
+rather than a second alert.
 
 This service is **produce-only** on Kafka. Its `KafkaConfig` declares a producer factory, a template
 and the outbound topic — no consumer factory, no listener container, no DLQ, because nothing is

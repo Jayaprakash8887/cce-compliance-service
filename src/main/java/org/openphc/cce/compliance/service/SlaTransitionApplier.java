@@ -2,6 +2,7 @@ package org.openphc.cce.compliance.service;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
+import org.openphc.cce.common.entity.Deviation;
 import org.openphc.cce.common.entity.StepInstance;
 import org.openphc.cce.common.entity.StepSlaStateTransition;
 import org.openphc.cce.common.enums.DeviationType;
@@ -319,18 +320,17 @@ public class SlaTransitionApplier {
 
     /**
      * The deviation a breach produces: the due date an {@code OVERDUE}, the missed date a
-     * {@code MISSED}. Intelligence is evaluated only for a freshly created deviation, so a re-fetched
-     * row cannot publish the same intelligence event twice.
+     * {@code MISSED}. Reached only when {@link #writeSlaStatus} has just written the breach status,
+     * which {@code SlaStatus.canReplace} allows once per step, so a re-fetched row never gets here and
+     * cannot publish the same intelligence event twice.
      */
     private void raiseDeviationFor(StepSlaStateTransition row, StepInstance step) {
         DeviationType type = row.getTransitionType() == SlaTransitionType.DUE_DATE_REACHED
                 ? DeviationType.OVERDUE
                 : DeviationType.MISSED;
 
-        DeviationRecorder.DeviationResult result = deviationRecorder.recordDeviation(step, type);
-        if (result.created()) {
-            intelligenceActionEvaluator.evaluateOnDeviation(step, result.deviation());
-        }
+        Deviation deviation = deviationRecorder.recordDeviation(step, type);
+        intelligenceActionEvaluator.evaluateOnDeviation(step, deviation);
     }
 
     private void markProcessed(StepSlaStateTransition row) {

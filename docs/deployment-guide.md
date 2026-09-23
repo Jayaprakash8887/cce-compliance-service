@@ -239,7 +239,7 @@ This service owns no tables, so there is nothing here to back up. `step_sla_stat
 | `due` rising, `batches.failed` rising | Rows failing and backing off; check the logs for the rolled-back batch |
 | `cycles` not incrementing | Scheduler stopped; restart the pod. Liveness will not detect this |
 | Deviations recorded but no intelligence delivered | Check `?published=false` on the [read API](api-reference.md#get-v1complianceintelligence-events) — the trigger may be built but unconfirmed |
-| The same alert delivered repeatedly | A transition retrying against an already-recorded deviation should be de-duplicated ([Architecture §5](architecture-overview.md#5-intelligence-on-deviation)); check `attempts` on the row |
+| The same alert delivered repeatedly | A deviation is recorded once per step and type, so this is downstream of this service ([Architecture §5](architecture-overview.md#5-intelligence-on-deviation)) — check the delivery side for redelivery of one `cce.intelligence.triggers` message |
 | A completed step is `OVERDUE` / `MISSED` although its `completed_at` beat the threshold | The row was judged before the Matcher Service had matched the completing event — the [Event Replay](#event-replay--sequencing-the-two-services) sequence was not held. Not self-correcting |
 | A step's `sla_status` looks wrong for a completed step | This service is its **only** writer — Matcher records `step_status` and `completed_at` and never judges timeliness. Compare `completed_at` against the row's `process_by` ([Architecture §4](architecture-overview.md#4-what-the-applier-does)) |
 | A completed step stays at a null `sla_status` | It has no `due_date`, so nothing judges it: `MET` requires a deadline to have been beaten. Null is terminal here and correct |
