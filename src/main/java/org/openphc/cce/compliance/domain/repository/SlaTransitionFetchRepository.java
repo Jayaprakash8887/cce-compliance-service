@@ -42,6 +42,20 @@ public interface SlaTransitionFetchRepository extends JpaRepository<StepSlaState
      * covers only the unprocessed backlog. Ordered by {@code process_by} so the oldest deadline is
      * always applied first, however often a row has been deferred.
      *
+     * <h2>Why the fetch join to {@code step_instance}</h2>
+     * A step has up to three transition rows, and {@code FOR UPDATE SKIP LOCKED} on {@code t} alone only
+     * protects a single row at a time — two replicas can each claim a different row of the <em>same</em>
+     * step and both judge it concurrently, racing on {@code step_instance.sla_status}. Fetching
+     * {@code StepInstance} in this query brings it under the same {@code PESSIMISTIC_WRITE} lock:
+     * Hibernate emits {@code ... join step_instance ... for no key update skip locked}, with no
+     * {@code OF} list, so a row is skipped if either its own row or its step is already held. The same
+     * lock keeps {@code fetchOnTimeSteps} off a step this batch is judging.
+     *
+     * <p>It also hands the applier every step it judges, so a batch costs one query however large it
+     * grows, and a step's rows in the same batch share the one managed instance. The join must keep
+     * {@code FETCH}: a bare {@code JOIN t.stepInstance s} selects nothing from the step and is pruned
+     * from the SQL, taking the step's lock with it.
+     *
      * <p>The only way a transition row is fetched. There is deliberately no second path reaching rows by
      * their step's state — taking a settled step's remaining row ahead of its deadline would buy nothing
      * and cost the retry contract. Nothing would change: the verdict is a function of {@code process_by}
@@ -55,6 +69,7 @@ public interface SlaTransitionFetchRepository extends JpaRepository<StepSlaState
     @QueryHints(@QueryHint(name = "jakarta.persistence.lock.timeout", value = "-2"))
     @Query("""
             SELECT t FROM StepSlaStateTransition t
+            JOIN FETCH t.stepInstance s
             WHERE t.processed = false
               AND t.nextAttemptAt <= :now
             ORDER BY t.processBy ASC

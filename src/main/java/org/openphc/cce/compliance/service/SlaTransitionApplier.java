@@ -168,7 +168,7 @@ public class SlaTransitionApplier {
             row.setAttempts(row.getAttempts() + 1);
             if (row.getAttempts() > ATTEMPTS_BEFORE_ALERT) {
                 log.error("SLA transition {} for step {} has now been attempted {} times",
-                        row.getId(), row.getStepInstanceId(), row.getAttempts());
+                        row.getId(), row.getStepInstance().getId(), row.getAttempts());
             }
             applyRow(row);
         }
@@ -176,15 +176,8 @@ public class SlaTransitionApplier {
     }
 
     private void applyRow(StepSlaStateTransition row) {
-        StepInstance step = stepInstanceRepository.findById(row.getStepInstanceId()).orElse(null);
-        if (step == null) {
-            // The step is gone, so there is no schedule left to honour. Close the row rather than
-            // retrying something that can never succeed.
-            log.warn("SLA transition {} references step {} which no longer exists — consuming",
-                    row.getId(), row.getStepInstanceId());
-            markProcessed(row);
-            return;
-        }
+        // Already loaded and locked by the fetch, which joins each row's step in.
+        StepInstance step = row.getStepInstance();
 
         if (breachedThreshold(row, step)) {
             applyBreach(row, step);

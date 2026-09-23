@@ -177,15 +177,24 @@ deferred without rewriting `process_by`, which stays the immutable record of whe
 partial index `idx_sslt_due` covers exactly this predicate, so the scan touches only the unprocessed
 backlog.
 
-Note what it does *not* read: this is a single-table query with no join to `step_instance`, so it knows
-nothing about whether the step completed. Eligibility here is purely "this row's gate has passed"; what
-the row *means* is decided later, in the apply.
+**The fetch also fetches `step_instance`, under the same lock.** A step has up to three transition rows,
+and locking `step_sla_state_transition` rows alone only protects one row at a time — two replicas could
+each claim a different row of the *same* step and judge it concurrently, racing on
+`step_instance.sla_status`. `JOIN FETCH t.stepInstance` brings `step_instance` under the same
+`FOR UPDATE`/`SKIP LOCKED` semantics (Hibernate emits `... join step_instance ... for no key update skip
+locked`, with no `OF` list), so a step is held by exactly one replica for as long as its batch
+transaction runs — and `fetchOnTimeSteps` skips it meanwhile. The same query hands the apply every step
+it judges, so a batch is one query however large it grows. It has to stay a *fetch* join: a bare
+`JOIN t.stepInstance` selects nothing from the step and is pruned from the SQL, taking the lock with it.
+
+The join changes nothing about eligibility, which is still purely "this row's gate has passed"; what the
+row *means* is decided later, in the apply.
 
 **any rows fetched?** — zero is the steady state: one empty indexed query per interval, and the cycle
 ends.
 
 **apply each row** — per row: increment `attempts` (past five, the row is logged as an error every cycle
-rather than failing quietly), load the step, decide whether the threshold was breached, write
+rather than failing quietly), take the step the fetch brought with it, decide whether the threshold was breached, write
 `sla_status` forward-only, record the deviation if there is one, mirror the write into
 `step_instance_history`, and mark the row processed with `processed_by`. §4 covers the judgement itself.
 Each fetched id is also appended to a list the evaluator holds — plain memory rather than transactional
@@ -319,7 +328,6 @@ different owners, and only `due_date` is a statement about the work.
 | `MISSED_DATE_REACHED` | `completed_at >= process_by` | `MISSED` | `MISSED` |
 | `MISSED_DATE_REACHED` | `completed_at < process_by` | *unchanged* | — |
 
-A step whose row no longer exists is consumed rather than retried: there is no schedule left to honour.
 A step marked `COMPLETED` with no `completed_at` is treated as a breach — the row is better evidence
 than a missing timestamp, and letting it pass would hide the gap instead of surfacing it. That rule
 needs no clock to justify it: a row is only ever applied once its own threshold has passed, so a step
