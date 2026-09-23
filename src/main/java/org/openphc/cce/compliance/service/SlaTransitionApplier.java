@@ -281,19 +281,15 @@ public class SlaTransitionApplier {
      * Write {@code sla_status}, recording the transition in history, unless the step is already at a
      * status this one must not overwrite.
      *
-     * <p>Forward-only. {@code MET} and {@code MISSED} are settled outcomes, and {@code OVERDUE} must
-     * never replace {@code MISSED} — which is what would happen if the two rows for a step were applied
-     * out of order after a retry. {@code MET} is written only from null, so a step already found
-     * {@code OVERDUE} cannot be relabelled as having been on time.
+     * <p>Forward-only, by {@link SlaStatus#canReplace}: the enum holds the order, so {@code OVERDUE} can
+     * never replace {@code MISSED} after rows applied out of order on a retry, and {@code MET} is written
+     * only over null, so a step already found {@code OVERDUE} cannot be relabelled as on time.
      *
      * @return whether the status was written
      */
     private boolean writeSlaStatus(StepInstance step, SlaStatus target) {
         SlaStatus current = step.getSlaStatus();
-        boolean allowed = target == SlaStatus.MET
-                ? current == null
-                : rank(target) > rank(current);
-        if (!allowed) {
+        if (!target.canReplace(current)) {
             log.debug("Step {} is already {} — not writing {}", step.getId(), current, target);
             return false;
         }
@@ -307,17 +303,6 @@ public class SlaTransitionApplier {
         log.info("Step {} (actionId={}) SLA {} -> {}",
                 step.getId(), step.getActionId(), current, target);
         return true;
-    }
-
-    /** Ordering for the forward-only rule. Null is "not yet judged", so it precedes every outcome. */
-    private static int rank(SlaStatus status) {
-        if (status == null) {
-            return 0;
-        }
-        return switch (status) {
-            case OVERDUE -> 1;
-            case MISSED, MET -> 2;
-        };
     }
 
     /**
